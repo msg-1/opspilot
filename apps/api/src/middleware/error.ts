@@ -39,6 +39,13 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
       return;
     }
   }
+  const dbDown = err instanceof Prisma.PrismaClientInitializationError || (err instanceof Prisma.PrismaClientKnownRequestError && ['P1001', 'P1002', 'P1008', 'P1017'].includes(err.code));
+  if (dbDown) {
+    logger.error({ code: (err as { code?: string }).code ?? (err as { errorCode?: string }).errorCode }, 'database unavailable');
+    res.setHeader('Retry-After', '5');
+    res.status(503).json({ error: { code: 'service_unavailable', message: 'The database is temporarily unavailable. Try again in a few seconds.' } });
+    return;
+  }
   if (err?.type === 'entity.parse.failed') {
     res.status(400).json({ error: { code: 'bad_request', message: 'Malformed JSON body' } });
     return;

@@ -90,3 +90,84 @@ describe('recovery of stranded work', () => {
     expect((await reapStranded())).toMatchObject({ remediations: 0 });
   });
 });
+
+describe('session and request integrity', () => {
+  it('invalidates access tokens the moment the session ends', async () => {
+    const org = await createOrg();
+    const email = (await org.owner.get('/api/v1/auth/me')).body.user.email;
+    const login = await api().post('/api/v1/auth/login').send({ email, password: PASSWORD });
+    const bearer = { Authorization: `Bearer ${login.body.accessToken}` };
+    const cookies = login.headers['set-cookie'] as unknown as string[];
+    expect((await api().get('/api/v1/auth/me').set(bearer)).status).toBe(200);
+    await api().post('/api/v1/auth/logout').set('Cookie', cookies.map((c) => c.split(';')[0]!)).expect(204);
+    expect((await api().get('/api/v1/auth/me').set(bearer)).status).toBe(401);
+
+    // Changing the password ends every other session but keeps this device signed in.
+    const other = await api().post('/api/v1/auth/login').send({ email, password: PASSWORD });
+    await org.owner.patch('/api/v1/auth/profile').send({ currentPassword: PASSWORD, newPassword: 'A-new-passw0rd-here' }).expect(200);
+    expect((await api().get('/api/v1/auth/me').set({ Authorization: `Bearer ${other.body.accessToken}` })).status).toBe(401);
+    expect((await org.owner.get('/api/v1/auth/me')).status).toBe(200);
+  });
+
+  it('refuses cookie-authenticated writes from another origin', async () => {
+    const org = await createOrg();
+    const create = (origin?: string) => {
+      const req = org.owner.post('/api/v1/incidents');
+      return (origin ? req.set('Origin', origin) : req).send({ title: 'Cross-site request probe' });
+    };
+    expect((await create('https://evil.example')).status).toBe(403);
+    expect((await create('http://localhost:3000')).status).toBe(201);
+    expect((await create()).status).toBe(201); // non-browser clients send no Origin
+    // Reads are unaffected, and so are requests that authenticate with a key instead of the cookie.
+    expect((await org.owner.get('/api/v1/incidents').set('Origin', 'https://evil.example')).status).toBe(200);
+    const { createApiKey, createService } = await import('./helpers');
+    await createService(org.owner, 'Origin Probe');
+    const key = await createApiKey(org.owner, ['ingest:logs']);
+    expect((await api().post('/api/v1/logs').set('x-api-key', key).set('Origin', 'https://ci.example').send({ service: 'origin-probe', logs: [{ message: 'x' }] })).status).toBe(202);
+  });
+
+  it('audits failed sign-ins against real accounts', async () => {
+    const org = await createOrg();
+    const email = (await org.owner.get('/api/v1/auth/me')).body.user.email;
+    await api().post('/api/v1/auth/login').send({ email, password: 'Wrong-password-12' }).expect(401);
+    const entries = (await org.owner.get('/api/v1/audit-logs?action=auth.login_failed')).body.data;
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ action: 'auth.login_failed', resourceType: 'user' });
+  });
+
+  it('answers 503 with Retry-After when the database is unreachable', async () => {
+    const { Prisma } = await import('@prisma/client');
+    const { default: express } = await import('express');
+    const { default: request } = await import('supertest');
+    const { errorHandler } = await import('../src/middleware/error');
+    const probe = express();
+    probe.get('/down', () => {
+      throw new Prisma.PrismaClientInitializationError("Can't reach database server", '6.19.3', 'P1001');
+    });
+    probe.get('/lost', () => {
+      throw new Prisma.PrismaClientKnownRequestError('Server has closed the connection', { code: 'P1017', clientVersion: '6.19.3' });
+    });
+    probe.use(errorHandler);
+    for (const path of ['/down', '/lost']) {
+      const res = await request(probe).get(path);
+      expect(res.status).toBe(503);
+      expect(res.headers['retry-after']).toBe('5');
+      expect(res.body.error.code).toBe('service_unavailable');
+      expect(JSON.stringify(res.body)).not.toContain('database server');
+    }
+  });
+});
+
+describe('remediation risk floor', () => {
+  it('does not let the proposer understate the risk of a production change', async () => {
+    const { createService } = await import('./helpers');
+    const org = await createOrg();
+    const tier1 = await createService(org.owner, 'Critical Path');
+    const propose = (body: Record<string, unknown>) => org.owner.post('/api/v1/remediations').send({ title: 'Proposed action', description: 'Do the thing carefully', risk: 'LOW', ...body });
+    expect((await propose({ type: 'rollback_deployment' })).body.risk).toBe('MEDIUM');
+    expect((await propose({ type: 'config_change' })).body.risk).toBe('MEDIUM');
+    expect((await propose({ type: 'restart_service', serviceId: tier1.id })).body.risk).toBe('MEDIUM');
+    expect((await propose({ type: 'manual' })).body.risk).toBe('LOW');
+    expect((await propose({ type: 'rollback_deployment', risk: 'HIGH' })).body).toMatchObject({ risk: 'HIGH', requiredApprovals: 2 });
+  });
+});

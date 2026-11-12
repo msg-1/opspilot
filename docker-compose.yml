@@ -24,6 +24,7 @@ x-app-env: &app-env
   TRUST_PROXY: uniquelocal
   LOG_LEVEL: ${LOG_LEVEL:-info}
   AI_DAILY_COST_LIMIT_USD: ${AI_DAILY_COST_LIMIT_USD:-5}
+  SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
   INVESTIGATION_DAILY_LIMIT: ${INVESTIGATION_DAILY_LIMIT:-50}
   INVESTIGATION_MAX_CONCURRENT: ${INVESTIGATION_MAX_CONCURRENT:-3}
 
@@ -62,7 +63,9 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-    command: ["sh", "-c", "npx prisma migrate deploy && node dist/prisma/seed.js --if-empty"]
+    # Applies migrations. Demo data (with documented demo passwords) is loaded only into an
+    # empty database, and only while SEED_DEMO_DATA is not "false".
+    command: ["sh", "-c", "npx prisma migrate deploy && if [ \"$$SEED_DEMO_DATA\" != \"false\" ]; then node dist/prisma/seed.js --if-empty; fi"]
     environment: *app-env
     depends_on:
       postgres:
