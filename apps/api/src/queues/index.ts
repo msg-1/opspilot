@@ -1,6 +1,7 @@
 import { type JobsOptions, Queue, Worker } from 'bullmq';
 import IORedis from 'ioredis';
 import { env } from '../config/env';
+import { serviceUnavailable } from '../lib/errors';
 import { logger } from '../lib/logger';
 import { jobDuration, jobsProcessed } from '../lib/metrics';
 
@@ -33,19 +34,49 @@ export function registerProcessor<N extends JobName>(name: N, processor: Process
 }
 
 let connection: IORedis | undefined;
+let producerConnection: IORedis | undefined;
 const queues = new Map<JobName, Queue>();
+const PRODUCER_TIMEOUT_MS = 3000;
 
+/** Worker connection: BullMQ needs unlimited retries on its blocking connections. */
 function redis() {
-  // BullMQ requires maxRetriesPerRequest: null on its blocking connections.
   connection ??= new IORedis(env.REDIS_URL, { maxRetriesPerRequest: null });
   return connection;
 }
 
-function queueFor(name: JobName) {
-  let queue = queues.get(name);
+/**
+ * Producer connection, used by request handlers. It must fail fast: with the offline queue on,
+ * a command issued while Redis is down waits forever and the HTTP request hangs with it.
+ */
+function producer() {
+  if (!producerConnection) {
+    producerConnection = new IORedis(env.REDIS_URL, { enableOfflineQueue: false, maxRetriesPerRequest: 1, connectTimeout: PRODUCER_TIMEOUT_MS });
+    // Without a listener, connection errors would be thrown as unhandled events.
+    producerConnection.on('error', (err) => logger.debug({ err: err.message }, 'redis producer connection error'));
+  }
+  return producerConnection;
+}
+
+const timeout = (ms: number) => new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`timed out after ${ms} ms`)), ms).unref());
+
+/** Resolves once the producer connection is usable, or rejects quickly if Redis is not there. */
+async function producerReady() {
+  const conn = producer();
+  if (conn.status === 'ready') return conn;
+  await Promise.race([
+    new Promise<void>((resolve) => conn.once('ready', resolve)),
+    timeout(PRODUCER_TIMEOUT_MS),
+  ]);
+  return conn;
+}
+
+function queueFor(name: JobName, forWorker = false) {
+  const key = (forWorker ? `worker:${name}` : name) as JobName;
+  let queue = queues.get(key);
   if (!queue) {
-    queue = new Queue(name, { connection: redis() });
-    queues.set(name, queue);
+    queue = new Queue(name, { connection: forWorker ? redis() : producer() });
+    queue.on('error', (err) => logger.debug({ err: err.message, queue: name }, 'queue connection error'));
+    queues.set(key, queue);
   }
   return queue;
 }
@@ -71,13 +102,22 @@ export async function enqueue<N extends JobName>(name: N, data: JobPayloads[N], 
     await run(name, data).catch((err) => logger.error({ err, queue: name }, 'inline job failed'));
     return;
   }
-  await queueFor(name).add(name, data, {
-    attempts: CONFIG[name].attempts,
-    backoff: { type: 'exponential', delay: 5000 },
-    removeOnComplete: { age: 24 * 3600, count: 1000 },
-    removeOnFail: { age: 7 * 24 * 3600 },
-    ...options,
-  });
+  try {
+    await producerReady();
+    await Promise.race([
+      queueFor(name).add(name, data, {
+        attempts: CONFIG[name].attempts,
+        backoff: { type: 'exponential', delay: 5000 },
+        removeOnComplete: { age: 24 * 3600, count: 1000 },
+        removeOnFail: { age: 7 * 24 * 3600 },
+        ...options,
+      }),
+      timeout(PRODUCER_TIMEOUT_MS),
+    ]);
+  } catch (err) {
+    logger.error({ err: (err as Error).message, queue: name }, 'could not enqueue job');
+    throw serviceUnavailable('The background job queue (Redis) is not reachable. Nothing was started; try again shortly.');
+  }
 }
 
 /** Started only by the worker process (src/worker.ts). */
@@ -88,8 +128,8 @@ export async function startWorkers() {
     worker.on('completed', (job) => logger.debug({ queue: name, jobId: job.id }, 'job completed'));
     return worker;
   });
-  await queueFor('alert-eval').upsertJobScheduler('alert-eval-every-minute', { every: 60_000 }, { name: 'alert-eval', data: {} });
-  await queueFor('log-retention').upsertJobScheduler('log-retention-hourly', { every: 3_600_000 }, { name: 'log-retention', data: {} });
+  await queueFor('alert-eval', true).upsertJobScheduler('alert-eval-every-minute', { every: 60_000 }, { name: 'alert-eval', data: {} });
+  await queueFor('log-retention', true).upsertJobScheduler('log-retention-hourly', { every: 3_600_000 }, { name: 'log-retention', data: {} });
   logger.info({ queues: Object.keys(CONFIG) }, 'workers started');
   return async () => {
     await Promise.all(workers.map((w) => w.close()));
@@ -99,18 +139,23 @@ export async function startWorkers() {
 
 export async function queueStats() {
   if (env.QUEUE_INLINE) return [];
-  return Promise.all(
-    (Object.keys(CONFIG) as JobName[]).map(async (name) => ({
-      name,
-      ...(await queueFor(name).getJobCounts('waiting', 'active', 'completed', 'failed', 'delayed')),
-    })),
-  );
+  await producerReady();
+  return Promise.race([
+    Promise.all(
+      (Object.keys(CONFIG) as JobName[]).map(async (name) => ({
+        name,
+        ...(await queueFor(name).getJobCounts('waiting', 'active', 'completed', 'failed', 'delayed')),
+      })),
+    ),
+    timeout(PRODUCER_TIMEOUT_MS),
+  ]);
 }
 
 export async function redisPing(): Promise<boolean> {
   if (env.QUEUE_INLINE) return true;
   try {
-    return (await redis().ping()) === 'PONG';
+    const conn = await producerReady();
+    return (await Promise.race([conn.ping(), timeout(PRODUCER_TIMEOUT_MS)])) === 'PONG';
   } catch {
     return false;
   }
@@ -121,4 +166,6 @@ export async function closeQueues() {
   queues.clear();
   await connection?.quit().catch(() => undefined);
   connection = undefined;
+  producerConnection?.disconnect();
+  producerConnection = undefined;
 }

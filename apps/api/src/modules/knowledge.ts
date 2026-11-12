@@ -162,7 +162,12 @@ export async function createDocument(
   const doc = await prisma.knowledgeDocument.create({
     data: { ...rest, tags: input.tags?.map((t) => t.toLowerCase()) ?? [], organizationId, serviceId: service?.id ?? null, createdById },
   });
-  await enqueue('knowledge-index', { documentId: doc.id });
+  try {
+    await enqueue('knowledge-index', { documentId: doc.id });
+  } catch (err) {
+    // The document is saved; say plainly that it is not searchable yet rather than "pending" forever.
+    await prisma.knowledgeDocument.update({ where: { id: doc.id }, data: { indexStatus: 'failed', indexError: (err as Error).message } });
+  }
   return doc;
 }
 
