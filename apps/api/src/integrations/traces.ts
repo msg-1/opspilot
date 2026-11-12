@@ -111,24 +111,42 @@ function percentile(sorted: number[], p: number) {
 }
 
 export const tracesConfig = { url: env.TRACES_URL };
+const SETTLE_MS = 8000;
+const SLICES = 4;
+const PER_SLICE = 60;
 
 export async function queryTraces(serviceName: string, from: Date, to: Date, opts: { limit?: number; errorsOnly?: boolean } = {}): Promise<TraceResult> {
   const none = (note: string): TraceResult => ({ available: false, note, sampled: 0, failed: 0, p50Ms: null, p95Ms: null, traces: [] });
   if (!tracesConfig.url) return none('No trace store is connected (TRACES_URL is not set).');
-  const url = new URL('/api/traces', tracesConfig.url);
-  url.search = new URLSearchParams({ service: serviceName, start: String(from.getTime() * 1000), end: String(to.getTime() * 1000), limit: '60', lookback: 'custom', ...(opts.errorsOnly ? { tags: JSON.stringify({ error: 'true' }) } : {}) }).toString();
-  let body: { data?: JaegerTrace[] };
-  try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(8000), headers: { accept: 'application/json' } });
-    if (!res.ok) return none(`The trace store answered HTTP ${res.status}.`);
-    body = (await res.json()) as { data?: JaegerTrace[] };
-  } catch (err) {
-    return none(`The trace store could not be reached: ${(err as Error).message}`);
-  }
   // Spans reach the store in batches, a few seconds after they end. A trace that began in the
   // last moments may still be missing spans, and summarising it would misplace its time.
-  const settled = Date.now() - 8000;
-  const all = (body.data ?? [])
+  const settled = Date.now() - SETTLE_MS;
+  const end = Math.min(to.getTime(), settled);
+  if (end <= from.getTime()) return { available: true, note: 'The window is too recent: its traces may not have reached the trace store yet.', sampled: 0, failed: 0, p50Ms: null, p95Ms: null, traces: [] };
+  // A trace store returns the most recent traces first, so one query with a limit sees only the
+  // end of the window (the last ten seconds, at a few requests per second). The window is cut
+  // into slices and each is sampled, so that the sample covers all of it.
+  const width = (end - from.getTime()) / SLICES;
+  const slice = async (index: number): Promise<JaegerTrace[]> => {
+    const url = new URL('/api/traces', tracesConfig.url);
+    const start = from.getTime() + index * width;
+    url.search = new URLSearchParams({
+      service: serviceName, start: String(Math.round(start * 1000)), end: String(Math.round((start + width) * 1000)), limit: String(PER_SLICE), lookback: 'custom',
+      ...(opts.errorsOnly ? { tags: JSON.stringify({ error: 'true' }) } : {}),
+    }).toString();
+    const res = await fetch(url, { signal: AbortSignal.timeout(8000), headers: { accept: 'application/json' } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return ((await res.json()) as { data?: JaegerTrace[] }).data ?? [];
+  };
+  let traces: JaegerTrace[];
+  try {
+    traces = (await Promise.all(Array.from({ length: SLICES }, (_, i) => slice(i)))).flat();
+  } catch (err) {
+    return none(`The trace store could not be queried: ${(err as Error).message}`);
+  }
+  const seen = new Set<string>();
+  const all = traces
+    .filter((t) => !seen.has(t.traceID) && seen.add(t.traceID))
     .map(summarise)
     .filter((t): t is TraceSummary => !!t && t.services.includes(serviceName) && new Date(t.startedAt).getTime() + t.durationMs < settled);
   const durations = all.map((t) => t.durationMs).sort((a, b) => a - b);

@@ -350,7 +350,12 @@ describe('trace retrieval', () => {
     tracesConfig.url = `http://127.0.0.1:${(jaeger.address() as AddressInfo).port}`;
     asked = [];
     const body = (await traces('service=gateway&from=1h').expect(200)).body;
-    expect(asked[0]).toContain('/api/traces?service=gateway');
+    // The window is sampled in slices, because a trace store returns the most recent traces first.
+    expect(asked).toHaveLength(4);
+    expect(asked.every((u) => u.includes('/api/traces?service=gateway'))).toBe(true);
+    const starts = asked.map((u) => Number(new URL(u, 'http://x').searchParams.get('start'))).sort((a, b) => a - b);
+    expect(new Set(starts).size).toBe(4);
+    expect(Number(new URL(asked[0]!, 'http://x').searchParams.get('end'))).toBeLessThan((Date.now() - 7000) * 1000); // the last seconds are left out: spans may still be arriving
     expect(body).toMatchObject({ available: true, service: 'gateway', sampled: 3, failed: 1 });
     // The failed trace first, then the slowest. A trace that never touched the service is left out.
     expect(body.traces.map((t: { traceId: string }) => t.traceId)).toEqual(['t-fail', 't-slow', 't-fast']);
@@ -372,6 +377,11 @@ describe('trace retrieval', () => {
     // An unreachable trace store is reported, not hidden.
     tracesConfig.url = 'http://127.0.0.1:9';
     expect((await traces('service=gateway')).body).toMatchObject({ available: false, traces: [] });
+    // A window that ended moments ago has nothing settled to read yet, and says so.
+    tracesConfig.url = `http://127.0.0.1:${(jaeger.address() as AddressInfo).port}`;
+    const tooRecent = (await traces(`service=gateway&from=${encodeURIComponent(new Date(Date.now() - 3000).toISOString())}`)).body;
+    expect(tooRecent).toMatchObject({ available: true, sampled: 0 });
+    expect(tooRecent.note).toContain('too recent');
   });
 });
 
