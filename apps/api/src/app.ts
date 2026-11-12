@@ -40,7 +40,20 @@ export function createApp() {
       },
     }),
   );
-  if (!isTest) app.use(pinoHttp({ logger, autoLogging: { ignore: (req) => req.url === '/health' || req.url === '/metrics' } }));
+  if (!isTest) {
+    app.use(
+      pinoHttp({
+        logger,
+        autoLogging: { ignore: (req) => req.url === '/health' || req.url === '/ready' || req.url === '/metrics' },
+        // One compact line per request; headers and bodies are never logged.
+        serializers: {
+          req: (req) => ({ id: req.id, method: req.method, url: String(req.url).split('?')[0] }),
+          res: (res) => ({ statusCode: res.statusCode }),
+        },
+        customLogLevel: (_req, res, err) => (err || res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info'),
+      }),
+    );
+  }
   app.use(httpMetrics);
 
   app.use(healthRouter);
