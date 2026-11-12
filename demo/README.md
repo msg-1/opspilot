@@ -95,7 +95,7 @@ Every `off` ends with a recovery check: 24 real requests through the gateway mus
 
 The faults are switched through an admin endpoint on the demo services (`/admin`, token `DEMO_ADMIN_TOKEN`, default `local-demo`) or by stopping a demo container. They cannot reach anything else.
 
-`bad-deploy` changes the code path of the running process; it does not build and roll out a new image. What OPSILUME sees is the same as for a real deployment: a deployment record, then different behaviour.
+`bad-deploy` changes the code path of the running process; it does not build and roll out a new image. What OPSILUME sees is the same as for a real deployment: a deployment record, then different behaviour. Recovery is recorded as a rollback of v1.5.0 (`rollbackOf`), which marks that deployment as rolled back so that it is never proposed as a version to return to.
 
 ## Investigate a failure by hand
 
@@ -124,10 +124,10 @@ This takes about 25 minutes: each failure runs for 100 seconds before it is inve
 |---|---|
 | `healthy-baseline` | Outcome HEALTHY; no hypothesis above "unlikely"; nothing proposed that changes production; the conclusion cites steady metrics |
 | `db-latency` | Outcome INCIDENT; a latency metric is a strong signal; the leading hypothesis locates the delay in shop-orders' PostgreSQL calls and cites traces whose slowest span is a PostgreSQL span; Redis and payments are not blamed |
-| `redis-outage` | Outcome INCIDENT; the leading hypothesis names Redis; the dependency chain gateway → orders → payments → redis was followed; PostgreSQL is not blamed; no rollback is proposed |
-| `bad-deploy` | Outcome INCIDENT; the leading hypothesis is the v1.5.0 deployment and cites the deployment record created by the scenario; a rollback to v1.4.0 is proposed, awaiting approval; executing it without approval is refused |
+| `redis-outage` | Outcome INCIDENT; the leading hypothesis names Redis; the dependency chain gateway → orders → payments → redis was followed; traces place the failure in shop-payments' calls to Redis; PostgreSQL is not blamed; no rollback is proposed |
+| `bad-deploy` | Outcome INCIDENT; the leading hypothesis is the v1.5.0 deployment, ahead of every other deployment, and cites the deployment record created by the scenario; traces place the failure in shop-orders; a rollback to v1.4.0 is proposed, awaiting approval; executing it without approval is refused |
 | `insufficient-evidence` | Asked about `shop-inventory`, which sends no telemetry: outcome UNDETERMINED, with the missing telemetry named; no hypothesis and no proposal |
-| `pool-exhaustion`, `error-rate`, `upstream-down` | The failure shows in real requests; OPSILUME does not report HEALTHY; recovery is verified |
+| `pool-exhaustion`, `error-rate`, `upstream-down` | The failure shows in real requests; OPSILUME does not report HEALTHY and locates the problem where it is (shop-orders' calls to PostgreSQL; shop-payments; shop-orders' calls to shop-payments); no rollback is proposed; recovery is verified |
 | `recovery` | After the failures are removed, shop-orders is HEALTHY again |
 | `runbook-safety` | The runbook's steps are split into read-only and state-changing; an action that points at the runbook cannot run without approval, cannot be approved by its proposer, and loses its approvals when edited; a read-only diagnostic can be recorded without approval |
 
@@ -154,6 +154,7 @@ If a scenario is interrupted half-way, `npm run demo:scenario -- baseline` resto
 
 ## Limitations
 
+- **Earlier failures stay in the history.** Deployments, alerts and incidents recorded by one scenario are evidence in the next, as they would be in a real system. The runner waits for five minutes of clean telemetry before it starts and 150 seconds between scenarios.
 - **Rule-based engine only.** The demo has not been run with a language model: that would cost money and was not authorised. What a model would make of this telemetry is untested.
 - **One trace store, one tenant.** Jaeger is not tenant-aware. The API only asks it about services of the caller's organisation, and expects the OpenTelemetry `service.name` to equal the service's slug.
 - **Traces are kept in memory for about ten minutes** (4,000 traces). An investigation of an older window finds none and says so.
