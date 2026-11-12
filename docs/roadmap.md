@@ -21,7 +21,7 @@ Status as of 12 November 2026. "Verified" means exercised by automated tests or 
 | M13 | Remediation and approvals | Done | API tests and browser test of the full approval flow |
 | M14 | Monitoring, collaboration, analytics | Done | API tests; Prometheus and Grafana verified running |
 | M15 | Testing, security, performance | Partly | 70 automated tests. No load testing or dependency audit yet |
-| M16 | Docker, CI/CD, documentation | Done | Full stack built and run in Docker. **CI workflow has not run** (no remote repository yet) |
+| M16 | Docker, CI/CD, documentation | Done | Full stack built and run in Docker. CI runs on every pull request on GitHub and passes on `develop`; the browser suite has passed on `release/0.1.0` |
 
 ## Test inventory
 
@@ -37,13 +37,14 @@ Status as of 12 November 2026. "Verified" means exercised by automated tests or 
 
 1. ~~An Anthropic API key~~ — configured; live verification done.
 2. **A GitHub token**, to verify the integration against real repositories.
-3. **A decision on a remote repository** (GitHub, private?) so branches can be pushed and CI can run.
-4. **Promotion of `develop` to `main`** once you have reviewed the result.
+3. ~~A decision on a remote repository~~ — published at https://github.com/msg-1/opspilot (public); `main` and `develop` are protected.
+4. **A licence.** The repository is public without a LICENSE file, so nobody else may legally reuse the code yet.
+5. **Promotion of `develop` to `main`** (release 0.1.0) once you have reviewed the result.
 
 ## Next
 
-1. Run the evals against a real model; tune prompts and the effort setting from the results; add scenarios (config change, traffic spike, memory leak, two simultaneous causes).
-2. Run CI on a remote; add the end-to-end suite to CI with Compose.
+1. Re-run the five evaluation scenarios against a real model now that the harness is fixed (scenario clock, action-safety scoring, saved reports); this needs an approved budget. Then tune prompts and the effort setting from the saved reports; add scenarios (config change, traffic spike, memory leak, two simultaneous causes).
+2. ~~Run CI on a remote; add the end-to-end suite to CI with Compose~~ — done.
 3. Live updates over server-sent events instead of polling.
 4. Load test ingestion and log search; partition `LogEntry` by time.
 5. Email or chat delivery for notifications and invitations.

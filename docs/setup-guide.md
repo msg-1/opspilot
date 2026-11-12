@@ -120,8 +120,8 @@ Lets Claude Desktop, Claude Code or another MCP client query OpsPilot read-only.
 ## 9. Tests
 
 ```bash
-npm test                 # API: 48 integration tests on database opspilot_test · web: 11 tests
-npm run test:ai          # 39 tests, all against mocked model APIs
+npm test                 # API: 54 integration tests on database opspilot_test (5 of them use Redis and skip without it) · web: 11 tests
+npm run test:ai          # 46 tests, all against mocked model APIs
 npm run evals -- --heuristic
 npm run db:seed && npm run test:e2e   # 9 browser tests; needs the stack running on the deterministic engine:
                                       #   AI_PROVIDER=deterministic docker compose --profile app up -d ai
