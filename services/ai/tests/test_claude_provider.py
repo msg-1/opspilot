@@ -264,3 +264,34 @@ def test_secrets_never_appear_in_status_errors_or_logs():
     record = main.logging.LogRecord("x", main.logging.ERROR, "f", 1, 'boom "quoted" %s', (FAKE_KEY,), None)
     line = main.JsonFormatter().format(record)
     assert json.loads(line)["message"] == 'boom "quoted" [redacted-key]'
+
+
+async def test_evaluation_run_never_exceeds_its_budget_and_skips_what_it_cannot_afford():
+    """The harness is the only thing that fires several paid investigations in a row, so its
+    ceiling is tested with a mocked provider that reports a known cost per scenario."""
+    from app.evals import run as evals
+    from app.llm import Resolution
+
+    costs = iter([0.03, 0.03, 0.03, 0.03, 0.03])
+    limits: list[float] = []
+
+    def fake_build(resolution, settings):
+        provider = MockProvider(settings)
+        limits.append(settings.ai_max_cost_usd_per_investigation)
+        provider.usage.cost_usd = next(costs)  # as if this scenario's calls had cost this much
+        return provider
+
+    original = evals.build_provider
+    evals.build_provider = fake_build
+    try:
+        results, skipped = await evals.run_all(Resolution("anthropic", "claude-haiku-5-5", True, ""), Settings(_env_file=None), 0.10, log=lambda *_: None)
+    finally:
+        evals.build_provider = original
+    # 0.03 + 0.03 = 0.06 spent; the third would be expected at 0.0375 with 0.04 left, so it runs;
+    # after 0.09 the fourth cannot fit in the remaining 0.01 and nothing further is started.
+    assert [r.cost_usd for r in results] == [0.03, 0.03, 0.03] and len(skipped) == 2
+    assert sum(r.cost_usd for r in results) <= 0.10
+    # Each scenario's provider is capped at what was left of the budget when it started.
+    assert limits == pytest.approx([0.10, 0.07, 0.04])
+    assert evals.mentions("cache schema change shipped in v4.2.0 of orders-api", "orders-api v4.2.0")
+    assert not evals.mentions("search-api ranking tweak", "orders-api v4.2.0")
