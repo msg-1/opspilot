@@ -20,9 +20,9 @@
     "simulate": "tsx --env-file-if-exists=../../.env scripts/simulate.ts"
   },
   "dependencies": {
-    "@opentelemetry/auto-instrumentations-node": "^0.56.0",
-    "@opentelemetry/exporter-trace-otlp-http": "^0.57.0",
-    "@opentelemetry/sdk-node": "^0.57.0",
+    "@opentelemetry/auto-instrumentations-node": "^0.83.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.301.1",
+    "@opentelemetry/sdk-node": "^0.301.1",
     "@prisma/client": "6.19.3",
     "bcryptjs": "^3.0.3",
     "bullmq": "^5.81.5",
@@ -54,6 +54,6 @@
     "tsx": "^4.19.2",
     "typescript": "5.9.3",
     "typescript-eslint": "^8.20.0",
-    "vitest": "^3.2.7"
+    "vitest": "^5.1.0"
   }
 }
