@@ -1,4 +1,7 @@
 # OpsPilot local stack.
+# Every port is published on 127.0.0.1 only: nothing here is reachable from the network.
+# A shared or production deployment must not publish Postgres or Redis at all, must set
+# POSTGRES_PASSWORD, and must put TLS in front of the web app (COOKIE_SECURE=true).
 #   Infra only (develop on host):   docker compose up -d postgres redis
 #   Full application:               docker compose --profile app up -d --build
 #   Observability add-on:           docker compose --profile observability up -d
@@ -6,28 +9,31 @@ name: opspilot
 
 x-app-env: &app-env
   NODE_ENV: production
-  DATABASE_URL: postgresql://opspilot:opspilot@postgres:5432/opspilot?schema=public
+  DATABASE_URL: postgresql://opspilot:${POSTGRES_PASSWORD:-opspilot}@postgres:5432/opspilot?schema=public
   REDIS_URL: redis://redis:6379
   API_URL: http://api:4000
   AI_SERVICE_URL: http://ai:8000
   WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3000}
-  JWT_SECRET: ${JWT_SECRET:-dev-only-change-me-jwt-secret-0000000000000000}
-  INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-dev-only-change-me-internal-token-000000000}
-  ENCRYPTION_KEY: ${ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
+  JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env - see .env.example}
+  INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in .env - see .env.example}
+  ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Set ENCRYPTION_KEY in .env - see .env.example}
   GITHUB_TOKEN: ${GITHUB_TOKEN:-}
   GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
   COOKIE_SECURE: "false"
+  # The web container is the only proxy in front of the API on the Compose network.
+  TRUST_PROXY: uniquelocal
   LOG_LEVEL: ${LOG_LEVEL:-info}
 
 services:
   postgres:
+    restart: unless-stopped
     image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: opspilot
-      POSTGRES_PASSWORD: opspilot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-opspilot}
       POSTGRES_DB: opspilot
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
@@ -38,9 +44,10 @@ services:
       retries: 20
 
   redis:
+    restart: unless-stopped
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -59,6 +66,7 @@ services:
         condition: service_healthy
 
   api:
+    restart: unless-stopped
     profiles: ["app"]
     build:
       context: .
@@ -66,7 +74,7 @@ services:
     command: ["node", "dist/src/server.js"]
     environment: *app-env
     ports:
-      - "4000:4000"
+      - "127.0.0.1:4000:4000"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -79,12 +87,18 @@ services:
       retries: 10
 
   worker:
+    restart: unless-stopped
     profiles: ["app"]
     build:
       context: .
       dockerfile: apps/api/Dockerfile
     command: ["node", "dist/src/worker.js"]
     environment: *app-env
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:9464/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -92,6 +106,7 @@ services:
         condition: service_healthy
 
   ai:
+    restart: unless-stopped
     profiles: ["app"]
     build:
       context: services/ai
@@ -99,7 +114,7 @@ services:
       - "host.docker.internal:host-gateway"
     environment:
       API_URL: http://api:4000
-      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-dev-only-change-me-internal-token-000000000}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in .env - see .env.example}
       LLM_PROVIDER: ${LLM_PROVIDER:-auto}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-5-5}
@@ -109,33 +124,46 @@ services:
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.1}
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-auto}
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=2).status == 200 else 1)"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
 
   web:
+    restart: unless-stopped
     profiles: ["app"]
     build:
       context: .
       dockerfile: apps/web/Dockerfile
     environment:
       API_PROXY_TARGET: http://api:4000
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     depends_on:
       api:
         condition: service_healthy
 
   prometheus:
+    restart: unless-stopped
     profiles: ["observability"]
     image: prom/prometheus:v2.55.1
     volumes:
       - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
   grafana:
+    restart: unless-stopped
     profiles: ["observability"]
     image: grafana/grafana:11.3.0
     environment:
@@ -147,7 +175,7 @@ services:
       - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
     ports:
-      - "3001:3000"
+      - "127.0.0.1:3001:3000"
     depends_on:
       - prometheus
 

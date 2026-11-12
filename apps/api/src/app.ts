@@ -23,10 +23,17 @@ import { deploymentsRouter, serviceEventsRouter, servicesRouter } from './module
 import { healthRouter, systemRouter } from './modules/system';
 import { toolsRouter } from './modules/tools';
 
+/** Off unless configured: a client-supplied X-Forwarded-For must never be believed by default. */
+function parseTrustProxy(value: string): boolean | number | string {
+  if (value === 'false' || value === '') return false;
+  if (value === 'true') return true;
+  return /^\d+$/.test(value) ? Number(value) : value;
+}
+
 export function createApp() {
   const app = express();
   app.disable('x-powered-by');
-  app.set('trust proxy', 1);
+  app.set('trust proxy', parseTrustProxy(env.TRUST_PROXY));
 
   app.use(helmet());
   app.use(cors({ origin: env.WEB_ORIGIN.split(',').map((o) => o.trim()), credentials: true }));
