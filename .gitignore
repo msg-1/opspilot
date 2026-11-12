@@ -25,3 +25,6 @@ test-results/
 # misc
 .DS_Store
 *.log
+
+# evaluation run output (model reports; local only)
+services/ai/eval-runs/

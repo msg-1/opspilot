@@ -147,7 +147,7 @@ Costs shown in OpsPilot are estimates from published list prices (table in `serv
 | Agent evaluations, rule-based engine | `npm run evals -- --heuristic` | No |
 | Key and model check | `uv run python -m app.live_check --verify` | Yes, free |
 | Minimal live inference | `uv run python -m app.live_check` | Yes, a fraction of a cent |
-| Agent evaluations against the model | `npm run evals` (five investigations) | Yes, paid |
+| Agent evaluations against the model | `npm run evals -- --max-cost 0.10` (five investigations; refuses to run without a ceiling; full reports saved to `services/ai/eval-runs/`) | Yes, paid |
 
 ## Troubleshooting
 
