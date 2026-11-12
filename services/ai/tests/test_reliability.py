@@ -616,3 +616,42 @@ async def test_only_the_last_deployment_before_the_problem_is_the_code_that_was_
     assert any("replaced it before the problem began" in c for c in second.contradictions)
     (rollback,) = [a for a in report.recommended_actions if a.type == "rollback_deployment"]
     assert rollback.parameters.deployment_id == "new" and rollback.parameters.to_version == "v1.4.0"
+
+
+def test_a_rollback_is_judged_by_the_deployment_it_rolls_back_not_by_the_target_it_cites():
+    """Found on real telemetry: the correct rollback was withdrawn because it cited the previous
+    version's deployment record, which was also the only evidence of a hypothesis rated unlikely
+    ("regression introduced by that earlier deployment")."""
+    def build() -> tuple[EvidenceStore, InvestigationReport]:
+        store = EvidenceStore()
+        store.ingest("list_deployments", {"deployments": [
+            {"id": "new", "service": "shop-orders", "version": "v1.5.0", "status": "SUCCEEDED", "startedAt": t(3)},
+            {"id": "prev", "service": "shop-orders", "version": "v1.4.0", "status": "SUCCEEDED", "startedAt": t(40), "isRollback": True},
+        ]})  # E1 the bad release, E2 the version before it
+        store.add("log_pattern", "300× ERROR in shop-orders (new pattern)", "boom", source_type="log_pattern", source_id="fp", service="shop-orders", occurred_at=t(2), data={"level": "ERROR", "count": 300, "kind": "new"})
+        report = InvestigationReport(
+            summary="s", confidence=0.57,
+            hypotheses=[
+                HypothesisOut(title="Regression introduced by v1.5.0", description="d", confidence=0.57, status="likely", evidence_refs=["E1", "E3"]),
+                HypothesisOut(title="Regression introduced by the earlier v1.4.0 deployment", description="d", confidence=0.2, status="unlikely", evidence_refs=["E2"]),
+            ],
+        )
+        return store, report
+
+    store, report = build()
+    report.recommended_actions = [RecommendedAction(type="rollback_deployment", title="Roll back shop-orders to v1.4.0", description="Return to the previous version.", risk="MEDIUM", evidence_refs=["E1", "E2", "E3"], parameters=RemediationParameters(deployment_id="new", to_version="v1.4.0"))]
+    notes = guardrails.enforce(report, store)
+    assert [a.type for a in report.recommended_actions] == ["rollback_deployment"] and not any("rated unlikely" in n for n in notes)
+
+    # Rolling back the deployment that the unlikely hypothesis is about is still withdrawn.
+    store, report = build()
+    store.ingest("list_deployments", {"deployments": [{"id": "older", "service": "shop-orders", "version": "v1.3.9", "status": "SUCCEEDED", "startedAt": t(9000)}]})
+    report.recommended_actions = [RecommendedAction(type="rollback_deployment", title="Roll back shop-orders to v1.3.9", description="Undo the earlier deployment.", risk="MEDIUM", evidence_refs=["E1", "E2"], parameters=RemediationParameters(deployment_id="prev", to_version="v1.3.9"))]
+    notes = guardrails.enforce(report, store)
+    assert report.recommended_actions == [] and any("rated unlikely" in n for n in notes)
+
+    # Any other production change is still judged by everything it cites.
+    store, report = build()
+    report.recommended_actions = [RecommendedAction(type="restart_service", title="Restart shop-orders", description="Restart the pods.", risk="LOW", evidence_refs=["E2", "E3"])]
+    notes = guardrails.enforce(report, store)
+    assert report.recommended_actions == [] and any("rated unlikely" in n for n in notes)

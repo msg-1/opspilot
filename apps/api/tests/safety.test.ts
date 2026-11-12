@@ -396,6 +396,42 @@ describe('trace retrieval', () => {
 describe('investigation reports', () => {
   const evidence = (ref: string, kind: string, title: string) => ({ type: 'evidence', evidence: { ref, kind, title, summary: `${title} summary`, sourceType: kind, sourceId: `${kind}-${ref}` } });
 
+  it('judge a rollback by the deployment it rolls back, not by the previous version it cites', async () => {
+    // From the demo run: the correct rollback cited the previous version's deployment, which was
+    // also the only evidence of a hypothesis rated unlikely, and was withdrawn for it.
+    const org = await createOrg();
+    await createService(org.owner, 'Orders');
+    const hypothesis = (title: string, confidence: number, status: string, evidenceRefs: string[]) => ({ title, description: 'd', confidence, status, evidenceRefs, facts: [], assumptions: [], gaps: [] });
+    const rollback = (deploymentId: string, toVersion: string) => ({ type: 'rollback_deployment', title: `Roll back orders to ${toVersion}`, description: 'Return to the previous version.', risk: 'MEDIUM', serviceSlug: 'orders', parameters: { deploymentId, toVersion }, evidenceRefs: ['E1', 'E2', 'E3'] });
+    const run = async (action: Record<string, unknown>) => {
+      ai.events = [
+        evidence('E1', 'deployment', 'Deployment of orders v1.5.0'),
+        evidence('E2', 'deployment', 'Rollback of orders v1.4.0'),
+        evidence('E3', 'log_pattern', '300× ERROR in orders'),
+        {
+          type: 'final',
+          report: {
+            summary: 'Errors began after v1.5.0.', confidence: 0.57, analysisMode: 'heuristic', outcome: 'INCIDENT',
+            assessment: { outcome: 'INCIDENT', confidence: 0.9, rationale: 'A failure is evident.', supportingRefs: ['E3'], signals: [], missingTelemetry: [] },
+            hypotheses: [hypothesis('Regression introduced by v1.5.0', 0.57, 'likely', ['E1', 'E3']), hypothesis('Regression introduced by the earlier v1.4.0 deployment', 0.2, 'unlikely', ['E2'])],
+            facts: [], timeline: [], assumptions: [], uncertainties: ['x'], nextSteps: [], recommendedActions: [action],
+          },
+        },
+      ];
+      const started = await org.owner.post('/api/v1/investigations').send({ question: 'Why is orders returning errors?' });
+      return (await org.owner.get(`/api/v1/investigations/${started.body.id}`)).body;
+    };
+    // The evidence helper gives each item the source id "<kind>-<ref>".
+    const kept = await run(rollback('deployment-E1', 'v1.4.0'));
+    expect(kept.report.recommendedActions.map((a: { type: string }) => a.type)).toEqual(['rollback_deployment']);
+    expect(kept.remediations).toEqual([expect.objectContaining({ type: 'rollback_deployment', status: 'PROPOSED', effect: 'state_changing' })]);
+    // Rolling back the deployment that the unlikely hypothesis is about is withdrawn.
+    const withdrawn = await run(rollback('deployment-E2', 'v1.3.9'));
+    expect(withdrawn.report.recommendedActions).toEqual([]);
+    expect(withdrawn.report.nextSteps.join(' ')).toContain('Considered and not recommended (it would change production on the strength of a hypothesis rated unlikely)');
+    expect(withdrawn.remediations).toEqual([]);
+  });
+
   it('store a healthy conclusion with the evidence it rests on, and carry claim verification to the reader', async () => {
     const org = await createOrg();
     await createService(org.owner, 'Billing');

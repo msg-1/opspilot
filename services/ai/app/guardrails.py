@@ -151,8 +151,15 @@ def enforce(report: InvestigationReport, store: EvidenceStore, *, scope: list[st
         (doubted if h.status == "unlikely" and i > 0 else held).update(h.evidence_refs)
     doubted -= held
     withdrawn.clear()
+    by_source = {e.source_id: e.ref for e in store.by_kind("deployment")}
     for a in report.recommended_actions:
-        if a.effect == "state_changing" and set(a.evidence_refs) & doubted:
+        if a.effect != "state_changing":
+            continue
+        # A rollback rests on the deployment it rolls back, not on every record it cites: the
+        # previous version's deployment is cited as the target, whatever else that record supports.
+        subject = by_source.get(a.parameters.deployment_id) if a.type == "rollback_deployment" and a.parameters and a.parameters.deployment_id else None
+        rests_on = {subject} if subject else set(a.evidence_refs)
+        if rests_on & doubted:
             withdraw(a, "it would change production on the strength of a hypothesis rated unlikely")
     report.recommended_actions = [a for a in report.recommended_actions if a not in withdrawn]
     # A high-risk option is not put forward next to a safer one that addresses the problem: it

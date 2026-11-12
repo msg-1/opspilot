@@ -128,6 +128,8 @@ export async function runInvestigation(investigationId: string) {
   let provider = 'unknown';
   let finished = false;
   const evidenceRefs = new Set<string>();
+  // Reference of each deployment evidence item by the deployment's id, to tell what a rollback acts on.
+  const deploymentRefs = new Map<string, string>();
 
   const assertNotCancelled = async () => {
     const current = await prisma.investigation.findUnique({ where: { id: investigationId }, select: { status: true } });
@@ -170,6 +172,7 @@ export async function runInvestigation(investigationId: string) {
         const e = event.evidence;
         if (evidenceRefs.has(e.ref)) break;
         evidenceRefs.add(e.ref);
+        if (e.kind === 'deployment' && e.sourceId) deploymentRefs.set(e.sourceId, e.ref);
         const occurredAt = e.occurredAt ? new Date(e.occurredAt) : null;
         await prisma.evidence.create({
           data: {
@@ -190,7 +193,7 @@ export async function runInvestigation(investigationId: string) {
       case 'final': {
         const parsed = reportSchema.safeParse(event.report);
         if (!parsed.success) throw new Error(`AI service returned a malformed report: ${parsed.error.issues[0]?.message ?? 'invalid'}`);
-        const report = await applyGuardrails(parsed.data, evidenceRefs, addStep);
+        const report = await applyGuardrails(parsed.data, evidenceRefs, addStep, deploymentRefs);
         await persistFinal(investigationId, report, event.usage, event.engine);
         finished = true;
         break;
@@ -259,6 +262,7 @@ async function applyGuardrails(
   report: InvestigationReport,
   known: Set<string>,
   addStep: (step: Extract<InvestigationEvent, { type: 'step' }>['step']) => Promise<unknown>,
+  deploymentRefs: Map<string, string> = new Map(),
 ): Promise<InvestigationReport> {
   const notes: string[] = [];
   const clean = (list: string[], where: string) => {
@@ -314,7 +318,13 @@ async function applyGuardrails(
   result.hypotheses.forEach((h, i) => h.evidenceRefs.forEach((r) => (h.status === 'unlikely' && i > 0 ? doubted : held).add(r)));
   held.forEach((r) => doubted.delete(r));
   result.recommendedActions = result.recommendedActions.filter((a) => {
-    if (a.effect !== 'state_changing' || !a.evidenceRefs.some((r) => doubted.has(r))) return true;
+    if (a.effect !== 'state_changing') return true;
+    // A rollback rests on the deployment it rolls back, not on every record it cites (the
+    // previous version's deployment is cited as the target, whatever else that record supports).
+    const id = a.type === 'rollback_deployment' ? (a.parameters as { deploymentId?: unknown } | null | undefined)?.deploymentId : undefined;
+    const subject = typeof id === 'string' ? deploymentRefs.get(id) : undefined;
+    const restsOn = subject ? [subject] : a.evidenceRefs;
+    if (!restsOn.some((r) => doubted.has(r))) return true;
     withdraw(a, 'it would change production on the strength of a hypothesis rated unlikely');
     return false;
   });
