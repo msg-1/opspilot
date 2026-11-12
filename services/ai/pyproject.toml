@@ -1,0 +1,41 @@
+[project]
+name = "opspilot-ai"
+version = "0.1.0"
+description = "OpsPilot AI service: investigation agent (LangGraph), embeddings, MCP server"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "httpx>=0.27",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "anthropic>=0.60",
+    "langchain-core>=0.3",
+    "langchain-openai>=0.2",
+    "langchain-ollama>=0.2",
+    "langgraph>=0.2",
+    "mcp>=1.2",
+    "prometheus-client>=0.21",
+    "opentelemetry-sdk>=1.28",
+    "opentelemetry-exporter-otlp-proto-http>=1.28",
+    "opentelemetry-instrumentation-fastapi>=0.49b0",
+]
+
+[dependency-groups]
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.8"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501", "B008"]  # B008: FastAPI Depends() defaults are idiomatic
+
+[tool.ruff.lint.per-file-ignores]
+"app/evals/scenarios.py" = ["E731"]
