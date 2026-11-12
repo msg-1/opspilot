@@ -1,0 +1,819 @@
+// OpsPilot data model. Every tenant-owned table carries organizationId and every
+// query in the API filters on it (see docs/database-design.md).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ───────────────────────── Identity, tenancy, security ─────────────────────────
+
+enum Role {
+  OWNER
+  ADMIN
+  ENGINEER
+  VIEWER
+}
+
+model Organization {
+  id              String   @id @default(cuid())
+  name            String
+  slug            String   @unique
+  incidentCounter Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  memberships        Membership[]
+  teams              Team[]
+  services           Service[]
+  incidents          Incident[]
+  deployments        Deployment[]
+  logs               LogEntry[]
+  serviceEvents      ServiceEvent[]
+  metricSamples      MetricSample[]
+  alertRules         AlertRule[]
+  alerts             Alert[]
+  repositories       Repository[]
+  githubIntegration  GithubIntegration?
+  documents          KnowledgeDocument[]
+  investigations     Investigation[]
+  remediationActions RemediationAction[]
+  auditLogs          AuditLog[]
+  apiKeys            ApiKey[]
+  notifications      Notification[]
+  invitations        Invitation[]
+  settings           OrganizationSettings?
+}
+
+model OrganizationSettings {
+  organizationId       String       @id
+  organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  // Number of distinct approvers required per remediation risk level
+  approvalsLowRisk     Int          @default(1)
+  approvalsMediumRisk  Int          @default(1)
+  approvalsHighRisk    Int          @default(2)
+  allowSelfApproval    Boolean      @default(false)
+  logRetentionDays     Int          @default(30)
+  // When true, secrets/PII patterns are masked in logs before storage
+  redactLogs           Boolean      @default(true)
+  // Optional outbound webhook that performs approved remediation actions (e.g. a CI/CD
+  // pipeline). When unset, execution is recorded inside OpsPilot only ("simulated").
+  remediationWebhookUrl             String?
+  remediationWebhookSecretEncrypted String?
+  updatedAt            DateTime     @updatedAt
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  name         String
+  passwordHash String
+  title        String?
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  memberships   Membership[]
+  refreshTokens RefreshToken[]
+  teamMembers   TeamMember[]
+  notifications Notification[]
+}
+
+model Membership {
+  id             String       @id @default(cuid())
+  userId         String
+  organizationId String
+  role           Role         @default(ENGINEER)
+  createdAt      DateTime     @default(now())
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+  @@index([organizationId])
+}
+
+model Invitation {
+  id             String       @id @default(cuid())
+  organizationId String
+  email          String
+  role           Role         @default(ENGINEER)
+  tokenHash      String       @unique
+  invitedById    String
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+}
+
+model RefreshToken {
+  id             String    @id @default(cuid())
+  userId         String
+  organizationId String
+  tokenHash      String    @unique
+  userAgent      String?
+  ip             String?
+  expiresAt      DateTime
+  revokedAt      DateTime?
+  createdAt      DateTime  @default(now())
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model ApiKey {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  prefix         String
+  keyHash        String       @unique
+  scopes         String[]
+  createdById    String
+  lastUsedAt     DateTime?
+  revokedAt      DateTime?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+}
+
+model AuditLog {
+  id             String       @id @default(cuid())
+  organizationId String
+  actorType      String // user | api_key | ai_agent | system
+  actorId        String?
+  actorLabel     String?
+  action         String // e.g. incident.create
+  resourceType   String
+  resourceId     String?
+  metadata       Json?
+  ip             String?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt(sort: Desc)])
+  @@index([organizationId, resourceType, resourceId])
+  @@index([organizationId, action])
+}
+
+model Notification {
+  id             String       @id @default(cuid())
+  organizationId String
+  userId         String
+  type           String
+  title          String
+  body           String?
+  link           String?
+  readAt         DateTime?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, organizationId, readAt])
+}
+
+// ───────────────────────── Teams & services ─────────────────────────
+
+model Team {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  slug           String
+  description    String?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  members        TeamMember[]
+  services       Service[]
+
+  @@unique([organizationId, slug])
+}
+
+model TeamMember {
+  teamId   String
+  userId   String
+  isLead   Boolean @default(false)
+  onCall   Boolean @default(false)
+  team     Team    @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user     User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([teamId, userId])
+}
+
+enum ServiceTier {
+  TIER1
+  TIER2
+  TIER3
+}
+
+enum ServiceLifecycle {
+  EXPERIMENTAL
+  PRODUCTION
+  DEPRECATED
+}
+
+enum HealthStatus {
+  HEALTHY
+  DEGRADED
+  DOWN
+  UNKNOWN
+}
+
+model Service {
+  id             String           @id @default(cuid())
+  organizationId String
+  name           String
+  slug           String
+  description    String?
+  tier           ServiceTier      @default(TIER2)
+  lifecycle      ServiceLifecycle @default(PRODUCTION)
+  language       String?
+  repoUrl        String?
+  runbookUrl     String?
+  ownerTeamId    String?
+  health         HealthStatus     @default(UNKNOWN)
+  healthNote     String?
+  healthAt       DateTime?
+  tags           String[]
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  ownerTeam    Team?               @relation(fields: [ownerTeamId], references: [id], onDelete: SetNull)
+  dependencies ServiceDependency[] @relation("dependent")
+  dependents   ServiceDependency[] @relation("dependency")
+  deployments  Deployment[]
+  incidents    IncidentService[]
+  logs         LogEntry[]
+  events       ServiceEvent[]
+  metrics      MetricSample[]
+  alertRules   AlertRule[]
+  alerts       Alert[]
+  repositories Repository[]
+  documents    KnowledgeDocument[]
+
+  @@unique([organizationId, slug])
+  @@index([organizationId, ownerTeamId])
+}
+
+model ServiceDependency {
+  serviceId    String
+  dependsOnId  String
+  kind         String   @default("sync") // sync | async | datastore
+  description  String?
+  createdAt    DateTime @default(now())
+  service      Service  @relation("dependent", fields: [serviceId], references: [id], onDelete: Cascade)
+  dependsOn    Service  @relation("dependency", fields: [dependsOnId], references: [id], onDelete: Cascade)
+
+  @@id([serviceId, dependsOnId])
+  @@index([dependsOnId])
+}
+
+// ───────────────────────── Deployments ─────────────────────────
+
+enum DeploymentStatus {
+  PENDING
+  IN_PROGRESS
+  SUCCEEDED
+  FAILED
+  ROLLED_BACK
+}
+
+model Deployment {
+  id             String           @id @default(cuid())
+  organizationId String
+  serviceId      String
+  version        String
+  environment    String           @default("production")
+  status         DeploymentStatus @default(SUCCEEDED)
+  commitSha      String?
+  branch         String?
+  deployedBy     String?
+  description    String?
+  source         String           @default("manual") // manual | api | github | remediation
+  isRollback     Boolean          @default(false)
+  rollbackOfId   String?
+  startedAt      DateTime         @default(now())
+  finishedAt     DateTime?
+  createdAt      DateTime         @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  service      Service      @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  rollbackOf   Deployment?  @relation("rollback", fields: [rollbackOfId], references: [id], onDelete: SetNull)
+  rollbacks    Deployment[] @relation("rollback")
+
+  @@index([organizationId, startedAt(sort: Desc)])
+  @@index([organizationId, serviceId, startedAt(sort: Desc)])
+  @@index([organizationId, commitSha])
+}
+
+// ───────────────────────── Incidents ─────────────────────────
+
+enum IncidentSeverity {
+  SEV1
+  SEV2
+  SEV3
+  SEV4
+}
+
+enum IncidentStatus {
+  OPEN
+  INVESTIGATING
+  IDENTIFIED
+  MITIGATED
+  RESOLVED
+  CLOSED
+}
+
+model Incident {
+  id             String           @id @default(cuid())
+  organizationId String
+  number         Int
+  title          String
+  description    String?
+  severity       IncidentSeverity @default(SEV3)
+  status         IncidentStatus   @default(OPEN)
+  environment    String           @default("production")
+  source         String           @default("manual") // manual | alert | api
+  commanderId    String?
+  assigneeId     String?
+  createdById    String?
+  rootCause      String?
+  resolution     String?
+  customerImpact String?
+  startedAt      DateTime         @default(now())
+  acknowledgedAt DateTime?
+  mitigatedAt    DateTime?
+  resolvedAt     DateTime?
+  closedAt       DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  services       IncidentService[]
+  events         IncidentEvent[]
+  investigations Investigation[]
+  remediations   RemediationAction[]
+  alerts         Alert[]
+  postmortem     KnowledgeDocument?
+
+  @@unique([organizationId, number])
+  @@index([organizationId, status, severity])
+  @@index([organizationId, startedAt(sort: Desc)])
+}
+
+model IncidentService {
+  incidentId String
+  serviceId  String
+  incident   Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  service    Service  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@id([incidentId, serviceId])
+  @@index([serviceId])
+}
+
+model IncidentEvent {
+  id         String   @id @default(cuid())
+  incidentId String
+  // created | status_change | severity_change | assignment | comment | investigation |
+  // remediation | alert | update
+  type       String
+  message    String
+  actorType  String   @default("user") // user | ai_agent | system
+  actorId    String?
+  actorLabel String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  incident   Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  @@index([incidentId, createdAt])
+}
+
+// ───────────────────────── Logs, events, metrics ─────────────────────────
+
+enum LogLevel {
+  TRACE
+  DEBUG
+  INFO
+  WARN
+  ERROR
+  FATAL
+}
+
+model LogEntry {
+  id             String   @id @default(cuid())
+  organizationId String
+  serviceId      String?
+  timestamp      DateTime
+  level          LogLevel @default(INFO)
+  message        String
+  environment    String   @default("production")
+  host           String?
+  traceId        String?
+  spanId         String?
+  // Stable hash of the normalised message; groups repeated errors into patterns
+  fingerprint    String
+  attributes     Json?
+  ingestedAt     DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  service      Service?     @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, timestamp(sort: Desc)])
+  @@index([organizationId, serviceId, timestamp(sort: Desc)])
+  @@index([organizationId, level, timestamp(sort: Desc)])
+  @@index([organizationId, fingerprint, timestamp])
+  @@index([organizationId, traceId])
+  @@index([message(ops: raw("gin_trgm_ops"))], type: Gin)
+}
+
+model ServiceEvent {
+  id             String   @id @default(cuid())
+  organizationId String
+  serviceId      String
+  // config_change | feature_flag | scaling | restart | infrastructure | alert | maintenance | other
+  type           String
+  title          String
+  details        String?
+  source         String   @default("manual")
+  actor          String?
+  metadata       Json?
+  occurredAt     DateTime @default(now())
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  service      Service      @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, occurredAt(sort: Desc)])
+  @@index([organizationId, serviceId, occurredAt(sort: Desc)])
+}
+
+model MetricSample {
+  id             String   @id @default(cuid())
+  organizationId String
+  serviceId      String
+  // latency_p95_ms | latency_p50_ms | error_rate | requests_per_min | cpu_percent | memory_percent | ...
+  metric         String
+  value          Float
+  timestamp      DateTime
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  service      Service      @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, serviceId, metric, timestamp(sort: Desc)])
+  @@index([organizationId, timestamp])
+}
+
+model AlertRule {
+  id             String           @id @default(cuid())
+  organizationId String
+  serviceId      String
+  name           String
+  metric         String
+  comparator     String           @default("gt") // gt | lt
+  threshold      Float
+  windowMinutes  Int              @default(5)
+  severity       IncidentSeverity @default(SEV3)
+  enabled        Boolean          @default(true)
+  autoIncident   Boolean          @default(false)
+  createdAt      DateTime         @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  service      Service      @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  alerts       Alert[]
+
+  @@index([organizationId, serviceId])
+}
+
+model Alert {
+  id             String    @id @default(cuid())
+  organizationId String
+  ruleId         String
+  serviceId      String
+  status         String    @default("firing") // firing | resolved
+  value          Float
+  message        String
+  incidentId     String?
+  startedAt      DateTime  @default(now())
+  resolvedAt     DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  rule         AlertRule    @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  service      Service      @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  incident     Incident?    @relation(fields: [incidentId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, status, startedAt(sort: Desc)])
+  @@index([ruleId, status])
+}
+
+// ───────────────────────── GitHub ─────────────────────────
+
+model GithubIntegration {
+  organizationId  String       @id
+  // mock | token
+  mode            String       @default("mock")
+  tokenEncrypted  String?
+  webhookSecretEncrypted String?
+  accountLogin    String?
+  lastSyncAt      DateTime?
+  lastSyncStatus  String?
+  lastSyncError   String?
+  updatedAt       DateTime     @updatedAt
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+model Repository {
+  id             String    @id @default(cuid())
+  organizationId String
+  fullName       String // owner/name
+  defaultBranch  String    @default("main")
+  url            String?
+  serviceId      String?
+  isMock         Boolean   @default(false)
+  lastSyncedAt   DateTime?
+  createdAt      DateTime  @default(now())
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  service      Service?      @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+  commits      Commit[]
+  pullRequests PullRequest[]
+
+  @@unique([organizationId, fullName])
+  @@index([organizationId, serviceId])
+}
+
+model Commit {
+  id           String   @id @default(cuid())
+  repositoryId String
+  sha          String
+  message      String
+  authorName   String?
+  authorLogin  String?
+  committedAt  DateTime
+  url          String?
+  additions    Int?
+  deletions    Int?
+  filesChanged Json? // [{ filename, additions, deletions, status }]
+
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@unique([repositoryId, sha])
+  @@index([repositoryId, committedAt(sort: Desc)])
+  @@index([sha])
+}
+
+model PullRequest {
+  id             String    @id @default(cuid())
+  repositoryId   String
+  number         Int
+  title          String
+  body           String?
+  state          String // open | closed | merged
+  authorLogin    String?
+  url            String?
+  baseBranch     String?
+  headBranch     String?
+  mergeCommitSha String?
+  additions      Int?
+  deletions      Int?
+  changedFiles   Int?
+  labels         String[]
+  openedAt       DateTime
+  mergedAt       DateTime?
+  closedAt       DateTime?
+
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@unique([repositoryId, number])
+  @@index([repositoryId, mergedAt(sort: Desc)])
+  @@index([mergeCommitSha])
+}
+
+// ───────────────────────── Knowledge base (RAG) ─────────────────────────
+
+model KnowledgeDocument {
+  id             String   @id @default(cuid())
+  organizationId String
+  title          String
+  // runbook | postmortem | architecture | guide | policy | other
+  type           String   @default("runbook")
+  content        String
+  sourceUrl      String?
+  serviceId      String?
+  incidentId     String?  @unique
+  tags           String[]
+  // pending | indexing | indexed | failed
+  indexStatus    String   @default("pending")
+  indexError     String?
+  embeddingModel String?
+  chunkCount     Int      @default(0)
+  createdById    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  service      Service?         @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+  incident     Incident?        @relation(fields: [incidentId], references: [id], onDelete: SetNull)
+  chunks       KnowledgeChunk[]
+
+  @@index([organizationId, type])
+  @@index([organizationId, serviceId])
+}
+
+model KnowledgeChunk {
+  id             String                      @id @default(cuid())
+  documentId     String
+  organizationId String
+  index          Int
+  heading        String?
+  content        String
+  tokenEstimate  Int                         @default(0)
+  // pgvector column; written and searched with raw SQL (see knowledge module)
+  embedding      Unsupported("vector(768)")?
+  createdAt      DateTime                    @default(now())
+
+  document KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, index])
+  @@index([organizationId])
+}
+
+// ───────────────────────── AI investigations ─────────────────────────
+
+enum InvestigationStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model Investigation {
+  id             String              @id @default(cuid())
+  organizationId String
+  incidentId     String?
+  question       String
+  status         InvestigationStatus @default(QUEUED)
+  // LLM provider/model actually used; "heuristic" when no LLM is configured
+  provider       String?
+  model          String?
+  plan           Json?
+  // Final structured report (see services/ai/app/schemas.py InvestigationReport)
+  report         Json?
+  summary        String?
+  confidence     Float?
+  error          String?
+  timeWindowStart DateTime?
+  timeWindowEnd   DateTime?
+  createdById    String?
+  inputTokens    Int                 @default(0)
+  outputTokens   Int                 @default(0)
+  startedAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime            @default(now())
+
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  incident     Incident?           @relation(fields: [incidentId], references: [id], onDelete: SetNull)
+  steps        InvestigationStep[]
+  evidence     Evidence[]
+  hypotheses   Hypothesis[]
+  remediations RemediationAction[]
+
+  @@index([organizationId, createdAt(sort: Desc)])
+  @@index([incidentId])
+}
+
+model InvestigationStep {
+  id              String   @id @default(cuid())
+  investigationId String
+  index           Int
+  // plan | tool_call | evaluation | hypothesis | report | guardrail | error
+  type            String
+  title           String
+  detail          String?
+  toolName        String?
+  input           Json?
+  output          Json?
+  status          String   @default("completed") // completed | failed
+  durationMs      Int?
+  createdAt       DateTime @default(now())
+
+  investigation Investigation @relation(fields: [investigationId], references: [id], onDelete: Cascade)
+
+  @@index([investigationId, index])
+}
+
+model Evidence {
+  id              String    @id @default(cuid())
+  investigationId String
+  // Short stable reference used in the report, e.g. E1, E2
+  ref             String
+  // log_pattern | log | deployment | commit | pull_request | metric | service_event |
+  // incident | document | dependency
+  kind            String
+  title           String
+  summary         String
+  sourceType      String?
+  sourceId        String?
+  occurredAt      DateTime?
+  relevance       Float?
+  data            Json?
+  createdAt       DateTime  @default(now())
+
+  investigation Investigation @relation(fields: [investigationId], references: [id], onDelete: Cascade)
+
+  @@unique([investigationId, ref])
+  @@index([investigationId, occurredAt])
+}
+
+model Hypothesis {
+  id              String   @id @default(cuid())
+  investigationId String
+  rank            Int
+  title           String
+  description     String
+  confidence      Float
+  // likely | possible | unlikely — never "confirmed" without human verification
+  status          String   @default("possible")
+  evidenceRefs    String[]
+  facts           String[]
+  assumptions     String[]
+  gaps            String[]
+  createdAt       DateTime @default(now())
+
+  investigation Investigation @relation(fields: [investigationId], references: [id], onDelete: Cascade)
+
+  @@index([investigationId, rank])
+}
+
+// ───────────────────────── Remediation & approvals ─────────────────────────
+
+enum RemediationStatus {
+  PROPOSED
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  EXECUTING
+  EXECUTED
+  FAILED
+  CANCELLED
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+model RemediationAction {
+  id              String            @id @default(cuid())
+  organizationId  String
+  incidentId      String?
+  investigationId String?
+  // rollback_deployment | restart_service | scale_service | toggle_feature_flag |
+  // config_change | run_runbook | manual
+  type            String
+  title           String
+  description     String
+  rationale       String?
+  risk            RiskLevel         @default(MEDIUM)
+  status          RemediationStatus @default(PROPOSED)
+  serviceId       String?
+  parameters      Json?
+  proposedByType  String            @default("user") // user | ai_agent
+  proposedById    String?
+  requestedById   String?
+  requestedAt     DateTime?
+  requiredApprovals Int             @default(1)
+  executedById    String?
+  executedAt      DateTime?
+  executionResult Json?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  incident      Incident?      @relation(fields: [incidentId], references: [id], onDelete: SetNull)
+  investigation Investigation? @relation(fields: [investigationId], references: [id], onDelete: SetNull)
+  approvals     Approval[]
+
+  @@index([organizationId, status])
+  @@index([incidentId])
+}
+
+model Approval {
+  id         String   @id @default(cuid())
+  actionId   String
+  approverId String
+  decision   String // approved | rejected
+  comment    String?
+  createdAt  DateTime @default(now())
+
+  action RemediationAction @relation(fields: [actionId], references: [id], onDelete: Cascade)
+
+  @@unique([actionId, approverId])
+}
