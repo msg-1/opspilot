@@ -21,6 +21,7 @@ from .schemas import (
     InvestigationReport,
     PlanStep,
     RecommendedAction,
+    RemediationParameters,
     TimelineEntry,
 )
 
@@ -233,7 +234,7 @@ def analyse(question: str, store: EvidenceStore, *, scope: list[str], window: tu
                     type="rollback_deployment", title=f"Roll back {change.service} to {prev_version}",
                     description=f"Roll back {change.service} from {(change.data or {}).get('version')} to the previous successful version {prev_version}, then watch error rate and latency for 15 minutes.",
                     rationale=f"Errors began shortly after {(change.data or {}).get('version')} was deployed; {prev_version} was running before the errors started. This is a hypothesis based on timing and content overlap, not a confirmed cause.",
-                    risk="MEDIUM", service_slug=change.service, parameters={"deploymentId": change.source_id, "fromVersion": (change.data or {}).get("version"), "toVersion": prev_version},
+                    risk="MEDIUM", service_slug=change.service, parameters=RemediationParameters(deployment_id=change.source_id, from_version=(change.data or {}).get("version"), to_version=prev_version),
                     evidence_refs=_unique([change.ref, previous.ref] + ([dominant.ref] if dominant else [])),
                 ))
 

@@ -240,3 +240,49 @@ async def test_anthropic_provider_surfaces_refusals():
     provider = AnthropicProvider(Settings(_env_file=None, anthropic_api_key="k"), client=SimpleNamespace(messages=FakeMessages(response)))
     with pytest.raises(LLMError, match="declined"):
         await provider.invoke([HumanMessage("hi")], [])
+
+
+async def test_report_schema_sent_to_claude_lets_the_model_fill_in_rollback_parameters():
+    """Regression test for audit finding H7: a free-form `parameters` dict reached the API as an
+    empty closed object, so a model could never name the deployment or the target version."""
+    import json
+
+    import anthropic
+    import httpx2
+
+    sent: list[dict] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        sent.append(json.loads(request.content))
+        return httpx2.Response(400, json={"type": "error", "error": {"type": "invalid_request_error", "message": "captured"}})
+
+    client = anthropic.AsyncAnthropic(api_key="test", http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(handler)), max_retries=0)
+    provider = AnthropicProvider(Settings(_env_file=None, anthropic_api_key="test"), client=client)
+    with pytest.raises(LLMError):
+        await provider.structured([HumanMessage("write the report")], LLMReport)
+
+    schema = sent[0]["output_config"]["format"]["schema"]
+    text = json.dumps(schema)
+    params = schema["$defs"]["RemediationParameters"]["properties"]
+    assert {"deploymentId", "toVersion", "fromVersion", "replicas", "featureFlag"} <= set(params)
+    assert '"properties": {}' not in text  # no empty objects anywhere in the contract
+    assert '"evidenceRefs"' in text and '"evidence_refs"' not in text  # wire names are camelCase
+    assert "thinking" not in sent[0] and "temperature" not in sent[0] and "tool_choice" not in sent[0]
+
+
+def test_report_wire_format_carries_only_parameters_that_were_set():
+    from app.schemas import InvestigationReport, RemediationParameters
+
+    report = InvestigationReport(
+        summary="s", confidence=0.5, analysis_mode="heuristic",
+        recommended_actions=[
+            RecommendedAction(type="rollback_deployment", title="Roll back api", description="Roll back to v1", parameters=RemediationParameters(deployment_id="dep_1", to_version="v1")),
+            RecommendedAction(type="manual", title="Check the dashboard", description="Look at the pool panel"),
+        ],
+    )
+    actions = report.wire()["recommendedActions"]
+    assert actions[0]["parameters"] == {"deploymentId": "dep_1", "toVersion": "v1"}
+    assert actions[1]["parameters"] is None
+    # A model answering in the wire format parses back into the typed object.
+    parsed = LLMReport.model_validate({"summary": "s", "confidence": 0.4, "timeline": [], "facts": [], "assumptions": [], "uncertainties": [], "hypotheses": [], "nextSteps": [], "recommendedActions": [{"type": "scale_service", "title": "Scale out api", "description": "Add replicas", "risk": "LOW", "serviceSlug": "api", "parameters": {"replicas": 6}, "evidenceRefs": []}]})
+    assert parsed.recommended_actions[0].parameters.replicas == 6

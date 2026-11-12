@@ -125,6 +125,21 @@ class HypothesisOut(CamelModel):
     gaps: list[str] = Field(default_factory=list, description="Evidence that would confirm or refute it")
 
 
+class RemediationParameters(CamelModel):
+    """Typed on purpose. A free-form object cannot be expressed in a strict output schema: the
+    provider receives it as an empty object and the model can then supply no parameters at all."""
+
+    deployment_id: str | None = Field(default=None, description="For rollback_deployment: sourceId of the deployment evidence being rolled back")
+    from_version: str | None = Field(default=None, description="Version currently running")
+    to_version: str | None = Field(default=None, description="Version to return to")
+    feature_flag: str | None = Field(default=None, description="For toggle_feature_flag: the flag name")
+    enabled: bool | None = Field(default=None, description="For toggle_feature_flag: desired state")
+    replicas: int | None = Field(default=None, description="For scale_service: desired replica count")
+    config_key: str | None = Field(default=None, description="For config_change: the setting to change")
+    config_value: str | None = Field(default=None, description="For config_change: the new value")
+    runbook: str | None = Field(default=None, description="For run_runbook: title of the runbook to follow")
+
+
 class RecommendedAction(CamelModel):
     type: RemediationType
     title: str
@@ -132,7 +147,7 @@ class RecommendedAction(CamelModel):
     rationale: str | None = None
     risk: Literal["LOW", "MEDIUM", "HIGH"] = "MEDIUM"
     service_slug: str | None = None
-    parameters: dict[str, Any] | None = None
+    parameters: RemediationParameters | None = None
     evidence_refs: list[str] = Field(default_factory=list)
 
 
@@ -150,7 +165,12 @@ class InvestigationReport(CamelModel):
     recommended_actions: list[RecommendedAction] = Field(default_factory=list)
 
     def wire(self) -> dict[str, Any]:
-        return self.model_dump(by_alias=True)
+        data = self.model_dump(by_alias=True)
+        # Send only the parameters that were actually set.
+        for action in data["recommendedActions"]:
+            if action.get("parameters") is not None:
+                action["parameters"] = {k: v for k, v in action["parameters"].items() if v is not None} or None
+        return data
 
 
 class LLMReport(CamelModel):
