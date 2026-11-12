@@ -141,8 +141,10 @@ export async function searchKnowledge(
       if (by === 'vector' && similarity !== undefined) hit.similarity = Math.round(similarity * 1000) / 1000;
       merged.set(row.chunkId, hit);
     });
-  // Weak vector matches add noise; require a minimal similarity unless keywords agree.
-  add(vectorRows.filter((r) => (r.similarity ?? 0) >= 0.2), 'vector');
+  // Weak vector matches add noise. Take those above a floor, and always let a vector match
+  // reinforce a chunk that the keyword ranking also found.
+  const keywordIds = new Set(keywordRows.map((r) => r.chunkId));
+  add(vectorRows.filter((r) => (r.similarity ?? 0) >= 0.15 || keywordIds.has(r.chunkId)), 'vector');
   add(keywordRows, 'keyword');
   const hits = [...merged.values()].sort((a, b) => b.score - a.score).slice(0, limit).map((h) => ({ ...h, score: Math.round(h.score * 10_000) / 10_000 }));
   return { mode: note ? 'keyword' : 'hybrid', hits, note };
