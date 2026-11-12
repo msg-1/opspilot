@@ -32,5 +32,9 @@
   },
   "devDependencies": {
     "concurrently": "^9.1.2"
+  },
+  "overrides": {
+    "deepmerge-ts": "8.0.2",
+    "postcss": "8.5.32"
   }
 }

@@ -104,9 +104,8 @@ jobs:
         with: { node-version: 22, cache: npm }
       - run: npm ci
       - run: npm run build
-      # Fails on critical advisories in shipped dependencies. Raise to "high" once the
-      # remaining major upgrades are done (docs/engineering-audit.md, H8).
-      - run: npm audit --omit=dev --audit-level=critical
+      # Fails on high or critical advisories in shipped dependencies.
+      - run: npm audit --omit=dev --audit-level=high
       - name: Container images
         run: |
           cp .env.example .env
