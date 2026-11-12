@@ -51,7 +51,7 @@ export const reportSchema = z.object({
         rationale: z.string().max(5000).optional().nullable(),
         risk: z.enum(['LOW', 'MEDIUM', 'HIGH']).default('MEDIUM'),
         serviceSlug: z.string().optional().nullable(),
-        parameters: z.record(z.unknown()).optional().nullable(),
+        parameters: z.record(z.string(), z.unknown()).optional().nullable(),
         evidenceRefs: refs,
       }),
     )

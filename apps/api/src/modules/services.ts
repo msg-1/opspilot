@@ -344,7 +344,7 @@ export const serviceEventBody = z.object({
   title: z.string().trim().min(2).max(200),
   details: z.string().trim().max(4000).nullable().optional(),
   actor: z.string().trim().max(120).nullable().optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
   occurredAt: z.coerce.date().optional(),
 });
 

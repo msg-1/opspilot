@@ -31,7 +31,7 @@ export const remediationInput = z.object({
   incidentId: z.string().nullable().optional(),
   investigationId: z.string().nullable().optional(),
   serviceId: z.string().nullable().optional(),
-  parameters: z.record(z.unknown()).optional(),
+  parameters: z.record(z.string(), z.unknown()).optional(),
 });
 
 async function serviceNames(ids: (string | null)[]) {

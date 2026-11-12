@@ -46,12 +46,12 @@ export const param = (value: string | string[] | undefined): string => {
 };
 
 /** Comma-separated list where every item must be one of the allowed values (400 otherwise). */
-export const csvEnum = <T extends string>(values: readonly [T, ...T[]]) =>
+export const csvEnum = <T extends string>(values: readonly T[]) =>
   z
     .string()
     .optional()
     .transform((v) => (v ? v.split(',').map((s) => s.trim()).filter(Boolean) : undefined))
-    .pipe(z.array(z.enum(values)).optional());
+    .pipe(z.array(z.enum(values as [T, ...T[]])).optional());
 
 /** A link that will be rendered or fetched: http and https only (no javascript:, data:, file:). */
 export const httpUrl = z

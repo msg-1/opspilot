@@ -247,7 +247,7 @@ monitoringRouter.get('/overview', requirePermission('read'), async (req, res) =>
 
 monitoringRouter.get('/series', requirePermission('read'), async (req, res) => {
   const { organizationId } = authOf(req);
-  const q = z.object({ service: z.string(), metric: z.string(), from: timeParam.default('6h'), to: timeParam.optional() }).parse(req.query);
+  const q = z.object({ service: z.string(), metric: z.string(), from: timeParam.prefault('6h'), to: timeParam.optional() }).parse(req.query);
   const to = q.to ?? new Date();
   assertRange(q.from, to);
   const service = await requireService(organizationId, q.service);
