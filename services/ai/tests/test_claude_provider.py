@@ -110,6 +110,7 @@ async def test_full_investigation_through_the_claude_provider_with_a_mocked_api(
     assert report.recommended_actions[0].parameters.to_version == "v4.1.9"
     final = events[-1]
     assert final["engine"] == {"mode": "llm", "provider": "anthropic", "model": "claude-haiku-5-5", "attemptedProvider": "anthropic"}
+    assert provider.served_model == "claude-haiku-5-5"  # taken from the API response, not from configuration
 
     # Requests: plan, two agent rounds, report. Model and limits come from configuration.
     bodies = [r["body"] for r in api.requests]

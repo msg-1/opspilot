@@ -46,7 +46,7 @@ async def run(verify_only: bool) -> int:
         return 1
     u = provider.usage
     cost = f"${u.cost_usd:.6f}" if u.cost_known else "unknown (model not in price table)"
-    print(f"Inference: OK — model answered: {str(reply.content).strip()[:80]!r}")
+    print(f"Inference: OK — served by model {provider.served_model!r}; answer: {str(reply.content).strip()[:80]!r}")
     print(f"Usage: {u.input_tokens} input + {u.output_tokens} output tokens, {u.latency_ms} ms, estimated cost {cost}")
     return 0
 

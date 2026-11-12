@@ -358,6 +358,6 @@ async def run_investigation(ctx: Context) -> InvestigationReport:
     usage = ctx.provider.usage.wire() if ctx.provider else {"inputTokens": 0, "outputTokens": 0, "cacheReadTokens": 0, "cacheWriteTokens": 0, "llmCalls": 0, "llmLatencyMs": 0, "estimatedCostUsd": 0}
     # The engine that actually wrote the report, which differs from the configured provider when
     # the model failed and rule-based analysis took over.
-    engine = {"mode": report.analysis_mode, "provider": ctx.provider.name if ctx.provider and report.analysis_mode != "heuristic" else "heuristic", "model": ctx.provider.model if ctx.provider and report.analysis_mode != "heuristic" else None, "attemptedProvider": ctx.provider.name if ctx.provider else ctx.unavailable_provider}
+    engine = {"mode": report.analysis_mode, "provider": ctx.provider.name if ctx.provider and report.analysis_mode != "heuristic" else "heuristic", "model": (ctx.provider.served_model or ctx.provider.model) if ctx.provider and report.analysis_mode != "heuristic" else None, "attemptedProvider": ctx.provider.name if ctx.provider else ctx.unavailable_provider}
     await ctx.emit({"type": "final", "report": report.wire(), "usage": usage, "engine": engine})
     return report
