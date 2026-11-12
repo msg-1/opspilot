@@ -144,7 +144,22 @@ authRouter.post('/register', limiter, async (req, res) => {
   res.status(201).json({ ...(await sessionPayload(user.id, org.id)), accessToken });
 });
 
-authRouter.post('/login', limiter, async (req, res) => {
+/**
+ * Per-account throttle. The address-based limiter above can be sidestepped by anyone who can
+ * vary their apparent address; this one is keyed by the account under attack, so it cannot.
+ * Successful sign-ins do not count, so a legitimate user is not locked out by their own use.
+ */
+const accountLimiter = rateLimit({
+  windowMs: 15 * 60_000,
+  limit: 10,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  keyGenerator: (req) => `login:${String((req.body as { email?: unknown } | undefined)?.email ?? '').trim().toLowerCase().slice(0, 254)}`,
+  message: { error: { code: 'rate_limited', message: 'Too many failed sign-in attempts for this account. Try again in 15 minutes.' } },
+});
+
+authRouter.post('/login', limiter, accountLimiter, async (req, res) => {
   const body = loginBody.parse(req.body);
   const user = await prisma.user.findUnique({
     where: { email: body.email },

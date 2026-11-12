@@ -4,7 +4,8 @@ import { z } from 'zod';
 import { audit } from '../lib/audit';
 import { decrypt, hmacSha256Hex } from '../lib/crypto';
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors';
-import { csv, paged, paginate, paginationQuery, param } from '../lib/http';
+import { csvEnum, paged, paginate, paginationQuery, param } from '../lib/http';
+import { assertSafeOutboundUrl } from '../lib/netguard';
 import { notifyRoles, notifyUsers } from '../lib/notify';
 import { prisma } from '../lib/prisma';
 import { authOf, can, requirePermission, requireUser, userOf } from '../middleware/auth';
@@ -140,18 +141,23 @@ async function execute(action: RemediationAction, operator: { userId: string; la
   });
   const secret = settings.remediationWebhookSecretEncrypted ? decrypt(settings.remediationWebhookSecretEncrypted) : null;
   try {
-    const res = await fetch(settings.remediationWebhookUrl, {
+    // Re-validated at call time: the host may resolve differently than when it was saved.
+    const target = await assertSafeOutboundUrl(settings.remediationWebhookUrl);
+    const res = await fetch(target, {
       method: 'POST',
+      redirect: 'manual',
       headers: { 'content-type': 'application/json', 'user-agent': 'opspilot', ...(secret ? { 'x-opspilot-signature': `sha256=${hmacSha256Hex(secret, body)}` } : {}) },
       body,
       signal: AbortSignal.timeout(30_000),
     });
-    const text = (await res.text().catch(() => '')).slice(0, 2000);
+    // The response body is deliberately not stored: it would let a webhook owner read
+    // whatever the server can reach.
+    await res.body?.cancel().catch(() => undefined);
     return {
       mode: 'webhook',
       success: res.ok,
       summary: res.ok ? `Dispatched to remediation webhook (HTTP ${res.status}).` : `Remediation webhook rejected the request (HTTP ${res.status}).`,
-      detail: { status: res.status, response: text },
+      detail: { status: res.status },
     };
   } catch (err) {
     return { mode: 'webhook', success: false, summary: `Remediation webhook could not be reached: ${(err as Error).message}` };
@@ -207,10 +213,10 @@ export const remediationRouter = Router();
 
 remediationRouter.get('/', requirePermission('read'), async (req, res) => {
   const { organizationId } = authOf(req);
-  const q = paginationQuery.extend({ status: csv, incidentId: z.string().optional(), investigationId: z.string().optional() }).parse(req.query);
+  const q = paginationQuery.extend({ status: csvEnum(['PROPOSED', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'EXECUTING', 'EXECUTED', 'FAILED', 'CANCELLED']), incidentId: z.string().optional(), investigationId: z.string().optional() }).parse(req.query);
   const where: Prisma.RemediationActionWhereInput = {
     organizationId,
-    ...(q.status ? { status: { in: q.status as never } } : {}),
+    ...(q.status ? { status: { in: q.status } } : {}),
     ...(q.incidentId ? { incidentId: q.incidentId } : {}),
     ...(q.investigationId ? { investigationId: q.investigationId } : {}),
   };

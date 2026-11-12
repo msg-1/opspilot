@@ -4,7 +4,8 @@ import { z } from 'zod';
 import { audit } from '../lib/audit';
 import { encrypt, randomToken, sha256 } from '../lib/crypto';
 import { badRequest, forbidden, notFound } from '../lib/errors';
-import { paged, paginate, paginationQuery, param, timeParam } from '../lib/http';
+import { csvCell, httpUrl, paged, paginate, paginationQuery, param, timeParam } from '../lib/http';
+import { assertSafeOutboundUrl } from '../lib/netguard';
 import { API_KEY_SCOPES, roleRank } from '../lib/permissions';
 import { prisma } from '../lib/prisma';
 import { slugify } from '../lib/slug';
@@ -207,7 +208,7 @@ const settingsBody = z.object({
   allowSelfApproval: z.boolean().optional(),
   logRetentionDays: z.number().int().min(1).max(365).optional(),
   redactLogs: z.boolean().optional(),
-  remediationWebhookUrl: z.string().url().max(500).nullable().optional(),
+  remediationWebhookUrl: httpUrl.nullable().optional(),
   remediationWebhookSecret: z.string().min(16).max(200).nullable().optional(),
 });
 
@@ -231,6 +232,7 @@ settingsRouter.get('/', requirePermission('read'), async (req, res) => {
 settingsRouter.patch('/', requirePermission('settings:manage'), async (req, res) => {
   const { organizationId } = authOf(req);
   const { name, remediationWebhookSecret, ...rest } = settingsBody.parse(req.body);
+  if (rest.remediationWebhookUrl) await assertSafeOutboundUrl(rest.remediationWebhookUrl);
   await getSettings(organizationId);
   await prisma.$transaction([
     prisma.organizationSettings.update({
@@ -327,12 +329,11 @@ auditRouter.get('/', requirePermission('audit:read'), async (req, res) => {
   };
   if (q.format === 'csv') {
     const rows = await prisma.auditLog.findMany({ where, orderBy: { createdAt: 'desc' }, take: 5000 });
-    const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
     const lines = [
       'timestamp,actor_type,actor,action,resource_type,resource_id,ip,metadata',
       ...rows.map((r) =>
         [r.createdAt.toISOString(), r.actorType, r.actorLabel, r.action, r.resourceType, r.resourceId, r.ip, r.metadata ? JSON.stringify(r.metadata) : '']
-          .map(esc)
+          .map(csvCell)
           .join(','),
       ),
     ];

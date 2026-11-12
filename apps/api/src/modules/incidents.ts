@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { audit } from '../lib/audit';
 import { badRequest, notFound } from '../lib/errors';
-import { csv, paged, paginate, paginationQuery, param, timeParam } from '../lib/http';
+import { csvEnum, paged, paginate, paginationQuery, param, timeParam } from '../lib/http';
 import { notifyUsers } from '../lib/notify';
 import { prisma } from '../lib/prisma';
 import { type AuthContext, authOf, requirePermission } from '../middleware/auth';
@@ -42,8 +42,8 @@ const updateBody = z.object({
 
 const listQuery = paginationQuery.extend({
   q: z.string().trim().optional(),
-  status: csv,
-  severity: csv,
+  status: csvEnum(status.options),
+  severity: csvEnum(severity.options),
   service: z.string().optional(),
   assigneeId: z.string().optional(),
   active: z.enum(['true', 'false']).optional(),
@@ -177,8 +177,8 @@ incidentsRouter.get('/', requirePermission('read'), async (req, res) => {
           ],
         }
       : {}),
-    ...(q.status ? { status: { in: q.status as IncidentStatus[] } } : q.active === 'true' ? { status: { in: ACTIVE } } : q.active === 'false' ? { status: { notIn: ACTIVE } } : {}),
-    ...(q.severity ? { severity: { in: q.severity as never } } : {}),
+    ...(q.status ? { status: { in: q.status } } : q.active === 'true' ? { status: { in: ACTIVE } } : q.active === 'false' ? { status: { notIn: ACTIVE } } : {}),
+    ...(q.severity ? { severity: { in: q.severity } } : {}),
     ...(q.service ? { services: { some: { service: { OR: [{ id: q.service }, { slug: q.service }] } } } } : {}),
     ...(q.assigneeId ? { assigneeId: q.assigneeId } : {}),
     ...(q.from || q.to ? { startedAt: { gte: q.from, lte: q.to } } : {}),

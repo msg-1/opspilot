@@ -44,3 +44,25 @@ export const param = (value: string | string[] | undefined): string => {
   if (typeof value !== 'string' || !value) throw badRequest('Missing path parameter');
   return value;
 };
+
+/** Comma-separated list where every item must be one of the allowed values (400 otherwise). */
+export const csvEnum = <T extends string>(values: readonly [T, ...T[]]) =>
+  z
+    .string()
+    .optional()
+    .transform((v) => (v ? v.split(',').map((s) => s.trim()).filter(Boolean) : undefined))
+    .pipe(z.array(z.enum(values)).optional());
+
+/** A link that will be rendered or fetched: http and https only (no javascript:, data:, file:). */
+export const httpUrl = z
+  .string()
+  .url()
+  .max(500)
+  .refine((u) => /^https?:\/\//i.test(u), 'Only http and https URLs are allowed');
+
+/** One CSV cell. Values that a spreadsheet would run as a formula are neutralised. */
+export const csvCell = (value: unknown): string => {
+  const text = String(value ?? '');
+  const safe = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
+  return `"${safe.replace(/"/g, '""')}"`;
+};

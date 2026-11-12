@@ -5,7 +5,7 @@ import { env } from '../config/env';
 import { type InvestigationEvent, aiService } from '../integrations/aiService';
 import { audit, writeAudit } from '../lib/audit';
 import { conflict, notFound } from '../lib/errors';
-import { csv, paged, paginate, paginationQuery, param } from '../lib/http';
+import { csvEnum, paged, paginate, paginationQuery, param } from '../lib/http';
 import { logger } from '../lib/logger';
 import { investigationsTotal } from '../lib/metrics';
 import { notifyUsers } from '../lib/notify';
@@ -340,8 +340,8 @@ const listSelect = {
 
 investigationsRouter.get('/', requirePermission('read'), async (req, res) => {
   const { organizationId } = authOf(req);
-  const q = paginationQuery.extend({ status: csv, incidentId: z.string().optional() }).parse(req.query);
-  const where: Prisma.InvestigationWhereInput = { organizationId, ...(q.status ? { status: { in: q.status as never } } : {}), ...(q.incidentId ? { incidentId: q.incidentId } : {}) };
+  const q = paginationQuery.extend({ status: csvEnum(['QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED']), incidentId: z.string().optional() }).parse(req.query);
+  const where: Prisma.InvestigationWhereInput = { organizationId, ...(q.status ? { status: { in: q.status } } : {}), ...(q.incidentId ? { incidentId: q.incidentId } : {}) };
   const [rows, total] = await Promise.all([
     prisma.investigation.findMany({ where, orderBy: { createdAt: 'desc' }, ...paginate(q), select: listSelect }),
     prisma.investigation.count({ where }),

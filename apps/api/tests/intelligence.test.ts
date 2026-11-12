@@ -40,6 +40,7 @@ vi.mock('../src/integrations/aiService', () => {
   };
 });
 
+import { netConfig } from '../src/lib/netguard';
 import { githubConfig } from '../src/modules/github';
 import { api, createApiKey, createOrg, createService, minutesAgo, prisma } from './helpers';
 
@@ -289,6 +290,7 @@ describe('remediation approvals', () => {
     let received: { headers: Record<string, unknown>; body: string }[] = [];
     let status = 200;
     beforeAll(async () => {
+      netConfig.allowPrivate = true; // the stand-in webhook listens on 127.0.0.1
       server = createServer((req, res) => {
         let body = '';
         req.on('data', (c) => (body += c));
@@ -299,7 +301,37 @@ describe('remediation approvals', () => {
       });
       await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
     });
-    afterAll(() => new Promise((r) => server.close(r)));
+    afterAll(async () => {
+      netConfig.allowPrivate = false;
+      await new Promise((r) => server.close(r));
+    });
+
+    it('refuses private, loopback and metadata addresses, and re-checks at execution time', async () => {
+      const org = await createOrg();
+      const approver = await org.member('ADMIN');
+      const local = `http://127.0.0.1:${(server.address() as AddressInfo).port}/hook`;
+      netConfig.allowPrivate = false;
+      for (const url of [local, 'http://169.254.169.254/latest/meta-data/', 'http://10.0.0.5/x', 'http://[::1]:8000/', 'http://user:pw@93.184.216.34/']) {
+        const res = await org.owner.patch('/api/v1/settings').send({ remediationWebhookUrl: url });
+        expect(res.status, url).toBe(400);
+      }
+      expect((await org.owner.patch('/api/v1/settings').send({ remediationWebhookUrl: 'ftp://93.184.216.34/x' })).status).toBe(400);
+      expect((await org.owner.patch('/api/v1/settings').send({ remediationWebhookUrl: 'https://93.184.216.34/hook' })).status).toBe(200);
+
+      // A URL saved while private targets were allowed must still be refused when they are not.
+      netConfig.allowPrivate = true;
+      await org.owner.patch('/api/v1/settings').send({ remediationWebhookUrl: local }).expect(200);
+      const action = (await propose(org.owner)).body;
+      await org.owner.post(`/api/v1/remediations/${action.id}/request-approval`);
+      await approver.agent.post(`/api/v1/remediations/${action.id}/approve`);
+      netConfig.allowPrivate = false;
+      received = [];
+      const result = (await org.owner.post(`/api/v1/remediations/${action.id}/execute`).send({})).body;
+      expect(result.status).toBe('FAILED');
+      expect(result.executionResult.summary).toContain('private, loopback or link-local');
+      expect(received).toHaveLength(0);
+      netConfig.allowPrivate = true;
+    });
 
     it('dispatches a signed request, records failures, and allows retry', async () => {
       const org = await createOrg();
@@ -319,7 +351,10 @@ describe('remediation approvals', () => {
       expect(await prisma.serviceEvent.count({ where: { organizationId: org.organizationId } })).toBe(0);
       status = 200;
       await org.owner.post(`${base}/retry`).expect(200);
-      expect((await org.owner.post(`${base}/execute`).send({})).body.status).toBe('EXECUTED');
+      const executed = (await org.owner.post(`${base}/execute`).send({})).body;
+      expect(executed.status).toBe('EXECUTED');
+      // Only the status code is kept: the webhook's response body is never stored or returned.
+      expect(executed.executionResult.detail).toEqual({ status: 200 });
       const last = received.at(-1)!;
       expect(last.headers['x-opspilot-signature']).toBe(`sha256=${createHmac('sha256', 'webhook-secret-123456').update(last.body).digest('hex')}`);
       expect(JSON.parse(last.body)).toMatchObject({ event: 'remediation.execute', type: 'restart_service', parameters: { replicas: 3 } });
