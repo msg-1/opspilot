@@ -36,6 +36,10 @@ const schema = z.object({
   AI_DAILY_COST_LIMIT_USD: z.coerce.number().min(0).default(5),
   // Run queue jobs in-process instead of through Redis (used by the test suite)
   QUEUE_INLINE: bool,
+  // Redis key prefix for BullMQ. Processes that share a Redis but must not share queues use different prefixes.
+  QUEUE_PREFIX: z.string().regex(/^[A-Za-z0-9:_-]+$/).default('bull'),
+  // Base delay for exponential retry backoff of failed jobs
+  QUEUE_BACKOFF_MS: z.coerce.number().int().min(1).default(5000),
   BCRYPT_ROUNDS: z.coerce.number().int().min(4).max(15).default(12),
 });
 

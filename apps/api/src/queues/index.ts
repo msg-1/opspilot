@@ -74,7 +74,7 @@ function queueFor(name: JobName, forWorker = false) {
   const key = (forWorker ? `worker:${name}` : name) as JobName;
   let queue = queues.get(key);
   if (!queue) {
-    queue = new Queue(name, { connection: forWorker ? redis() : producer() });
+    queue = new Queue(name, { connection: forWorker ? redis() : producer(), prefix: env.QUEUE_PREFIX });
     queue.on('error', (err) => logger.debug({ err: err.message, queue: name }, 'queue connection error'));
     queues.set(key, queue);
   }
@@ -107,7 +107,7 @@ export async function enqueue<N extends JobName>(name: N, data: JobPayloads[N], 
     await Promise.race([
       queueFor(name).add(name, data, {
         attempts: CONFIG[name].attempts,
-        backoff: { type: 'exponential', delay: 5000 },
+        backoff: { type: 'exponential', delay: env.QUEUE_BACKOFF_MS },
         removeOnComplete: { age: 24 * 3600, count: 1000 },
         removeOnFail: { age: 7 * 24 * 3600 },
         ...options,
@@ -120,16 +120,21 @@ export async function enqueue<N extends JobName>(name: N, data: JobPayloads[N], 
   }
 }
 
-/** Started only by the worker process (src/worker.ts). */
-export async function startWorkers() {
+/**
+ * Started only by the worker process (src/worker.ts). `schedulers: false` leaves out the repeating
+ * jobs, for callers that only want the on-demand queues served.
+ */
+export async function startWorkers({ schedulers = true }: { schedulers?: boolean } = {}) {
   const workers = (Object.keys(CONFIG) as JobName[]).map((name) => {
-    const worker = new Worker(name, async (job) => run(name, job.data), { connection: redis(), concurrency: CONFIG[name].concurrency });
+    const worker = new Worker(name, async (job) => run(name, job.data), { connection: redis(), concurrency: CONFIG[name].concurrency, prefix: env.QUEUE_PREFIX });
     worker.on('failed', (job, err) => logger.error({ err, queue: name, jobId: job?.id }, 'job failed'));
     worker.on('completed', (job) => logger.debug({ queue: name, jobId: job.id }, 'job completed'));
     return worker;
   });
-  await queueFor('alert-eval', true).upsertJobScheduler('alert-eval-every-minute', { every: 60_000 }, { name: 'alert-eval', data: {} });
-  await queueFor('log-retention', true).upsertJobScheduler('log-retention-hourly', { every: 3_600_000 }, { name: 'log-retention', data: {} });
+  if (schedulers) {
+    await queueFor('alert-eval', true).upsertJobScheduler('alert-eval-every-minute', { every: 60_000 }, { name: 'alert-eval', data: {} });
+    await queueFor('log-retention', true).upsertJobScheduler('log-retention-hourly', { every: 3_600_000 }, { name: 'log-retention', data: {} });
+  }
   logger.info({ queues: Object.keys(CONFIG) }, 'workers started');
   return async () => {
     await Promise.all(workers.map((w) => w.close()));
