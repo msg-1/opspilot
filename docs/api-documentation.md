@@ -120,7 +120,9 @@ API key scopes: `ingest:logs`, `ingest:deployments`, `ingest:events`, `ingest:me
 ### Tool API — `/tools` (agent, MCP)
 Read-only and compact. Accepts a user session, an API key with `tools:read`, or the investigation's tool token.
 
-`GET /services`, `/services/:ref`, `/incidents`, `/incidents/:id/context`, `/logs/search`, `/logs/patterns`, `/logs/anomalies`, `/logs/histogram`, `/deployments`, `/code-changes`, `/service-events`, `/metrics`; `POST /knowledge/search`.
+`GET /services`, `/services/:ref`, `/incidents`, `/incidents/:id/context`, `/logs/search`, `/logs/patterns`, `/logs/anomalies`, `/logs/histogram`, `/deployments`, `/deployment-context`, `/code-changes`, `/service-events`, `/metrics`; `POST /knowledge/search`.
+
+`GET /deployment-context?service=<slug|id>[&deploymentId=][&environment=]` answers the questions asked about a deployment in one call: what it replaced (`previousSuccessful`, skipping failed releases and with no age limit), the ready-made `rollbackTarget`, `changes` (commits and merged pull requests between the two deployments, the deployed commit first), `errorLogs` before and after it over an equal window, `incidentsAfter`, `alreadyRolledBack` and `recentDeployments`. Without `deploymentId` it describes the service's latest deployment; `deployment` is `null` when there is none.
 
 ## AI service (internal)
 

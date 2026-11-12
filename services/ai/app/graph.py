@@ -39,7 +39,7 @@ SYSTEM_PROMPT = """You are OpsPilot's incident investigator. You help on-call en
 How to work:
 - Start from what changed. Most incidents follow a deployment, a configuration or flag change, a dependency failure, or a traffic shift. Establish when the problem started (logs, metrics), then look at what happened just before it.
 - Check alternatives before settling. If one change looks guilty, also look at the other changes in the window and at upstream dependencies, and say why they fit less well.
-- Read the content of changes, not only their timing. A pull request description or changed file that matches the failure mode is much stronger evidence than proximity in time.
+- Read the content of changes, not only their timing. A pull request description or changed file that matches the failure mode is much stronger evidence than proximity in time. For a deployment that precedes the problem, get_deployment_context returns what it shipped, the error rate before and after it, and the version it replaced.
 - Use the knowledge base for runbooks and past postmortems that describe the same symptoms.
 - Call several tools in parallel when the calls are independent. Stop gathering when further calls would not change your conclusion.
 
@@ -62,7 +62,7 @@ REPORT_INSTRUCTIONS = """Write the investigation report as structured output.
 - timeline: key events in chronological order with ISO timestamps taken from the evidence.
 - uncertainties: what you could not check or what the data does not show.
 - nextSteps: concrete checks for a human, most valuable first.
-- recommendedActions: 0 to 3 actions a human could approve. Use rollback_deployment only when a specific deployment is implicated: set deploymentId to the sourceId of that deployment's evidence item, toVersion to the version that was running before it, and serviceSlug. For other action types leave deploymentId and toVersion as empty strings. Prefer the least risky action that would mitigate. Cite evidence for each.
+- recommendedActions: 0 to 3 actions a human could approve. Use rollback_deployment only when a specific deployment is implicated: set deploymentId to the sourceId of that deployment's evidence item, toVersion to the version that was running before it (get_deployment_context gives both as rollbackTarget), and serviceSlug. Do not recommend a rollback you cannot give a target version for. For other action types leave deploymentId and toVersion as empty strings. Prefer the least risky action that would mitigate. Cite evidence for each.
 
 Use only evidence references from the catalogue below."""
 
@@ -264,6 +264,9 @@ def build_graph(ctx: Context):
         wide = list(dict.fromkeys(scope + upstream))
         await run_tool(ctx, "list_deployments", {"services": wide, "from_time": iso(start - timedelta(days=7)), "to_time": w_to, "limit": 30}, "List deployments in the week before the problem")
         await run_tool(ctx, "get_code_changes", {"services": wide, "from_time": day_before, "to_time": w_to}, "Retrieve commits and pull requests shipped recently")
+        # For each service in scope, what its latest deployment shipped and replaced.
+        for slug in scope[:2]:
+            await run_tool(ctx, "get_deployment_context", {"service": slug}, f"Examine the latest deployment of {slug} and its rollback target")
         await run_tool(ctx, "list_service_events", {"services": wide, "from_time": day_before, "to_time": w_to}, "List config, flag, scaling and restart events")
         for slug in scope[:4]:
             await run_tool(ctx, "get_metrics", {"service": slug, "from_time": w_from, "to_time": w_to}, f"Compare metrics for {slug} with the preceding window")

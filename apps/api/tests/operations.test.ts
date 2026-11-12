@@ -172,3 +172,68 @@ describe('monitoring', () => {
     await org.owner.delete(`/api/v1/monitoring/alert-rules/${rule.id}`).expect(204);
   });
 });
+
+describe('deployment intelligence', () => {
+  it('reports what a deployment replaced, what it shipped and what happened after it', async () => {
+    const org = await createOrg();
+    const other = await createOrg();
+    const service = await createService(org.owner, 'Checkout');
+    await createService(other.owner, 'Checkout');
+    const key = await createApiKey(org.owner, ['tools:read']);
+    const ctx = (query: string) => api().get(`/api/v1/tools/deployment-context?${query}`).set('x-api-key', key);
+
+    expect((await ctx('service=checkout')).body).toMatchObject({ deployment: null, service: 'checkout' });
+
+    // The previous good version is nine days old: far outside any window an investigator would guess.
+    const sha = 'c0ffee1234567890abcdef';
+    const repo = await prisma.repository.create({ data: { organizationId: org.organizationId, fullName: 'acme/checkout', serviceId: service.id } });
+    await org.owner.post('/api/v1/deployments').send({ service: 'checkout', version: 'v1.0.0', startedAt: minutesAgo(60 * 24 * 9) }).expect(201);
+    await org.owner.post('/api/v1/deployments').send({ service: 'checkout', version: 'v1.1.0-broken', status: 'FAILED', startedAt: minutesAgo(60 * 24 * 2) }).expect(201);
+    const current = (await org.owner.post('/api/v1/deployments').send({ service: 'checkout', version: 'v1.2.0', commitSha: sha, startedAt: minutesAgo(20) })).body;
+    await prisma.commit.createMany({
+      data: [
+        { repositoryId: repo.id, sha, message: 'Lower DB pool size (#12)', authorLogin: 'dev1', committedAt: new Date(Date.now() - 5 * 3600_000), filesChanged: [{ filename: 'config/pool.yaml' }] },
+        { repositoryId: repo.id, sha: 'bbbb222233334444', message: 'Unrelated copy change', authorLogin: 'dev2', committedAt: new Date(Date.now() - 30 * 3600_000) },
+        { repositoryId: repo.id, sha: 'aaaa111122223333', message: 'Shipped long ago in v1.0.0', authorLogin: 'dev2', committedAt: new Date(Date.now() - 12 * 86_400_000) },
+      ],
+    });
+    await prisma.pullRequest.create({ data: { repositoryId: repo.id, number: 12, title: 'Lower DB pool size', state: 'merged', mergeCommitSha: sha, labels: ['config'], openedAt: new Date(Date.now() - 6 * 3600_000), mergedAt: new Date(Date.now() - 5 * 3600_000) } });
+    await org.owner.post('/api/v1/logs').send({
+      service: 'checkout',
+      logs: [
+        { level: 'error', message: 'background noise', timestamp: minutesAgo(35) },
+        ...Array.from({ length: 12 }, (_, i) => ({ level: 'error', message: `timeout acquiring connection ${i}`, timestamp: minutesAgo(15 - i) })),
+        { level: 'info', message: 'not an error', timestamp: minutesAgo(10) },
+      ],
+    });
+    const incident = (await org.owner.post('/api/v1/incidents').send({ title: 'Checkout failing after deploy', serviceIds: [service.id], startedAt: minutesAgo(12) })).body;
+
+    const body = (await ctx('service=checkout')).body;
+    expect(body.deployment).toMatchObject({ id: current.id, version: 'v1.2.0' });
+    expect(body).toMatchObject({ isLatest: true, alreadyRolledBack: false });
+    // The failed release in between is skipped: the rollback target is the last one that worked.
+    expect(body.previousSuccessful.version).toBe('v1.0.0');
+    expect(body.rollbackTarget).toMatchObject({ deploymentId: current.id, fromVersion: 'v1.2.0', toVersion: 'v1.0.0' });
+    // Everything merged since the previous good deployment, with the deployed commit first; nothing older.
+    expect(body.changes.commits.map((c: { message: string }) => c.message)).toEqual(['Lower DB pool size (#12)', 'Unrelated copy change']);
+    expect(body.changes.commits[0].files).toEqual(['config/pool.yaml']);
+    expect(body.changes.pullRequests[0]).toMatchObject({ number: 12, labels: ['config'] });
+    expect(body.errorLogs).toMatchObject({ before: 1, after: 12, windowMinutes: 20 });
+    expect(body.errorLogs.afterPerMinute).toBeGreaterThan(body.errorLogs.beforePerMinute * 10);
+    expect(body.incidentsAfter).toEqual([expect.objectContaining({ key: incident.key })]);
+    expect(body.recentDeployments.map((d: { version: string }) => d.version)).toEqual(['v1.2.0', 'v1.1.0-broken', 'v1.0.0']);
+
+    // A specific earlier deployment can be examined too, and a first deployment has no rollback target.
+    const first = body.recentDeployments[2];
+    const earliest = (await ctx(`service=checkout&deploymentId=${first.id}`)).body;
+    expect(earliest).toMatchObject({ isLatest: false, previousSuccessful: null, rollbackTarget: null });
+    expect(earliest.changes.note).toContain('no commit SHA');
+
+    // Scoped to the caller's organisation, and read-only for viewers of the tool API only.
+    const otherKey = await createApiKey(other.owner, ['tools:read']);
+    expect((await api().get('/api/v1/tools/deployment-context?service=checkout').set('x-api-key', otherKey)).body.deployment).toBeNull();
+    expect((await api().get(`/api/v1/tools/deployment-context?service=checkout&deploymentId=${current.id}`).set('x-api-key', otherKey)).body.deployment).toBeNull();
+    expect((await ctx('service=missing')).status).toBe(404);
+    expect((await ctx('')).status).toBe(400);
+  });
+});
