@@ -79,6 +79,10 @@ class Context:
     tool_failures: list[str] = field(default_factory=list)
     #: Set when the model must not be called again in this run (bad key, no credit, budget reached)
     llm_stopped: str | None = None
+
+    def now(self) -> datetime:
+        """The investigation's notion of the present: the request's as-of time, or the real clock."""
+        return parse_time(self.request.current_time) or datetime.now(UTC)
     #: Provider that was configured but could not be used at all (for example no API key)
     unavailable_provider: str | None = None
 
@@ -145,13 +149,13 @@ def build_graph(ctx: Context):
         if not scope:
             scope = heuristics.match_services(req.question, catalogue)
         requested = (req.time_window.from_, req.time_window.to) if req.time_window else None
-        window = heuristics.default_window(req.incident.started_at if req.incident else None, req.incident.resolved_at if req.incident else None, requested)
+        window = heuristics.default_window(req.incident.started_at if req.incident else None, req.incident.resolved_at if req.incident else None, requested, ctx.now())
         return {"catalogue": catalogue, "scope": scope, "window_from": iso(window[0]), "window_to": iso(window[1]), "rounds": 0}
 
     def briefing(state: State) -> str:
         parts = [
             f"Organisation: {req.organization_name}",
-            f"Current time: {iso(datetime.now(UTC))}",
+            f"Current time: {iso(ctx.now())}",
             "Question from the engineer:\n" + guardrails.wrap_untrusted("question", req.question),
         ]
         if req.incident:
@@ -169,7 +173,7 @@ def build_graph(ctx: Context):
 
     # ── plan ──
     async def plan(state: State) -> State:
-        window = (parse_time(state["window_from"]) or datetime.now(UTC), parse_time(state["window_to"]) or datetime.now(UTC))
+        window = (parse_time(state["window_from"]) or ctx.now(), parse_time(state["window_to"]) or ctx.now())
         fallback = heuristics.build_plan(req.question, state.get("scope", []), window, req.incident is not None)
         the_plan: InvestigationPlan = fallback
         source = "standard playbook"
@@ -243,7 +247,7 @@ def build_graph(ctx: Context):
     # ── heuristic path ──
     async def collect(state: State) -> State:
         scope = list(state.get("scope", []))
-        start = parse_time(state["window_from"]) or datetime.now(UTC) - timedelta(hours=2)
+        start = parse_time(state["window_from"]) or ctx.now() - timedelta(hours=2)
         w_from, w_to = state["window_from"], state["window_to"]
         day_before = iso(start - timedelta(hours=24))
         catalogue = {s["slug"]: s for s in state.get("catalogue", [])}
@@ -273,7 +277,7 @@ def build_graph(ctx: Context):
 
     # ── analyse ──
     def heuristic_report(state: State, extra_uncertainty: str | None = None) -> InvestigationReport:
-        window = (parse_time(state["window_from"]) or datetime.now(UTC), parse_time(state["window_to"]) or datetime.now(UTC))
+        window = (parse_time(state["window_from"]) or ctx.now(), parse_time(state["window_to"]) or ctx.now())
         report = heuristics.analyse(req.question, ctx.store, scope=state.get("scope", []), window=window, incident_started=req.incident.started_at if req.incident else None, tool_failures=ctx.tool_failures)
         if extra_uncertainty:
             report.uncertainties.insert(0, extra_uncertainty)

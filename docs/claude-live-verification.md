@@ -129,6 +129,10 @@ Does not hold up, and why the headline number should not be read as model qualit
 
 ### Follow-up before evaluating again
 
+**Done since this run (no paid calls):** investigations now take an explicit as-of time, and the evaluation passes each scenario's clock, so recorded data is no longer judged against the wall clock. Actions are scored for safety (no high-risk action, no rollback or other production change unless the evidence implicates that deployment; diagnostic steps always pass). Every run saves the full report, steps, evidence and usage of each scenario under `services/ai/eval-runs/`. The scores in the table above were produced by the old harness and have not been re-measured.
+
+Original list:
+
 - Make the scenario clock relative to now, or pass the scenario's clock to the agent as the current time.
 - Score actions by safety (no rollback without an implicated deployment; nothing high-risk) rather than by exact type.
 - Save each report to disk during a run so failures can be read afterwards without paying again.

@@ -48,6 +48,10 @@ class InvestigationRequest(CamelModel):
     tool_token: str
     incident: IncidentInfo | None = None
     time_window: TimeWindow | None = None
+    # The moment the investigation is conducted "as of" (ISO-8601). Defaults to the real
+    # current time. Evaluations and replays of past incidents set it so that recorded data is
+    # not mistaken for stale data.
+    current_time: str | None = None
 
 
 class EmbeddingRequest(CamelModel):
