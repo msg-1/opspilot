@@ -1,0 +1,40 @@
+import { z } from 'zod';
+
+const bool = z
+  .enum(['true', 'false', '1', '0', ''])
+  .optional()
+  .transform((v) => v === 'true' || v === '1');
+
+const schema = z.object({
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  DATABASE_URL: z.string().min(1),
+  REDIS_URL: z.string().default('redis://localhost:6379'),
+  API_PORT: z.coerce.number().int().default(4000),
+  WEB_ORIGIN: z.string().default('http://localhost:3000'),
+  // Base URL at which the AI service can reach this API (tool calls)
+  API_URL: z.string().optional(),
+  AI_SERVICE_URL: z.string().default('http://localhost:8000'),
+  JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
+  INTERNAL_SERVICE_TOKEN: z.string().min(32, 'INTERNAL_SERVICE_TOKEN must be at least 32 characters'),
+  ENCRYPTION_KEY: z.string().regex(/^[0-9a-fA-F]{64}$/, 'ENCRYPTION_KEY must be 64 hex characters'),
+  COOKIE_SECURE: bool,
+  GITHUB_TOKEN: z.string().optional().default(''),
+  GITHUB_WEBHOOK_SECRET: z.string().optional().default(''),
+  LOG_LEVEL: z.string().default('info'),
+  OTEL_ENABLED: bool,
+  OTEL_EXPORTER_OTLP_ENDPOINT: z.string().default('http://localhost:4318'),
+  // Run queue jobs in-process instead of through Redis (used by the test suite)
+  QUEUE_INLINE: bool,
+  BCRYPT_ROUNDS: z.coerce.number().int().min(4).max(15).default(12),
+});
+
+const parsed = schema.safeParse(process.env);
+if (!parsed.success) {
+  const issues = parsed.error.issues.map((i) => `  - ${i.path.join('.')}: ${i.message}`).join('\n');
+  // Fail fast: a misconfigured process must not start.
+  throw new Error(`Invalid environment configuration:\n${issues}\nSee .env.example.`);
+}
+
+export const env = parsed.data;
+export const isProd = env.NODE_ENV === 'production';
+export const isTest = env.NODE_ENV === 'test';

@@ -1,0 +1,33 @@
+{
+  "name": "opspilot",
+  "private": true,
+  "version": "0.1.0",
+  "description": "OpsPilot — AI-powered engineering operations and incident investigation platform",
+  "workspaces": [
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "infra:up": "docker compose up -d postgres redis",
+    "infra:down": "docker compose stop postgres redis",
+    "obs:up": "docker compose --profile observability up -d",
+    "db:migrate": "npm run db:migrate -w @opspilot/api",
+    "db:seed": "npm run db:seed -w @opspilot/api",
+    "dev:api": "npm run dev -w @opspilot/api",
+    "dev:worker": "npm run dev:worker -w @opspilot/api",
+    "dev:web": "npm run dev -w @opspilot/web",
+    "dev:ai": "cd services/ai && uv run uvicorn app.main:app --reload --port 8000",
+    "dev": "concurrently -n api,worker,web,ai -c blue,magenta,green,yellow \"npm run dev:api\" \"npm run dev:worker\" \"npm run dev:web\" \"npm run dev:ai\"",
+    "build": "npm run build -w @opspilot/api && npm run build -w @opspilot/web",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "test:ai": "cd services/ai && uv run pytest -q",
+    "test:e2e": "npm run test:e2e -w @opspilot/web"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
