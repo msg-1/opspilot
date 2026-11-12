@@ -40,11 +40,14 @@ const acceptInviteBody = z.object({
   password: password.optional(),
 });
 
+// Compared against when the email is unknown, so both paths cost one hash at the configured cost.
+const DUMMY_HASH = bcrypt.hashSync('not-a-real-password', env.BCRYPT_ROUNDS);
+
 const cookieBase = { httpOnly: true, sameSite: 'lax' as const, secure: env.COOKIE_SECURE, path: '/' };
 
 async function startSession(req: Request, res: Response, userId: string, organizationId: string) {
   const refresh = randomToken(48);
-  await prisma.refreshToken.create({
+  const session = await prisma.refreshToken.create({
     data: {
       userId,
       organizationId,
@@ -54,7 +57,7 @@ async function startSession(req: Request, res: Response, userId: string, organiz
       expiresAt: new Date(Date.now() + REFRESH_TTL_MS),
     },
   });
-  const access = signAccessToken(userId, organizationId);
+  const access = signAccessToken(userId, organizationId, session.id);
   res.cookie(ACCESS_COOKIE, access, { ...cookieBase, maxAge: accessCookieMaxAgeMs });
   // The refresh cookie is only ever sent to the auth endpoints.
   res.cookie(REFRESH_COOKIE, refresh, { ...cookieBase, maxAge: REFRESH_TTL_MS, path: '/api/v1/auth' });
@@ -166,9 +169,14 @@ authRouter.post('/login', limiter, accountLimiter, async (req, res) => {
     include: { memberships: { orderBy: { createdAt: 'asc' } } },
   });
   // Always run a hash comparison so response time does not reveal whether the email exists.
-  const hash = user?.passwordHash ?? '$2b$12$C6UzMDM.H6dfI/f/IKcEeO5fVbmB1cDf0a1ZC7m2b4E3fYpVqzG1a';
-  const ok = await bcrypt.compare(body.password, hash);
-  if (!user || !ok || !user.isActive) throw unauthorized('Invalid email or password');
+  const ok = await bcrypt.compare(body.password, user?.passwordHash ?? DUMMY_HASH);
+  if (!user || !ok || !user.isActive) {
+    // Failed attempts against a real account are part of that organisation's audit trail.
+    if (user?.memberships[0]) {
+      await writeAudit({ organizationId: user.memberships[0].organizationId, actorType: 'user', actorId: user.id, actorLabel: user.name, action: 'auth.login_failed', resourceType: 'user', resourceId: user.id, ip: req.ip });
+    }
+    throw unauthorized('Invalid email or password');
+  }
   const membership = body.organizationId
     ? user.memberships.find((m) => m.organizationId === body.organizationId)
     : user.memberships[0];
@@ -266,6 +274,8 @@ authRouter.patch('/profile', authenticate, async (req, res) => {
     await prisma.refreshToken.updateMany({ where: { userId: auth.userId, revokedAt: null }, data: { revokedAt: new Date() } });
   }
   await prisma.user.update({ where: { id: auth.userId }, data });
+  // Every session was just ended, including this one: start a fresh one for this device.
+  if (data.passwordHash) await startSession(req, res, auth.userId, auth.organizationId);
   res.json(await sessionPayload(auth.userId, auth.organizationId));
 });
 

@@ -81,6 +81,21 @@ export function createApp() {
     }),
   );
 
+  // CSRF defence in depth (on top of SameSite=Lax cookies): a browser always sends Origin on
+  // cross-origin writes, so a state-changing request that relies on the session cookie is
+  // refused unless it comes from the web app. API keys and bearer tokens are not affected.
+  const allowedOrigins = new Set(env.WEB_ORIGIN.split(',').map((o) => o.trim()));
+  v1.use((req, res, next) => {
+    const origin = req.headers.origin;
+    const write = !['GET', 'HEAD', 'OPTIONS'].includes(req.method);
+    const cookieAuth = !req.headers.authorization && !req.headers['x-api-key'];
+    if (write && cookieAuth && origin && !allowedOrigins.has(origin) && !req.path.startsWith('/webhooks/')) {
+      res.status(403).json({ error: { code: 'forbidden', message: 'Cross-origin request refused' } });
+      return;
+    }
+    next();
+  });
+
   // Public / self-authenticating routes
   v1.use('/auth', authRouter);
   v1.use('/webhooks/github', githubWebhookRouter);

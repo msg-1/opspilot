@@ -243,22 +243,27 @@ describe('investigations', () => {
     expect(inv.evidence).toHaveLength(0);
   });
 
-  it('gives the agent a read-only token scoped to one organisation', async () => {
+  it('gives the agent a read-only token scoped to one organisation and to the running investigation', async () => {
     const [org, other] = await Promise.all([createOrg(), createOrg()]);
     await createService(org.owner, 'Checkout');
     await createService(other.owner, 'Other Secret Service');
-    ai.events = [{ type: 'final', report: report({ hypotheses: [], recommendedActions: [], facts: [], timeline: [], confidence: 0.1 }) }];
+    const seen: Record<string, number | string[]> = {};
+    ai.events = [{ type: 'meta', provider: 'heuristic', model: null }, { type: 'final', report: report({ hypotheses: [], recommendedActions: [], facts: [], timeline: [], confidence: 0.1 }) }];
+    // Called while the investigation is RUNNING, exactly when the real agent uses its token.
+    ai.duringRun = async () => {
+      const auth = { Authorization: `Bearer ${ai.requests[0]!.toolToken}` };
+      seen.services = (await api().get('/api/v1/tools/services').set(auth)).body.services.map((s: { slug: string }) => s.slug);
+      seen.anomalies = (await api().get('/api/v1/tools/logs/anomalies?from=1h').set(auth)).status;
+      seen.knowledge = (await api().post('/api/v1/tools/knowledge/search').set(auth).send({ query: 'pool' })).status;
+      // Useless outside the tool API: it cannot read the main API or change anything.
+      seen.incidents = (await api().get('/api/v1/incidents').set(auth)).status;
+      seen.propose = (await api().post('/api/v1/remediations').set(auth).send({})).status;
+      seen.create = (await api().post('/api/v1/incidents').set(auth).send({ title: 'agent-created incident' })).status;
+    };
     await org.owner.post('/api/v1/investigations').send({ question: 'Why is everything failing?' });
-    const token = ai.requests[0]!.toolToken;
-    const auth = { Authorization: `Bearer ${token}` };
-    const services = await api().get('/api/v1/tools/services').set(auth);
-    expect(services.body.services.map((s: { slug: string }) => s.slug)).toEqual(['checkout']);
-    expect((await api().get('/api/v1/tools/logs/anomalies?from=1h').set(auth)).status).toBe(200);
-    expect((await api().post('/api/v1/tools/knowledge/search').set(auth).send({ query: 'pool' })).status).toBe(200);
-    // The same token is useless outside the tool API: it cannot read the main API or change anything.
-    expect((await api().get('/api/v1/incidents').set(auth)).status).toBe(401);
-    expect((await api().post('/api/v1/remediations').set(auth).send({})).status).toBe(401);
-    expect((await api().post('/api/v1/incidents').set(auth).send({ title: 'agent-created incident' })).status).toBe(401);
+    expect(seen).toEqual({ services: ['checkout'], anomalies: 200, knowledge: 200, incidents: 401, propose: 401, create: 401 });
+    // Once the investigation has finished the token is dead, well before its 30-minute expiry.
+    expect((await api().get('/api/v1/tools/services').set({ Authorization: `Bearer ${ai.requests[0]!.toolToken}` })).status).toBe(401);
     const toolAudit = await prisma.auditLog.findMany({ where: { organizationId: org.organizationId, action: 'ai_tool.call' } });
     expect(toolAudit.length).toBeGreaterThanOrEqual(2);
     // MCP-style access with an API key

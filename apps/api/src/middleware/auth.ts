@@ -35,16 +35,20 @@ const TOOL_TTL_SECONDS = 30 * 60;
 interface AccessClaims {
   sub: string;
   org: string;
+  /** Id of the refresh-token record this access token belongs to; revoking it ends the session */
+  sid: string;
   typ: 'access';
 }
+
+const VERIFY = { algorithms: ['HS256' as const] };
 interface ToolClaims {
   org: string;
   inv: string;
   typ: 'tool';
 }
 
-export const signAccessToken = (userId: string, organizationId: string) =>
-  jwt.sign({ sub: userId, org: organizationId, typ: 'access' } satisfies AccessClaims, env.JWT_SECRET, {
+export const signAccessToken = (userId: string, organizationId: string, sessionId: string) =>
+  jwt.sign({ sub: userId, org: organizationId, sid: sessionId, typ: 'access' } satisfies AccessClaims, env.JWT_SECRET, {
     expiresIn: ACCESS_TTL_SECONDS,
   });
 
@@ -78,11 +82,15 @@ function bearer(req: Request): string | undefined {
 async function fromUserToken(token: string): Promise<AuthContext | null> {
   let claims: AccessClaims;
   try {
-    claims = jwt.verify(token, env.JWT_SECRET) as AccessClaims;
+    claims = jwt.verify(token, env.JWT_SECRET, VERIFY) as AccessClaims;
   } catch {
     return null;
   }
-  if (claims.typ !== 'access') return null;
+  if (claims.typ !== 'access' || !claims.sid) return null;
+  // Signing out, rotating or changing the password revokes the session record, which
+  // invalidates its access tokens at once instead of when they expire.
+  const session = await prisma.refreshToken.findUnique({ where: { id: claims.sid }, select: { revokedAt: true, userId: true } });
+  if (!session || session.revokedAt || session.userId !== claims.sub) return null;
   // Membership is re-read on every request so role changes and removals apply immediately.
   const membership = await prisma.membership.findUnique({
     where: { userId_organizationId: { userId: claims.sub, organizationId: claims.org } },
@@ -116,10 +124,13 @@ async function fromApiKey(key: string): Promise<AuthContext | null> {
   };
 }
 
-function fromToolToken(token: string): AuthContext | null {
+async function fromToolToken(token: string): Promise<AuthContext | null> {
   try {
-    const claims = jwt.verify(token, env.JWT_SECRET) as ToolClaims;
+    const claims = jwt.verify(token, env.JWT_SECRET, VERIFY) as ToolClaims;
     if (claims.typ !== 'tool') return null;
+    // The token is only good while its investigation is actually running.
+    const run = await prisma.investigation.findFirst({ where: { id: claims.inv, organizationId: claims.org, status: 'RUNNING' }, select: { id: true } });
+    if (!run) return null;
     return {
       kind: 'tool_token',
       organizationId: claims.org,

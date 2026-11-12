@@ -287,3 +287,32 @@ def test_report_wire_format_carries_only_parameters_that_were_set():
     # A model answering in the wire format parses back into the typed object.
     parsed = LLMReport.model_validate({"summary": "s", "confidence": 0.4, "timeline": [], "facts": [], "assumptions": [], "uncertainties": [], "hypotheses": [], "nextSteps": [], "recommendedActions": [{"type": "scale_service", "title": "Scale out api", "description": "Add replicas", "risk": "LOW", "serviceSlug": "api", "parameters": {"replicas": 6}, "evidenceRefs": []}]})
     assert parsed.recommended_actions[0].parameters.replicas == 6
+
+
+CONTRACT = __import__("pathlib").Path(__file__).parent / "fixtures" / "report.contract.json"
+
+
+def _shape(value, prefix=""):
+    """The set of key paths in a JSON value (list items collapse to []), ignoring the data."""
+    if isinstance(value, dict):
+        return {p for k, v in value.items() for p in ({f"{prefix}{k}"} | _shape(v, f"{prefix}{k}."))}
+    if isinstance(value, list):
+        return {p for item in value for p in _shape(item, f"{prefix}[].")}
+    return set()
+
+
+async def test_report_wire_format_matches_the_contract_shared_with_the_api():
+    """The API parses this exact JSON (apps/api/tests/contract.test.ts reads the same file).
+    If a field is added or renamed here, regenerate the fixture and update the API schema:
+        OPSPILOT_WRITE_CONTRACT=1 uv run pytest tests/test_agent.py -k contract
+    """
+    import json
+    import os
+
+    report, _events, _ctx = await run("bad_deploy_matching_change", None)
+    wire = report.wire()
+    if os.environ.get("OPSPILOT_WRITE_CONTRACT"):
+        CONTRACT.write_text(json.dumps(wire, indent=2) + "\n")
+    expected = json.loads(CONTRACT.read_text())
+    assert _shape(wire) == _shape(expected), "report shape changed: regenerate the contract fixture and update the API's reportSchema"
+    assert wire["recommendedActions"][0]["parameters"].keys() >= {"deploymentId", "toVersion"}

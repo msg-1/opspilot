@@ -77,6 +77,22 @@ async function load(organizationId: string, id: string) {
   return action;
 }
 
+const RISK_ORDER: RiskLevel[] = ['LOW', 'MEDIUM', 'HIGH'];
+
+/**
+ * The proposer (a person or the AI) suggests a risk level, and that level decides how many
+ * approvals are needed. This sets a floor they cannot go below: anything that changes what is
+ * deployed or configured is at least MEDIUM, and so is any action on a tier-1 service.
+ */
+export async function effectiveRisk(organizationId: string, type: string, declared: RiskLevel, serviceId?: string | null): Promise<RiskLevel> {
+  let floor: RiskLevel = ['rollback_deployment', 'config_change', 'scale_service', 'toggle_feature_flag'].includes(type) ? 'MEDIUM' : 'LOW';
+  if (serviceId) {
+    const service = await prisma.service.findFirst({ where: { id: serviceId, organizationId }, select: { tier: true } });
+    if (service?.tier === 'TIER1') floor = 'MEDIUM';
+  }
+  return RISK_ORDER[Math.max(RISK_ORDER.indexOf(declared), RISK_ORDER.indexOf(floor))]!;
+}
+
 function requiredApprovals(settings: Awaited<ReturnType<typeof getSettings>>, risk: RiskLevel) {
   return risk === 'HIGH' ? settings.approvalsHighRisk : risk === 'MEDIUM' ? settings.approvalsMediumRisk : settings.approvalsLowRisk;
 }
@@ -91,14 +107,16 @@ export async function proposeRemediation(
   if (input.serviceId && !(await prisma.service.findFirst({ where: { id: input.serviceId, organizationId }, select: { id: true } }))) throw badRequest('Service does not exist');
   if (input.investigationId && !(await prisma.investigation.findFirst({ where: { id: input.investigationId, organizationId }, select: { id: true } }))) throw badRequest('Investigation does not exist');
   const settings = await getSettings(organizationId);
+  const risk = await effectiveRisk(organizationId, input.type, input.risk, input.serviceId);
   const action = await prisma.remediationAction.create({
     data: {
       ...input,
+      risk,
       parameters: input.parameters as Prisma.InputJsonValue | undefined,
       organizationId,
       proposedByType: proposer.type,
       proposedById: proposer.type === 'user' ? proposer.userId : null,
-      requiredApprovals: requiredApprovals(settings, input.risk),
+      requiredApprovals: requiredApprovals(settings, risk),
     },
   });
   if (action.incidentId) {
