@@ -25,3 +25,17 @@ scrape_configs:
         labels: { run: host }
       - targets: ["worker:9464"]
         labels: { run: compose }
+  # Demo microservices (docker compose --profile demo). Scraped more often so that a failure
+  # shows within seconds. "down" here is itself a signal: the bridge reports it as up = 0.
+  - job_name: demo-gateway
+    scrape_interval: 5s
+    static_configs:
+      - targets: ["demo-gateway:8080"]
+  - job_name: demo-orders
+    scrape_interval: 5s
+    static_configs:
+      - targets: ["demo-orders:8080"]
+  - job_name: demo-payments
+    scrape_interval: 5s
+    static_configs:
+      - targets: ["demo-payments:8080"]

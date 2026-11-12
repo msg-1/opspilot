@@ -28,7 +28,12 @@
     "test:e2e": "npm run test:e2e -w @opspilot/web",
     "simulate": "npm run simulate -w @opspilot/api",
     "evals": "cd services/ai && uv run python -m app.evals.run",
-    "mcp": "cd services/ai && uv run python -m app.mcp_server"
+    "mcp": "cd services/ai && uv run python -m app.mcp_server",
+    "demo:up": "node demo/scripts/up.mjs",
+    "demo:setup": "node demo/scripts/setup.mjs",
+    "demo:scenario": "node demo/scripts/ctl.mjs",
+    "demo:e2e": "node demo/scripts/e2e.mjs",
+    "demo:down": "node demo/scripts/down.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"
