@@ -247,7 +247,7 @@ Second pass, same day. "Verified" names how the fix was checked; nothing is mark
 | M8 | Tool output unmarked for the model | Fixed | Every tool result carries a data-only notice; instruction-like text is flagged in the steps; asserted in the provider test |
 | M9 | No spending limits or cost | Fixed | Per-investigation cost and token limits; per-organisation concurrency, daily count and daily cost limits; cost estimated and stored. 3 tests |
 | M10 | Contract duplicated without a test | Fixed | A fixture written by the AI service tests is parsed by the API tests. Web types are still hand-written |
-| M11 | Test gaps | Partly | Added: contract test, provider tests, browser tests in CI workflow. Still missing: a test through real BullMQ, team and settings route tests, page-level web tests |
+| M11 | Test gaps | Partly | Added: contract test, provider tests, browser tests in CI workflow. A real BullMQ/Redis test (`apps/api/tests/queue.test.ts`, AI service mocked) now covers queued-until-worker, run-once, worker restart, retry with backoff and exhausted retries. Still missing: team and settings route tests, page-level web tests |
 | M12 | Database outage returns 500 | Fixed | 1 test (503 with Retry-After) |
 | M13 | Queries that will not scale | Open | Not needed at current data sizes; listed in the backlog |
 | M14 | Module structure | Open | Deliberately not refactored during hardening |
@@ -287,7 +287,7 @@ Second pass, same day. "Verified" names how the fix was checked; nothing is mark
 ### Open items, in order
 
 1. Fix the evaluation harness (fixed scenario clock, action scoring tuned to the rule-based engine, reports not saved), then re-run it against the model. The first live run is recorded in claude-live-verification.md.
-2. **M11:** a test through real BullMQ; team and settings routes; page-level web tests.
+2. **M11:** team and settings routes; page-level web tests. (The real BullMQ test is done.)
 3. **M13, M20:** scaling work, when data volume or a second API instance calls for it.
 4. **M14:** split the larger modules as they are next touched.
 5. The Low items.

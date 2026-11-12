@@ -1,7 +1,8 @@
 import { defineConfig } from 'vitest/config';
 
 // Integration tests run against the real Postgres test database (opspilot_test, created by
-// infra/postgres/init.sql). Queue jobs run inline, so no Redis or worker is needed.
+// infra/postgres/init.sql). Queue jobs run inline, so no Redis or worker is needed, except in
+// tests/queue.test.ts, which runs real BullMQ workers and skips itself locally when Redis is absent.
 export default defineConfig({
   test: {
     include: ['tests/**/*.test.ts'],

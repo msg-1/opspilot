@@ -5,6 +5,7 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- Queue reliability tests on real BullMQ and Redis with the AI service mocked: queued work waits for a worker, runs once, survives a worker restart; indexing retries with backoff and stops after the configured attempts. `QUEUE_PREFIX` and `QUEUE_BACKOFF_MS` settings.
 - Claude provider: configurable model (default `claude-haiku-5-5`), prompt caching, bounded retries, timeouts, clear handling of rejected keys, exhausted credit, unknown models and rate limits.
 - Spending controls: per-investigation cost and token limits, per-organisation concurrency, daily count and daily cost limits.
 - Usage recorded per investigation: model, calls, tokens, cache use, latency, estimated cost; shown in the interface and in analytics.
