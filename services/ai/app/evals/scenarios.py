@@ -193,8 +193,8 @@ class Scenario:
         return handle
 
 
-def _log(id_: str, service: str, message: str, minutes_ago: float) -> dict[str, Any]:
-    return {"id": id_, "timestamp": t(minutes_ago), "level": "ERROR", "service": service, "message": message, "traceId": "abc123", "fingerprint": "fp", "attributes": None}
+def _log(id_: str, service: str, message: str, minutes_ago: float, level: str = "ERROR") -> dict[str, Any]:
+    return {"id": id_, "timestamp": t(minutes_ago), "level": level, "service": service, "message": message, "traceId": "abc123", "fingerprint": "fp", "attributes": None}
 
 
 SCENARIOS: list[Scenario] = [
@@ -246,6 +246,9 @@ SCENARIOS: list[Scenario] = [
         expect=Expectation(healthy=True, max_confidence=0.25),
         services=[svc("billing-service")],
         anomalies=[pattern("f3", "billing-service", "invoice email retry scheduled attempt=<n>", 6, 90, level="WARN")],
+        # A healthy service still has logs behind its patterns and metrics that show it is healthy.
+        logs=[_log("l3", "billing-service", "invoice email retry scheduled attempt=2", 40, level="WARN")],
+        metrics={"billing-service": [metric("error_rate", "Error rate", "%", 0.2, 0.2), metric("latency_p95_ms", "p95 latency", "ms", 180, 176)]},
         deployments=[deployment("d5", "billing-service", "v2.0.0", 60 * 24 * 7, "dddddddddddd4444", "Routine release")],
     ),
     Scenario(
@@ -262,7 +265,7 @@ SCENARIOS: list[Scenario] = [
             pattern("f4", "payments-api", "tls handshake failed: certificate signed by unknown authority", 510, 40),
             pattern("f5", "api-gateway", "upstream payments-api returned 502", 380, 39),
         ],
-        logs=[_log("l4", "payments-api", "tls handshake failed: certificate signed by unknown authority", 12)],
+        logs=[_log("l4", "payments-api", "tls handshake failed: certificate signed by unknown authority", 12), _log("l5", "api-gateway", "upstream payments-api returned 502", 11)],
         deployments=[deployment("d7", "payments-api", "v3.1.0", 52, "eeeeeeeeeeee5555", "Rotate mTLS certificate bundle"), deployment("d6", "payments-api", "v3.0.4", 60 * 50, "ffffffffffff6666")],
         events=[{"id": "e1", "service": "payments-api", "type": "feature_flag", "title": "Flag new_receipt_email enabled", "details": "Enabled for 5% of users", "actor": "pm", "source": "api", "occurredAt": t(44)}],
         pulls=[pull("p7", "payments-api", 301, "Rotate mTLS certificate bundle", "Replaces the CA certificate bundle used for TLS between services.", 70, "eeeeeeeeeeee5555")],

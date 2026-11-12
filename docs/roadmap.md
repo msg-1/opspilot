@@ -27,11 +27,11 @@ Status as of 12 November 2026. "Verified" means exercised by automated tests or 
 
 | Suite | Count | Scope |
 |---|---|---|
-| API integration (Vitest + Supertest) | 48 | HTTP → PostgreSQL, all modules |
-| AI service (pytest, mocked model APIs) | 39 | Agent graph, guardrails, providers, embeddings, HTTP API, MCP |
+| API integration (Vitest + Supertest) | 55 | HTTP → PostgreSQL, all modules |
+| AI service (pytest, mocked model APIs) | 64 | Agent graph, guardrails, providers, embeddings, HTTP API, MCP |
 | Web (Vitest + Testing Library) | 11 | API client, formatting, accessible components |
 | End-to-end (Playwright) | 9 | Sign-in, incident, investigation, approval, RBAC, logs, knowledge, audit, mobile layout |
-| Agent evaluations | 5 scenarios | Correct cause, calibration, grounding, safe action, no false blame |
+| Agent evaluations | 6 scenarios | Cause, service, citations, invention, contradictory and missing evidence, calibration, diagnostics, remediation safety, deployment-tool use |
 
 ## Needs the owner's input
 
@@ -43,7 +43,7 @@ Status as of 12 November 2026. "Verified" means exercised by automated tests or 
 
 ## Next
 
-1. Re-run the five evaluation scenarios against a real model now that the harness is fixed (scenario clock, action-safety scoring, saved reports); this needs an approved budget. Then tune prompts and the effort setting from the saved reports; add scenarios (config change, traffic spike, memory leak, two simultaneous causes).
+1. ~~Re-run the evaluation against a real model~~ — done with six scenarios and structured scoring (docs/claude-live-verification.md). Open from it: the healthy-service scenario reports 0.30 confidence against a bound of 0.25; `run_runbook` is treated as read-only although a runbook can change production. Next: more scenarios (config change, traffic spike, memory leak, two simultaneous causes), repeated runs to measure variance, and `ANTHROPIC_EFFORT=low` against `medium`. Each needs an approved budget.
 2. ~~Run CI on a remote; add the end-to-end suite to CI with Compose~~ — done.
 3. Live updates over server-sent events instead of polling.
 4. Load test ingestion and log search; partition `LogEntry` by time.

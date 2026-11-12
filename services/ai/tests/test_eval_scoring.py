@@ -257,6 +257,21 @@ def test_expectations_are_structured_and_internally_consistent():
             assert slug != (e.cause.service if e.cause else None)
 
 
+def test_scenario_data_agrees_with_itself():
+    """Found in the live runs: a scenario that counted an error pattern its log search could not
+    return, and one whose 'week-old' deployment was ten minutes old. A model rightly reports such
+    conflicts, which then looks like a model failure."""
+    for s in SCENARIOS:
+        searchable = {entry["service"] for entry in s.logs}
+        for p in s.anomalies:
+            assert p["serviceSlug"] in searchable, f"{s.name}: pattern on {p['serviceSlug']} has no log line behind it"
+        # Every service asked about that is not failing has metrics to show it.
+        if s.expect.healthy:
+            assert all(sv["slug"] in s.metrics for sv in s.services), s.name
+    healthy = BY_NAME["healthy_no_signal"]
+    assert healthy.deployments[0]["startedAt"] == t(60 * 24 * 7) and "week-old" in healthy.description
+
+
 @pytest.mark.parametrize("name", ["bad_deploy_matching_change", "red_herring_closer_in_time", "deployment_rollback_target"])
 async def test_rule_based_rollbacks_carry_the_target_from_the_deployment_context(name):
     from app.evals.run import evaluate
