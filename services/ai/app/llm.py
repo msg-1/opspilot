@@ -100,6 +100,8 @@ class LLMProvider:
     usage: Usage = field(default_factory=Usage)
     #: What reports produced with this provider are labelled as: llm | mock
     mode: str = "llm"
+    #: Model id the provider reported in its responses (None until a call succeeds)
+    served_model: str | None = None
 
     def budget_used(self) -> float:
         """Fraction (0..1+) of the investigation's spending limits consumed so far."""
@@ -235,6 +237,7 @@ class AnthropicProvider(LLMProvider):
             response = await fn(**kwargs)
         except anthropic.APIError as exc:
             raise classify_anthropic_error(exc) from exc
+        self.served_model = getattr(response, "model", None) or self.served_model
         u = response.usage
         self.usage.record(
             self.model, self.settings, input_tokens=u.input_tokens, output_tokens=u.output_tokens,
