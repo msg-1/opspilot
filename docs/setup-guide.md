@@ -1,0 +1,140 @@
+# Setup guide
+
+## Prerequisites
+
+| Tool | Version | Needed for |
+|---|---|---|
+| Docker Desktop | recent | Postgres, Redis, or the whole stack |
+| Node.js | 20 or newer (22 used here) | API and web, when developing on the host |
+| uv | 0.5 or newer | AI service, when developing on the host (`brew install uv`) |
+
+## 1. Configuration
+
+```bash
+cp .env.example .env
+```
+
+Replace the three secrets. Each of these commands prints a suitable value:
+
+```bash
+openssl rand -hex 32    # JWT_SECRET
+openssl rand -hex 32    # INTERNAL_SERVICE_TOKEN (shared by API and AI service)
+openssl rand -hex 32    # ENCRYPTION_KEY (must be exactly 64 hex characters)
+```
+
+The API refuses to start with missing or malformed values and tells you which. `.env` is git-ignored; never commit it. Changing `ENCRYPTION_KEY` later makes stored GitHub tokens and webhook secrets unreadable, so they must be re-entered.
+
+## 2a. Run everything in Docker
+
+```bash
+docker compose --profile app up -d --build
+```
+
+| URL | Service |
+|---|---|
+| http://localhost:3000 | Web app |
+| http://localhost:4000 | API (`/health`, `/ready`, `/metrics`) |
+| http://localhost:8000 | AI service (`/health`, `/metrics`) |
+
+The `migrate` container applies migrations and seeds demo data if the database is empty. Stop with `docker compose --profile app down` (add `-v` to also delete the database volume).
+
+## 2b. Run on the host (development)
+
+```bash
+npm install
+npm run infra:up
+npm run db:migrate
+npm run db:seed
+npm run dev
+```
+
+`npm run dev` starts four processes with file watching. If you start them separately, the worker (`npm run dev:worker`) is required for investigations, knowledge indexing, GitHub sync and alert evaluation.
+
+Port 5000 is used by macOS AirPlay, which is why nothing here uses it. If 3000, 4000, 5432, 6379 or 8000 are taken, stop the other process or change `API_PORT` and the related URLs in `.env`.
+
+## 3. Demo accounts
+
+All use the password `OpsPilot-demo-1`. These exist only in seeded demo data.
+
+| Email | Role | Use it to |
+|---|---|---|
+| demo@opspilot.dev | Owner | See everything |
+| marcus@opspilot.dev | Admin | Approve actions, including high-risk ones |
+| lena@opspilot.dev | Engineer | Run investigations, request approvals |
+| tomas@opspilot.dev | Engineer | Second engineer for approvals |
+| aiko@opspilot.dev | Viewer | See the read-only experience |
+
+`npm run db:seed` recreates only the demo organisation (`meridian-demo`); other organisations are untouched. Seeded timestamps are relative to when you seed, so reseed if the "active incident" has gone stale. Service health turns to "No data" 15 minutes after seeding unless you run the simulator (below).
+
+## 4. AI providers
+
+`LLM_PROVIDER=auto` (default) picks, in order: Anthropic if `ANTHROPIC_API_KEY` is set, OpenAI if `OPENAI_API_KEY` is set, a local Ollama if it is running and has `OLLAMA_MODEL`, otherwise the rule-based engine. Settings → System shows which one is active. Set `LLM_PROVIDER=none` to force the rule-based engine.
+
+Embeddings follow `EMBEDDING_PROVIDER` the same way (OpenAI, then Ollama `nomic-embed-text`, then built-in local embeddings). All produce 768-dimension vectors. After changing the embedding provider, use Knowledge base → **Reindex all**: documents embedded with a different model are only matched by keyword until then.
+
+With a cloud provider, tool results (log lines, commit messages, incident text) from your organisation are sent to that provider. Log redaction (on by default) masks credentials at ingestion.
+
+## 5. Sending your own data
+
+Create an API key under Settings → API keys with the scopes you need, then:
+
+```bash
+KEY=opk_...
+# Deployment (from CI/CD)
+curl -X POST localhost:4000/api/v1/deployments -H "x-api-key: $KEY" -H 'content-type: application/json' \
+  -d '{"service":"checkout-service","version":"v2.15.0","commitSha":"abc1234","description":"Raise pool size"}'
+# Logs (batch of up to 5000)
+curl -X POST localhost:4000/api/v1/logs -H "x-api-key: $KEY" -H 'content-type: application/json' \
+  -d '{"service":"checkout-service","logs":[{"level":"error","message":"timeout after 3000ms","traceId":"abc"}]}'
+# Metrics
+curl -X POST localhost:4000/api/v1/monitoring/metrics -H "x-api-key: $KEY" -H 'content-type: application/json' \
+  -d '{"samples":[{"service":"checkout-service","metric":"error_rate","value":1.2}]}'
+```
+
+For a living demo: `OPSPILOT_API_KEY=opk_... npm run simulate` (scopes `ingest:logs`, `ingest:metrics`). Add `-- --heal` to make checkout recover and watch the alerts resolve.
+
+## 6. GitHub
+
+Works three ways: sample repositories (generated data, no network, labelled as sample), public repositories without a token (60 requests/hour), or any repository with a token. Add a fine-grained personal access token with read-only **Contents**, **Pull requests** and **Metadata** under Settings → GitHub; it is validated, then stored encrypted. Connect repositories under Code changes. Webhooks are optional and need the API to be reachable from GitHub.
+
+## 7. MCP server
+
+Lets Claude Desktop, Claude Code or another MCP client query OpsPilot read-only. Create an API key with the `tools:read` scope, then register:
+
+```json
+{
+  "mcpServers": {
+    "opspilot": {
+      "command": "uv",
+      "args": ["run", "--directory", "/absolute/path/to/opspilot/services/ai", "python", "-m", "app.mcp_server"],
+      "env": { "OPSPILOT_API_URL": "http://localhost:4000", "OPSPILOT_API_KEY": "opk_..." }
+    }
+  }
+}
+```
+
+## 8. Observability
+
+`npm run obs:up` starts Prometheus (http://localhost:9090) and Grafana (http://localhost:3001, admin/admin, dashboard "OpsPilot platform"). Set `OTEL_ENABLED=true` and `OTEL_EXPORTER_OTLP_ENDPOINT` to export traces from the API, worker and AI service to any OTLP/HTTP collector (none is bundled).
+
+## 9. Tests
+
+```bash
+npm test                 # API: 28 integration tests on database opspilot_test · web: 10 tests
+npm run test:ai          # 23 tests
+npm run evals -- --heuristic
+npm run db:seed && npm run test:e2e   # 9 browser tests; needs the stack running
+```
+
+`opspilot_test` is created by `infra/postgres/init.sql` the first time the Postgres volume is created. If your volume predates that: `docker exec opspilot-postgres-1 psql -U opspilot -d opspilot -c 'CREATE DATABASE opspilot_test'`.
+
+## Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| API exits with "Invalid environment configuration" | A secret in `.env` is missing or the wrong length; the message names it |
+| Investigation stays "Queued" | The worker is not running |
+| Investigation fails with "AI service is not reachable" | Start the AI service (`npm run dev:ai`), check `AI_SERVICE_URL` |
+| Knowledge documents show "Keyword search only" | They were added while the AI service was down; Reindex all |
+| All services show "No data" | No metrics in the last 15 minutes; run the simulator or send metrics |
+| `prisma migrate dev` wants to drop an index | Expected; see the migration rule in CLAUDE.md |

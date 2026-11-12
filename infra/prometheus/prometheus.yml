@@ -1,0 +1,20 @@
+global:
+  scrape_interval: 15s
+
+# Targets cover both ways of running OpsPilot: on the host (npm run dev) and inside Compose.
+# Whichever is not running simply shows as "down" in Prometheus.
+scrape_configs:
+  - job_name: opspilot-api
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["host.docker.internal:4000"]
+        labels: { run: host }
+      - targets: ["api:4000"]
+        labels: { run: compose }
+  - job_name: opspilot-ai
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["host.docker.internal:8000"]
+        labels: { run: host }
+      - targets: ["ai:8000"]
+        labels: { run: compose }
