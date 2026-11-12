@@ -60,9 +60,10 @@ npm run evals -- --heuristic               # and without --heuristic if a model 
 npm run build
 npm audit --omit=dev --audit-level=critical
 
-# Whole stack from a clean database
+# Whole stack from a clean database, on the deterministic engine: the browser tests
+# refuse to run against a paid model, so they are repeatable and cost nothing
 docker compose --profile app down -v
-docker compose --profile app up -d --build --wait
+AI_PROVIDER=deterministic docker compose --profile app up -d --build --wait
 npm run test:e2e
 ```
 

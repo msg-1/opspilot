@@ -14,7 +14,7 @@ Status as of 12 November 2026. "Verified" means exercised by automated tests or 
 | M6 | Redis, BullMQ, background jobs | Done | Ran with a real worker and Redis; tests run jobs inline |
 | M7 | Auth, RBAC, multi-tenancy | Done | API integration tests (isolation, scopes, token rotation) |
 | M8 | Python FastAPI AI service | Done | 23 tests; ran on host and in Docker |
-| M9 | LLM integration, structured output, tool calling | Built, **not yet run against a live model** | 13 provider tests against a mocked Anthropic API covering requests, tool loop, caching, usage, errors and limits. Live check waits for an API key |
+| M9 | LLM integration, structured output, tool calling | Done | Verified against the live Anthropic API with `claude-haiku-5-5` (claude-live-verification.md), plus 14 provider tests against a mocked API |
 | M10 | RAG, embeddings, pgvector | Done | Tests against real pgvector; ran with local embeddings |
 | M11 | LangGraph investigation agent | Done | Evals 5/5 (rule-based engine); end-to-end through queue and worker |
 | M12 | MCP server | Done | Tool listing and a tool call tested in-process. **Not connected to a real MCP client** |
@@ -35,7 +35,7 @@ Status as of 12 November 2026. "Verified" means exercised by automated tests or 
 
 ## Needs the owner's input
 
-1. **An Anthropic API key in the local `.env`** (steps in claude-integration.md), to run the live check, a real investigation, and the evaluations against the model.
+1. ~~An Anthropic API key~~ — configured; live verification done.
 2. **A GitHub token**, to verify the integration against real repositories.
 3. **A decision on a remote repository** (GitHub, private?) so branches can be pushed and CI can run.
 4. **Promotion of `develop` to `main`** once you have reviewed the result.

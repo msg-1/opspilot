@@ -20,6 +20,20 @@ async function as(browser: Browser, email: string) {
 
 test.describe.configure({ mode: 'serial' });
 
+// These tests start an investigation on every run. With a real model configured that would
+// spend API credit each time and make the assertions depend on model output, so the suite
+// refuses to run unless the deterministic or mock engine is active.
+let paidModel: string | null = null;
+test.beforeAll(async ({ browser }) => {
+  const { page, close } = await as(browser, 'demo@opspilot.dev');
+  const status = await (await page.request.get('/api/v1/investigations/ai-status')).json();
+  if (status.llm?.available && status.llm.provider !== 'mock') paidModel = `${status.llm.provider} ${status.llm.model}`;
+  await close();
+});
+test.beforeEach(() => {
+  test.skip(paidModel !== null, `A paid model is active (${paidModel}). Run the browser tests with AI_PROVIDER=deterministic so they are repeatable and cost nothing.`);
+});
+
 test('unauthenticated visitors are sent to sign-in, and bad credentials are rejected', async ({ page }) => {
   await page.goto('/incidents');
   await expect(page).toHaveURL(/\/login\?next=%2Fincidents/);
