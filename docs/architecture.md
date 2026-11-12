@@ -61,13 +61,16 @@ The UI polls the investigation while it runs, so steps and evidence appear live.
 
 ### Analysis engines
 
+Selected by `AI_PROVIDER`; details, costs and limits in [claude-integration.md](claude-integration.md).
+
 | Engine | When | How it reasons |
 |---|---|---|
-| Anthropic (official SDK) | `ANTHROPIC_API_KEY` set | Tool use with adaptive thinking; structured report via `messages.parse` |
+| Claude (official Anthropic SDK) | `AI_PROVIDER=anthropic`, or `auto` with a key | Tool use with adaptive thinking and prompt caching; plan and report as structured output via `messages.parse`; bounded retries; per-investigation spending limit |
+| Mock | `AI_PROVIDER=mock` | Scripted turns through the same agent ⇄ tools path; canned report labelled as mock |
 | OpenAI / Ollama (LangChain chat models) | key set / local model present | `bind_tools` and `with_structured_output` |
-| Rule-based | nothing configured, or the model call fails | Finds the onset of the dominant error pattern, scores changes that preceded it by timing, service match, keyword overlap between the change and the errors, metric shifts and matching documentation; never above 75% confidence |
+| Rule-based | `AI_PROVIDER=deterministic`, nothing configured, or the model fails | Finds the onset of the dominant error pattern, scores changes that preceded it by timing, service match, keyword overlap between the change and the errors, metric shifts and matching documentation; never above 75% confidence |
 
-Every report states which engine produced it.
+Every report states which engine produced it, and the investigation record stores the engine, the provider that was attempted, model calls, tokens, cache use, latency and estimated cost. If the model becomes unusable part-way (rejected key, exhausted credit, spending limit), no further model call is made and the rule-based engine completes the report, saying why.
 
 ### Guardrails
 
@@ -94,7 +97,9 @@ Required approvals come from organisation settings by risk level (defaults 1 / 1
 
 ## Security summary
 
-- Passwords: bcrypt (cost 12). Sessions: 15-minute JWT access token and a rotating 30-day refresh token, both in `HttpOnly`, `SameSite=Lax` cookies. Reuse of a rotated refresh token revokes all of that user's sessions.
+- Passwords: bcrypt (cost 12). Sessions: 15-minute JWT access token and a rotating 30-day refresh token, both in `HttpOnly`, `SameSite=Lax` cookies. Each access token is bound to its session record, so signing out, rotating or changing the password invalidates it immediately. Reuse of a rotated refresh token revokes all of that user's sessions.
+- Cookie-authenticated writes are refused when the `Origin` header is not the web app's.
+- The agent's tool token works only while its investigation is running.
 - API keys: shown once, stored as SHA-256 hashes, limited to explicit scopes.
 - Stored integration secrets: AES-256-GCM with `ENCRYPTION_KEY`.
 - Webhooks in: GitHub HMAC-SHA256 over the raw body, constant-time comparison. Webhooks out: HMAC-signed.

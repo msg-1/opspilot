@@ -51,5 +51,17 @@ API tests run through HTTP against PostgreSQL (`opspilot_test`) with jobs execut
 ### 16. Chart colours
 Charts use a palette validated for colour-vision deficiency: status colours (critical, serious, warning) only for severity and error series, blue for a single measured series, one y-axis per chart, a legend for two or more series, and a screen-reader table behind every chart.
 
+### 16a. Default Claude model and spending limits
+Development defaults to `claude-haiku-5-5`, the lowest-priced current model, at the product owner's request; Sonnet and Opus are a one-line configuration change. Model ids were checked against Anthropic's models page. Spend is bounded at three levels: per call (output cap, timeout, at most two retries), per investigation (cost and token limits, with the last fifth reserved for the report) and per organisation per day. Costs are estimates from list prices; the Anthropic Console is authoritative.
+
+### 16b. A fatal model error ends model use for that investigation
+A rejected key, exhausted credit, unknown model or reached limit will not fix itself mid-run, so the agent stops calling the model immediately and the rule-based engine finishes, stating the reason. Rate limits and timeouts are retried a bounded number of times by the SDK and are not fatal.
+
+### 16c. Patched transitive packages instead of two framework majors
+The last high advisories were in `deepmerge-ts` (inside Prisma's CLI) and `postcss` (inside Next), both pinned exactly by their parents with no patched release on the current majors. npm `overrides` pin patched versions of those two packages only; the tools that use them were re-verified end to end. Zod, where the advisory was in the package itself, was upgraded to 4.
+
+### 16d. History rewritten once to remove attribution trailers
+With the owner's approval, the 23 commits carrying an AI co-author trailer were rewritten (message only). All 37 commits were verified one-for-one against the originals: same trees, authors, dates and parent relationships. Backups are kept under `refs/backup/pre-attribution-cleanup/*`, `refs/original/*` and a bundle in `.git/backup-pre-attribution-cleanup/` until the owner confirms removal.
+
 ### 17. Git workflow
 GitFlow-style: `main` for releases, `develop` for integration, `feature/*` and `bugfix/*` merged into `develop` with `--no-ff`, `release/*` and `hotfix/*` into `main` with a back-merge (see git-workflow.md). Commit messages follow Conventional Commits and carry no AI or tool attribution; a small shell hook checks both, locally and in CI, instead of adding a commit-lint dependency. The first seven backend branches were cut from work that already existed when the workflow was requested, so their intermediate commits are not individually runnable; from the AI service onward each branch was tested before merging.

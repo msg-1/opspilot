@@ -39,26 +39,28 @@ npm run dev                   # API :4000, worker, web :3000, AI service :8000
 | `npm run simulate` | Sends live demo metrics and logs through the ingestion API |
 | `npm run mcp` | Starts the MCP server for Claude Desktop / Claude Code |
 
-## Enabling a language model
+## Enabling Claude
 
-Without credentials, investigations run on a built-in rule-based engine and say so in every report. To use a model, set one of these in `.env` and restart the AI service:
+Without credentials, investigations run on a built-in rule-based engine and say so in every report. To have Claude do the reasoning, add an Anthropic API key to your local `.env` and restart the AI service:
 
 ```bash
-ANTHROPIC_API_KEY=...         # Claude (default model claude-opus-5-5)
-OPENAI_API_KEY=...            # OpenAI
-OLLAMA_MODEL=llama3.1         # a local Ollama model, if Ollama is running
+AI_PROVIDER=anthropic
+ANTHROPIC_API_KEY=            # your key; never commit or share it
+ANTHROPIC_MODEL=claude-haiku-5-5
 ```
+
+Step-by-step setup, costs, spending limits and troubleshooting: [docs/claude-integration.md](docs/claude-integration.md). Every investigation is labelled with the engine that produced it (Claude, rule-based, or mock).
 
 ## What is real and what is simulated
 
 - **Real:** everything in the product path — auth, RBAC, multi-tenancy, ingestion, log analysis, alerting, RAG with pgvector, the LangGraph agent, guardrails, the approval workflow, audit trail, GitHub REST sync and signed webhooks, the MCP server.
 - **Demo data:** the seeded organisation, including its "sample" repositories, is fictional and labelled as sample data in the UI.
 - **Not connected to your infrastructure:** OpsPilot never changes production itself. An approved action is either sent to a webhook you configure, or carried out by an operator who confirms it in OpsPilot.
-- **Not exercised here:** model-driven analysis has unit tests with scripted model responses but has not been run against a live LLM in this repository's verification; see [docs/roadmap.md](docs/roadmap.md).
+- **Not yet run live:** the Claude provider is tested against a mocked Anthropic API (requests, tool loop, errors, limits) but has not made a real API call, because no key has been configured. `docs/claude-integration.md` has the live-check steps.
 
 ## Documentation
 
-- [Setup guide](docs/setup-guide.md) · [Architecture](docs/architecture.md) · [API](docs/api-documentation.md) · [Database](docs/database-design.md)
+- [Claude integration](docs/claude-integration.md) · [Setup guide](docs/setup-guide.md) · [Architecture](docs/architecture.md) · [API](docs/api-documentation.md) · [Database](docs/database-design.md)
 - [Engineering audit](docs/engineering-audit.md) · [Changelog](CHANGELOG.md)
 - [Decisions](docs/decisions.md) · [Roadmap](docs/roadmap.md) · [Backlog](docs/feature-backlog.md) · [Learning log](docs/learning-log.md)
 
