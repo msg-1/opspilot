@@ -2,7 +2,7 @@ import type { LogLevel } from '@prisma/client';
 import { Router } from 'express';
 import { z } from 'zod';
 import { audit } from '../lib/audit';
-import { assertRange, csv, param, timeParam } from '../lib/http';
+import { assertRange, csv, csvEnum, param, timeParam } from '../lib/http';
 import { parseLevel } from '../lib/logParsing';
 import { prisma } from '../lib/prisma';
 import { authOf, requirePermission } from '../middleware/auth';
@@ -102,14 +102,14 @@ toolsRouter.get('/services/:ref', async (req, res) => {
 
 toolsRouter.get('/incidents', async (req, res) => {
   const { organizationId } = authOf(req);
-  const q = z.object({ q: z.string().trim().optional(), service: z.string().optional(), status: csv, limit: z.coerce.number().int().min(1).max(25).default(10) }).parse(req.query);
+  const q = z.object({ q: z.string().trim().optional(), service: z.string().optional(), status: csvEnum(['OPEN', 'INVESTIGATING', 'IDENTIFIED', 'MITIGATED', 'RESOLVED', 'CLOSED']), limit: z.coerce.number().int().min(1).max(25).default(10) }).parse(req.query);
   const service = q.service ? await findService(organizationId, q.service) : null;
   const incidents = await prisma.incident.findMany({
     where: {
       organizationId,
       ...(q.q ? { OR: [{ title: { contains: q.q, mode: 'insensitive' } }, { description: { contains: q.q, mode: 'insensitive' } }, { rootCause: { contains: q.q, mode: 'insensitive' } }] } : {}),
       ...(q.service ? { services: { some: { serviceId: service?.id ?? '__none__' } } } : {}),
-      ...(q.status ? { status: { in: q.status as never } } : {}),
+      ...(q.status ? { status: { in: q.status } } : {}),
     },
     orderBy: { startedAt: 'desc' },
     take: q.limit,

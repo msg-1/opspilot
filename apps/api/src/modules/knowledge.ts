@@ -6,7 +6,7 @@ import { aiService } from '../integrations/aiService';
 import { audit } from '../lib/audit';
 import { chunkMarkdown, embeddingText } from '../lib/chunking';
 import { notFound } from '../lib/errors';
-import { csv, paged, paginate, paginationQuery, param } from '../lib/http';
+import { csv, httpUrl, paged, paginate, paginationQuery, param } from '../lib/http';
 import { logger } from '../lib/logger';
 import { prisma } from '../lib/prisma';
 import { authOf, requirePermission } from '../middleware/auth';
@@ -19,7 +19,7 @@ const docBody = z.object({
   title: z.string().trim().min(3).max(200),
   type: z.enum(DOC_TYPES).default('runbook'),
   content: z.string().min(1).max(400_000),
-  sourceUrl: z.string().url().max(500).nullable().optional(),
+  sourceUrl: httpUrl.nullable().optional(),
   service: z.string().nullable().optional(),
   tags: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
 });

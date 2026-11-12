@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { audit } from '../lib/audit';
 import { badRequest, notFound } from '../lib/errors';
-import { csv, paged, paginate, paginationQuery, param, timeParam } from '../lib/http';
+import { csv, csvEnum, httpUrl, paged, paginate, paginationQuery, param, timeParam } from '../lib/http';
 import { prisma } from '../lib/prisma';
 import { slugify } from '../lib/slug';
 import { authOf, requirePermission } from '../middleware/auth';
@@ -29,16 +29,16 @@ const serviceBody = z.object({
   tier: z.enum(['TIER1', 'TIER2', 'TIER3']).optional(),
   lifecycle: z.enum(['EXPERIMENTAL', 'PRODUCTION', 'DEPRECATED']).optional(),
   language: z.string().trim().max(40).nullable().optional(),
-  repoUrl: z.string().url().max(300).nullable().optional(),
-  runbookUrl: z.string().url().max(300).nullable().optional(),
+  repoUrl: httpUrl.nullable().optional(),
+  runbookUrl: httpUrl.nullable().optional(),
   ownerTeamId: z.string().nullable().optional(),
   tags: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
 });
 
 const listQuery = paginationQuery.extend({
   q: z.string().trim().optional(),
-  tier: csv,
-  health: csv,
+  tier: csvEnum(['TIER1', 'TIER2', 'TIER3']),
+  health: csvEnum(['HEALTHY', 'DEGRADED', 'DOWN', 'UNKNOWN']),
   teamId: z.string().optional(),
   pageSize: z.coerce.number().int().min(1).max(200).default(100),
 });
@@ -54,8 +54,8 @@ servicesRouter.get('/', requirePermission('read'), async (req, res) => {
   const where: Prisma.ServiceWhereInput = {
     organizationId,
     ...(q.q ? { OR: [{ name: { contains: q.q, mode: 'insensitive' } }, { description: { contains: q.q, mode: 'insensitive' } }, { tags: { has: q.q.toLowerCase() } }] } : {}),
-    ...(q.tier ? { tier: { in: q.tier as never } } : {}),
-    ...(q.health ? { health: { in: q.health as never } } : {}),
+    ...(q.tier ? { tier: { in: q.tier } } : {}),
+    ...(q.health ? { health: { in: q.health } } : {}),
     ...(q.teamId ? { ownerTeamId: q.teamId } : {}),
   };
   const [services, total] = await Promise.all([
@@ -241,7 +241,7 @@ export async function recordDeployment(organizationId: string, input: z.infer<ty
 const deploymentQuery = paginationQuery.extend({
   service: z.string().optional(),
   environment: z.string().optional(),
-  status: csv,
+  status: csvEnum(deploymentStatus.options),
   from: timeParam.optional(),
   to: timeParam.optional(),
 });
@@ -254,7 +254,7 @@ deploymentsRouter.get('/', requirePermission('read'), async (req, res) => {
     organizationId,
     ...(service ? { serviceId: service.id } : {}),
     ...(q.environment ? { environment: q.environment } : {}),
-    ...(q.status ? { status: { in: q.status as never } } : {}),
+    ...(q.status ? { status: { in: q.status } } : {}),
     ...(q.from || q.to ? { startedAt: { gte: q.from, lte: q.to } } : {}),
   };
   const [rows, total] = await Promise.all([

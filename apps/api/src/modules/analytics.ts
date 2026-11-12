@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { audit } from '../lib/audit';
-import { assertRange, param, timeParam } from '../lib/http';
+import { assertRange, csvCell, param, timeParam } from '../lib/http';
 import { prisma } from '../lib/prisma';
 import { authOf, requirePermission } from '../middleware/auth';
 import { incidentKey, requireIncident } from './incidents';
@@ -140,7 +140,6 @@ analyticsRouter.get('/incidents.csv', requirePermission('read'), async (req, res
     orderBy: { startedAt: 'desc' },
     include: { services: { select: { service: { select: { name: true } } } } },
   });
-  const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const lines = [
     'key,title,severity,status,services,started_at,acknowledged_at,resolved_at,minutes_to_acknowledge,minutes_to_resolve,root_cause',
     ...incidents.map((i) =>
@@ -157,7 +156,7 @@ analyticsRouter.get('/incidents.csv', requirePermission('read'), async (req, res
         i.resolvedAt ? Math.round(minutes(i.startedAt, i.resolvedAt)) : '',
         i.rootCause,
       ]
-        .map(esc)
+        .map(csvCell)
         .join(','),
     ),
   ];
