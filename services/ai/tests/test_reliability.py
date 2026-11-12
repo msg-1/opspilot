@@ -365,6 +365,9 @@ def test_unsupported_percentages_and_calculated_values():
     assert ratio.status == "calculated" and "ratio of 12.37% and 0.4%" in ratio.detail
     assert one(s, "Connections fell by 60.", ["E3"]).status == "calculated"  # 140 - 80
     assert one(s, "Errors began 8 minutes after the deployment.", ["E4", "E5"]).status == "calculated"  # 11:22 → 11:30
+    # Quoted as approximate, an interval may be a minute out: timestamps are compared to the minute.
+    assert one(s, "Errors began about 9 minutes after the deployment.", ["E4", "E5"]).status == "estimate"
+    assert one(s, "Errors began about 12 minutes after the deployment.", ["E4", "E5"]).status == "unsupported"
     # The same calculation with one input missing from the cited evidence cannot be checked.
     missing = one(s, "Errors began 8 minutes after the deployment.", ["E5"])
     assert missing.status == "unsupported"
@@ -500,7 +503,7 @@ async def test_traces_locate_where_time_is_lost_without_claiming_to_know_why():
 
 
 async def test_traces_locate_where_requests_fail_at_the_deepest_span_with_a_message():
-    errors = [
+    errors = [  # from the entry point down, as the API returns them
         {"service": "shop-gateway", "operation": "POST /checkout", "message": "HTTP 502", "system": "http", "peer": None},
         {"service": "shop-orders", "operation": "POST", "message": "HTTP 503", "system": "http", "peer": "demo-payments"},
         {"service": "shop-payments", "operation": "set", "message": "Stream isn't writeable and enableOfflineQueue options is false", "system": "redis", "peer": "demo-redis"},
@@ -549,3 +552,39 @@ async def test_a_rollback_deployment_after_which_errors_fell_is_not_blamed_for_w
     assert not [a for a in report.recommended_actions if a.type == "rollback_deployment"]
     assert not any("v1.5.0" in step for step in report.next_steps)
     assert "No error onset could be determined" in undo.description and not [f for f in report.integrity.flagged if f.status == "unsupported"], report.integrity.flagged
+
+
+async def test_an_interval_quoted_by_the_engine_cites_both_of_its_ends():
+    """Found by the claim validator on real telemetry: "began about 3 minutes after this
+    deployment" cited the deployment but not the log pattern whose first occurrence was the onset."""
+    for name in ("bad_deploy_matching_change", "red_herring_closer_in_time", "deployment_rollback_target"):
+        report, store, _ = await investigate(BY_NAME[name])
+        top = report.hypotheses[0]
+        assert "minutes after this deployment" in top.description
+        kinds = {e.kind for e in store.items if e.ref in top.evidence_refs}
+        assert {"deployment", "log_pattern"} <= kinds, (name, kinds)
+        assert not [f for f in report.integrity.flagged if f.status == "unsupported"], (name, report.integrity.flagged)
+
+
+async def test_only_the_last_deployment_before_the_problem_is_the_code_that_was_running():
+    """Found on real telemetry: a service deployed twice within half an hour. Both deployments
+    scored the same on timing, although the earlier one had been replaced before the errors began."""
+    base = {"service": "shop-orders", "environment": "production", "status": "SUCCEEDED", "branch": "main", "deployedBy": "ci", "isRollback": False}
+    scenario = Scenario(
+        name="two_deploys", question="Why is shop-orders returning errors?", description="", expect=BY_NAME["bad_deploy_matching_change"].expect,
+        services=[svc("shop-orders")],
+        anomalies=[pattern("o1", "shop-orders", "failed to compute order total: Cannot read properties of null", 300, 2)],
+        logs=[{"id": "lo", "timestamp": t(1), "level": "ERROR", "service": "shop-orders", "message": "failed to compute order total: Cannot read properties of null", "traceId": "x", "fingerprint": "o1", "attributes": None}],
+        deployments=[
+            {**base, "id": "new", "version": "v1.5.0", "commitSha": "abababab1500", "startedAt": t(3), "finishedAt": t(3), "description": "Simplify discount lookup"},
+            {**base, "id": "old", "version": "v1.4.0", "commitSha": "abababab1400", "startedAt": t(27), "finishedAt": t(27), "description": "Order history pagination"},
+            {**base, "id": "older", "version": "v1.3.9", "commitSha": "abababab1309", "startedAt": t(9000), "finishedAt": t(9000), "description": "Routine update"},
+        ],
+        metrics={"shop-orders": [metric("error_rate", "Error rate", "%", 55.0, 0.0)]},
+    )
+    report, _, _ = await investigate(scenario)
+    first, second = report.hypotheses[0], next(h for h in report.hypotheses if "v1.4.0" in h.title)
+    assert "v1.5.0" in first.title and first.confidence >= second.confidence + 0.15
+    assert any("replaced it before the problem began" in c for c in second.contradictions)
+    (rollback,) = [a for a in report.recommended_actions if a.type == "rollback_deployment"]
+    assert rollback.parameters.deployment_id == "new" and rollback.parameters.to_version == "v1.4.0"

@@ -182,7 +182,8 @@ def analyse(question: str, store: EvidenceStore, *, scope: list[str], window: tu
         if lead < -10 or lead > 6 * 60:
             continue  # after the errors began, or too long before
         score = 0.42 if lead <= 30 else 0.34 if lead <= 120 else 0.22
-        refs = [change.ref]
+        # The interval quoted below runs from this change to the onset: cite both ends of it.
+        refs = [change.ref] + ([onset_ev.ref] if onset_ev else [])
         facts = [f"{change.title} happened at {change.occurred_at}, {max(0, round(lead))} minutes before the first anomalous error ({change.ref})." if onset_ev else f"{change.title} happened at {change.occurred_at} ({change.ref})."]
         assumptions = ["Temporal proximity is treated as a signal of causation; it has not been verified."]
         contradictions: list[str] = []
@@ -205,6 +206,11 @@ def analyse(question: str, store: EvidenceStore, *, scope: list[str], window: tu
         if change.kind == "deployment" and cdata.get("isRollback"):
             score -= 0.15
             contradictions.append("This deployment returned the service to a version that ran before, which makes a new regression unlikely.")
+        later = [d for d in store.by_kind("deployment") if change.kind == "deployment" and d.service == change.service and d.ref != change.ref and (change.occurred_at or "") < (d.occurred_at or "") and (parse_time(d.occurred_at) or onset) <= onset]
+        if later:
+            # Only the last deployment before the onset is the code that was running when it began.
+            score -= 0.2
+            contradictions.append(f"A later deployment of {change.service} ({later[0].title}, {later[0].ref}) replaced it before the problem began.")
         impact = next((i for i in store.by_kind("deployment_impact") if i.source_id == change.source_id), None)
         errors = ((impact.data or {}).get("errorLogs") or {}) if impact else {}
         if impact and errors.get("beforePerMinute") is not None and errors.get("afterPerMinute") is not None and errors["afterPerMinute"] <= errors["beforePerMinute"] and (errors.get("before") or 0) >= 5:
@@ -299,9 +305,9 @@ def analyse(question: str, store: EvidenceStore, *, scope: list[str], window: tu
             slow.setdefault((str(span.get("service")), _callee(span)), []).append(tr)
         errors = d.get("errorSpans") or []
         if errors:
-            # The span furthest down the call chain that carries a message of its own is the origin;
-            # the "HTTP 502" spans above it only pass the failure on.
-            origin = next((e for e in reversed(errors) if e.get("message") and not str(e["message"]).startswith("HTTP ")), errors[-1])
+            # Failed spans arrive ordered from the entry point down, so the last is the deepest:
+            # that is where the failure starts, and the spans above it only pass it on.
+            origin = errors[-1]
             broken.setdefault((str(origin.get("service")), _callee(origin) + "|" + re.sub(r"\d+", "<n>", str(origin.get("message") or ""))[:120]), []).append(tr)
     latency_up = [m for m in metrics if any(k in str((m.data or {}).get("metric")) for k in ("latency", "duration")) and _rose(m)]
     errors_up = [m for m in metrics if "error" in str((m.data or {}).get("metric")) and _rose(m)]

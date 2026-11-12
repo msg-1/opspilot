@@ -314,7 +314,9 @@ class Checker:
             for b, rb in moments[i + 1:]:
                 gap = (b - a).total_seconds() / 60 / per_unit
                 exact = _rounds_to(gap, claim)
-                if exact or (claim.estimate and gap and abs(gap - claim.number) <= ESTIMATE_TOLERANCE * gap):
+                # Timestamps are compared to the minute, so an interval quoted as approximate may be
+                # one unit out through rounding alone.
+                if exact or (claim.estimate and gap and abs(gap - claim.number) <= max(ESTIMATE_TOLERANCE * gap, 1.0)):
                     return ClaimCheck(text=claim.text, kind="number", status="calculated" if exact else "estimate", evidence_ref=ra,
                                       detail=f"time between {a.strftime('%H:%MZ')} ({ra}) and {b.strftime('%H:%MZ')} ({rb})")
         return None

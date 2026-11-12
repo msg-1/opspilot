@@ -18,6 +18,7 @@ export interface TraceSummary {
   rootOperation: string;
   spanCount: number;
   services: string[];
+  /** Failed spans from the entry point downwards: the last one is the deepest, where the failure starts. */
   /** The span with the largest self time: where the trace actually spent its time. */
   slowestSpan: { service: string; operation: string; durationMs: number; selfMs: number; system: string | null; peer: string | null } | null;
   errorSpans: { service: string; operation: string; message: string | null; system: string | null; peer: string | null }[];
@@ -72,9 +73,14 @@ function errorMessage(span: JaegerSpan): string | null {
 /** What kind of call a span is (postgresql, redis, http) and whom it was made to, when the span says. */
 function target(span: JaegerSpan): { system: string | null; peer: string | null } {
   // Both the older and the current OpenTelemetry attribute names are read.
-  const system = tag(span, 'db.system.name') ?? tag(span, 'db.system') ?? (tag(span, 'http.method') || tag(span, 'http.request.method') ? 'http' : null);
+  const db = tag(span, 'db.system.name') ?? tag(span, 'db.system');
+  // Only an outgoing call has a system and a peer. On a server span the same HTTP and address
+  // attributes describe the service itself, and reporting them would point the finger at it.
+  const outgoing = typeof db === 'string' || tag(span, 'span.kind') === 'client';
+  if (!outgoing) return { system: null, peer: null };
+  const system = typeof db === 'string' ? db : tag(span, 'http.method') || tag(span, 'http.request.method') ? 'http' : null;
   const peer = tag(span, 'peer.service') ?? tag(span, 'net.peer.name') ?? tag(span, 'server.address') ?? null;
-  return { system: typeof system === 'string' ? system : null, peer: typeof peer === 'string' ? peer : null };
+  return { system, peer: typeof peer === 'string' ? peer : null };
 }
 
 export function summarise(trace: JaegerTrace): TraceSummary | null {
@@ -83,6 +89,12 @@ export function summarise(trace: JaegerTrace): TraceSummary | null {
   const parentOf = (s: JaegerSpan) => s.references?.find((r) => r.refType === 'CHILD_OF' && ids.has(r.spanID))?.spanID;
   const root = trace.spans.filter((s) => !parentOf(s)).sort((a, b) => a.startTime - b.startTime)[0] ?? trace.spans[0]!;
   const service = (s: JaegerSpan) => trace.processes[s.processID]?.serviceName ?? 'unknown';
+  const byId = new Map(trace.spans.map((s) => [s.spanID, s]));
+  const depthOf = (s: JaegerSpan) => {
+    let depth = 0;
+    for (let p = parentOf(s); p && depth < 64; p = parentOf(byId.get(p)!)) depth += 1;
+    return depth;
+  };
   const childTime = new Map<string, number>();
   for (const s of trace.spans) {
     const parent = parentOf(s);
@@ -101,7 +113,14 @@ export function summarise(trace: JaegerTrace): TraceSummary | null {
     spanCount: trace.spans.length,
     services: [...new Set(trace.spans.map(service))].sort(),
     slowestSpan: slowest ? { service: service(slowest.span), operation: slowest.span.operationName, durationMs: ms(slowest.span.duration), selfMs: ms(slowest.self), ...target(slowest.span) } : null,
-    errorSpans: trace.spans.filter(failed).slice(0, 5).map((s) => ({ service: service(s), operation: s.operationName, message: errorMessage(s), ...target(s) })),
+    // Ordered from the entry point down the call chain, keeping the deepest: a failure starts at
+    // the bottom and every span above it only reports it.
+    errorSpans: trace.spans
+      .filter(failed)
+      .map((s) => ({ span: s, depth: depthOf(s) }))
+      .sort((a, b) => a.depth - b.depth || a.span.startTime - b.span.startTime)
+      .slice(-6)
+      .map(({ span: s }) => ({ service: service(s), operation: s.operationName, message: errorMessage(s), ...target(s) })),
   };
 }
 

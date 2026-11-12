@@ -239,6 +239,7 @@ if (wanted('redis-outage')) {
       const top = inv.hypotheses[0];
       c.ok('the leading hypothesis names Redis', !!top && /redis/i.test(top.title), titles(inv).join(' | '));
       c.ok('the dependency chain was followed down to shop-redis, recorded as DOWN', inv.evidence.some((e) => e.kind === 'dependency' && e.sourceId === 'dep:shop-redis' && /DOWN/.test(e.title)), inv.evidence.filter((e) => e.kind === 'dependency').map((e) => e.title).join(' | '));
+      c.ok('traces place the failure in shop-payments calls to Redis', titles(inv).some((t) => /Requests are failing in shop-payments's calls to .*redis/i.test(t)), titles(inv).join(' | '));
       c.ok('the unrelated database is not blamed', !titles(inv).some((t) => /postgres/i.test(t)), titles(inv).join(' | '));
       c.ok('no rollback is proposed: no deployment is involved', !inv.remediations.some((r) => r.type === 'rollback_deployment'), JSON.stringify(inv.remediations));
     },
@@ -251,7 +252,8 @@ if (wanted('bad-deploy')) {
     expect: async (c, inv, { activation, during }) => {
       c.ok('the failure is real: requests through the gateway fail', during.failed > 0, JSON.stringify(during));
       c.ok('outcome is INCIDENT', inv.outcome === 'INCIDENT', inv.report.assessment?.rationale);
-      c.ok('the leading hypothesis is the v1.5.0 deployment', /Regression introduced by Deployment of shop-orders v1\.5\.0/.test(inv.hypotheses[0]?.title ?? ''), titles(inv).join(' | '));
+      c.ok('the leading hypothesis is the v1.5.0 deployment, ahead of every other deployment', /Regression introduced by Deployment of shop-orders v1\.5\.0/.test(inv.hypotheses[0]?.title ?? '') && inv.hypotheses.slice(1).every((h) => !/Deployment|Rollback/.test(h.title) || h.confidence < inv.hypotheses[0].confidence), inv.hypotheses.map((h) => `${h.confidence} ${h.title}`).join(' | '));
+      c.ok('traces place the failure in shop-orders itself', titles(inv).some((t) => /Requests are failing in shop-orders$/.test(t)), titles(inv).join(' | '));
       c.ok('it cites the deployment record created when the scenario was switched on', inv.evidence.some((e) => e.kind === 'deployment' && e.sourceId === activation.id && inv.hypotheses[0]?.evidenceRefs.includes(e.ref)), activation.id);
       const rollback = inv.remediations.find((r) => r.type === 'rollback_deployment');
       c.ok('a rollback is proposed, as a production change awaiting a human', !!rollback && rollback.effect === 'state_changing' && rollback.status === 'PROPOSED', JSON.stringify(inv.remediations));
@@ -293,6 +295,9 @@ for (const name of ['pool-exhaustion', 'error-rate', 'upstream-down']) {
   const prov = await provenance(inv, startedAt);
   reportChecks(c, inv, prov);
   c.ok('OPSILUME sees a failure (not HEALTHY)', inv.outcome === 'INCIDENT' || inv.outcome === 'DEGRADED', inv.outcome);
+  const where = { 'pool-exhaustion': /shop-orders's calls to .*postgres/i, 'error-rate': /Requests are failing in shop-payments$|upstream dependency shop-payments/, 'upstream-down': /shop-orders's calls to .*payments|upstream dependency shop-payments/ }[name];
+  c.ok('the problem is located where it is', titles(inv).some((t) => where.test(t)), titles(inv).join(' | '));
+  c.ok('no rollback is proposed: no deployment is involved', !inv.remediations.some((r) => r.type === 'rollback_deployment'), JSON.stringify(inv.remediations));
   await sc.off();
   const recovered = await verifyRecovered();
   c.ok('after recovery, requests succeed and are fast again', recovered.recovered, JSON.stringify(recovered));

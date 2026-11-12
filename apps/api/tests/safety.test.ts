@@ -324,7 +324,12 @@ describe('trace retrieval', () => {
       const data = [
         { traceID: 't-slow', processes, spans: [span('t-slow', 'a', null, 'p1', 'GET /orders', 60_000, 1900), span('t-slow', 'b', 'a', 'p2', 'GET /orders', 59_990, 1880), span('t-slow', 'c', 'b', 'p2', 'pg.query:SELECT orders', 59_980, 1850, { 'db.system': 'postgresql', 'net.peer.name': 'demo-postgres' })] },
         { traceID: 't-fast', processes, spans: [span('t-fast', 'a', null, 'p1', 'GET /orders', 50_000, 40), span('t-fast', 'b', 'a', 'p2', 'GET /orders', 49_995, 30)] },
-        { traceID: 't-fail', processes, spans: [span('t-fail', 'a', null, 'p1', 'POST /checkout', 40_000, 120, { 'http.status_code': 502 }), span('t-fail', 'b', 'a', 'p3', 'POST /pay', 39_990, 100, { error: true, 'otel.status_description': 'connect ECONNREFUSED redis:6379' })] },
+        // Listed out of order on purpose: the failed spans must come back from the entry point down.
+        { traceID: 't-fail', processes, spans: [
+          span('t-fail', 'c', 'b', 'p3', 'set', 39_985, 2, { error: true, 'span.kind': 'client', 'db.system.name': 'redis', 'server.address': 'demo-redis', 'otel.status_description': 'connect ECONNREFUSED redis:6379' }),
+          span('t-fail', 'a', null, 'p1', 'POST /checkout', 40_000, 120, { 'http.status_code': 502, 'span.kind': 'server', 'server.address': 'gateway.example' }),
+          span('t-fail', 'b', 'a', 'p3', 'POST /pay', 39_990, 100, { error: true, 'span.kind': 'server', 'server.address': 'payments.example' }),
+        ] },
         { traceID: 't-other', processes, spans: [span('t-other', 'a', null, 'p3', 'GET /health', 30_000, 5)] },
       ];
       res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ data }));
@@ -359,9 +364,12 @@ describe('trace retrieval', () => {
     expect(body).toMatchObject({ available: true, service: 'gateway', sampled: 3, failed: 1 });
     // The failed trace first, then the slowest. A trace that never touched the service is left out.
     expect(body.traces.map((t: { traceId: string }) => t.traceId)).toEqual(['t-fail', 't-slow', 't-fast']);
+    // From the entry point down: the last failed span is the deepest, where the failure starts. A
+    // server span has no peer (its address attributes name itself); the outgoing call does.
     expect(body.traces[0].errorSpans).toEqual([
       { service: 'gateway', operation: 'POST /checkout', message: 'HTTP 502', system: null, peer: null },
-      { service: 'payments', operation: 'POST /pay', message: 'connect ECONNREFUSED redis:6379', system: null, peer: null },
+      { service: 'payments', operation: 'POST /pay', message: null, system: null, peer: null },
+      { service: 'payments', operation: 'set', message: 'connect ECONNREFUSED redis:6379', system: 'redis', peer: 'demo-redis' },
     ]);
     // Self time, not total time: the gateway span lasted longest, the database query is where the time went.
     expect(body.traces[1]).toMatchObject({ durationMs: 1900, rootService: 'gateway', spanCount: 3, services: ['gateway', 'orders'], slowestSpan: { service: 'orders', operation: 'pg.query:SELECT orders', durationMs: 1850, selfMs: 1850, system: 'postgresql', peer: 'demo-postgres' } });
