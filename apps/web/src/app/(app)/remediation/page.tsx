@@ -33,7 +33,7 @@ export default function RemediationPage() {
       />
       {data && (
         <div className="mb-4">
-          <Notice>{data.executionMode === 'webhook' ? 'Approved actions are dispatched to your remediation webhook when a person clicks Execute.' : 'No remediation webhook is configured: OpsPilot does not touch your infrastructure. After approval, an operator carries out the action and confirms it here. Configure a webhook under Settings to dispatch approved actions automatically.'}</Notice>
+          <Notice>{data.executionMode === 'webhook' ? 'Approved actions are dispatched to your remediation webhook when a person clicks Execute.' : 'No remediation webhook is configured: OPSILUME does not touch your infrastructure. After approval, an operator carries out the action and confirms it here. Configure a webhook under Settings to dispatch approved actions automatically.'}</Notice>
         </div>
       )}
       <Tabs
@@ -58,7 +58,7 @@ export default function RemediationPage() {
                   <td><RiskBadge risk={r.risk} /></td>
                   <td className="tabular text-ink-2">{r.approvalsGranted}/{r.requiredApprovals}</td>
                   <td>{r.incident ? <Link href={`/incidents/${r.incident.id}`} className="font-mono text-[12.5px] hover:underline">INC-{r.incident.number}</Link> : <span className="text-ink-3">—</span>}</td>
-                  <td className="whitespace-nowrap">{r.proposedByType === 'ai_agent' ? <span className="inline-flex items-center gap-1"><Bot className="size-3.5 text-accent" aria-hidden />OpsPilot AI</span> : r.proposedBy?.name}</td>
+                  <td className="whitespace-nowrap">{r.proposedByType === 'ai_agent' ? <span className="inline-flex items-center gap-1"><Bot className="size-3.5 text-accent" aria-hidden />OPSILUME AI</span> : r.proposedBy?.name}</td>
                   <td className="whitespace-nowrap text-ink-2">{timeAgo(r.createdAt)}</td>
                 </tr>
               ))}

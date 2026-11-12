@@ -32,7 +32,7 @@ function LoginForm() {
     <form onSubmit={submit} className="space-y-4">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Sign in</h1>
-        <p className="mt-1 text-sm text-ink-2">Use your OpsPilot account.</p>
+        <p className="mt-1 text-sm text-ink-2">Use your OPSILUME account.</p>
       </div>
       <FormError error={error} />
       <Field label="Email">{(id) => <Input id={id} type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} />}</Field>
@@ -48,7 +48,7 @@ function LoginForm() {
       </p>
       {process.env.NODE_ENV !== 'production' && (
         <div className="rounded-md border border-line bg-sunken px-3 py-2 text-[12px] text-ink-2">
-          Demo data (after <code className="font-mono">npm run db:seed</code>): <span className="font-mono text-ink">demo@example.com</span> / <span className="font-mono text-ink">OpsPilot-demo-1</span>
+          Demo data (after <code className="font-mono">npm run db:seed</code>): <span className="font-mono text-ink">demo@example.com</span> / <span className="font-mono text-ink">OPSILUME-demo-1</span>
         </div>
       )}
     </form>

@@ -35,7 +35,7 @@ export async function reapStranded(now = new Date()) {
     const claimed = await prisma.investigation.updateMany({ where: { id: inv.id, status: { in: ['RUNNING', 'QUEUED'] } }, data: { status: 'FAILED', error: interrupted, completedAt: now } });
     if (!claimed.count) continue;
     await prisma.investigationStep.create({ data: { investigationId: inv.id, index: inv._count.steps, type: 'error', title: 'Investigation interrupted', detail: interrupted, status: 'failed' } });
-    await writeAudit({ organizationId: inv.organizationId, actorType: 'system', actorLabel: 'OpsPilot worker', action: 'investigation.interrupted', resourceType: 'investigation', resourceId: inv.id });
+    await writeAudit({ organizationId: inv.organizationId, actorType: 'system', actorLabel: 'OPSILUME worker', action: 'investigation.interrupted', resourceType: 'investigation', resourceId: inv.id });
   }
 
   const unknown = 'Execution was interrupted and its outcome is unknown. Check the target system before retrying: the change may or may not have been applied.';
@@ -43,8 +43,8 @@ export async function reapStranded(now = new Date()) {
   for (const action of actions) {
     const claimed = await prisma.remediationAction.updateMany({ where: { id: action.id, status: 'EXECUTING' }, data: { status: 'FAILED', executedAt: now, executionResult: { mode: 'unknown', success: false, outcome: 'unknown', summary: unknown } } });
     if (!claimed.count) continue;
-    await writeAudit({ organizationId: action.organizationId, actorType: 'system', actorLabel: 'OpsPilot worker', action: 'remediation.execute_interrupted', resourceType: 'remediation_action', resourceId: action.id });
-    if (action.incidentId) await addIncidentEvent(action.incidentId, 'remediation', `Remediation outcome unknown: ${action.title} — ${unknown}`, { kind: 'system', label: 'OpsPilot worker' }, { actionId: action.id });
+    await writeAudit({ organizationId: action.organizationId, actorType: 'system', actorLabel: 'OPSILUME worker', action: 'remediation.execute_interrupted', resourceType: 'remediation_action', resourceId: action.id });
+    if (action.incidentId) await addIncidentEvent(action.incidentId, 'remediation', `Remediation outcome unknown: ${action.title} — ${unknown}`, { kind: 'system', label: 'OPSILUME worker' }, { actionId: action.id });
   }
 
   const documents = await prisma.knowledgeDocument.findMany({ where: { indexStatus: 'indexing', updatedAt: { lt: before(STALE.indexingDocument) } }, select: { id: true } });

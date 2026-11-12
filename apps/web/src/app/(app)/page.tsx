@@ -125,7 +125,7 @@ export default function OverviewPage() {
 
         <Card title="Recent investigations" className="xl:col-span-2" padded={false} actions={<LinkButton href="/investigations" size="sm" variant="ghost">Workspace</LinkButton>}>
           {data.recentInvestigations.length === 0 ? (
-            <EmptyState icon={<Sparkles className="size-5" aria-hidden />} title="No investigations yet" description="Ask OpsPilot to investigate an incident or any question about your systems. It gathers evidence and ranks hypotheses for you to verify." action={session.can('investigation:run') ? <LinkButton href="/investigations" size="sm">Start an investigation</LinkButton> : undefined} />
+            <EmptyState icon={<Sparkles className="size-5" aria-hidden />} title="No investigations yet" description="Ask OPSILUME to investigate an incident or any question about your systems. It gathers evidence and ranks hypotheses for you to verify." action={session.can('investigation:run') ? <LinkButton href="/investigations" size="sm">Start an investigation</LinkButton> : undefined} />
           ) : (
             <ul>
               {data.recentInvestigations.map((i) => (

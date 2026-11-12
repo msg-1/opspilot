@@ -1,11 +1,12 @@
 'use client';
 
 import clsx from 'clsx';
-import { AlertTriangle, BookOpen, Bot, Boxes, ChevronDown, CircleHelp, FileCode2, GitPullRequest, ListChecks, Rocket, ScrollText, ShieldAlert, Siren, Sparkles, TrendingUp, Wrench, XCircle } from 'lucide-react';
+import { Activity, AlertTriangle, BookOpen, Bot, Boxes, HeartPulse, Route, ChevronDown, CircleHelp, FileCode2, GitPullRequest, ListChecks, Rocket, ScrollText, ShieldAlert, Siren, Sparkles, TrendingUp, Wrench, XCircle } from 'lucide-react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useMemo, useState } from 'react';
-import { ConfidenceMeter, EngineBadge, InvestigationStatusBadge, RemediationStatusBadge, RiskBadge, SeverityBadge } from '@/components/badges';
+import { ConfidenceMeter, EffectBadge, EngineBadge, InvestigationStatusBadge, RemediationStatusBadge, RiskBadge, SeverityBadge } from '@/components/badges';
+import { AssessmentCard, IntegritySummary, VerificationMark } from '@/components/findings';
 import { Button, Card, EmptyState, ErrorState, FormError, Mono, Notice, PageHeader, Spinner, Tabs } from '@/components/ui';
 import { api, useApi } from '@/lib/api';
 import { clock, dateTime, timeAgo, titleCase } from '@/lib/format';
@@ -40,6 +41,10 @@ const KIND: Record<string, { icon: React.ElementType; label: string }> = {
   incident: { icon: Siren, label: 'Past incident' },
   document: { icon: BookOpen, label: 'Knowledge base' },
   dependency: { icon: Boxes, label: 'Dependency' },
+  metric_baseline: { icon: Activity, label: 'Steady metrics' },
+  service_health: { icon: HeartPulse, label: 'Service health' },
+  deployment_impact: { icon: TrendingUp, label: 'Deployment impact' },
+  trace: { icon: Route, label: 'Trace' },
 };
 
 function sourceLink(e: Evidence): string | null {
@@ -208,6 +213,8 @@ export default function InvestigationPage() {
     const refs = new Set<string>();
     data?.hypotheses.forEach((h) => h.evidenceRefs.forEach((r) => refs.add(r)));
     data?.report?.facts.forEach((f) => f.evidenceRefs.forEach((r) => refs.add(r)));
+    data?.report?.observations?.forEach((f) => f.evidenceRefs.forEach((r) => refs.add(r)));
+    data?.report?.assessment?.supportingRefs.forEach((r) => refs.add(r));
     return refs;
   }, [data]);
 
@@ -262,14 +269,17 @@ export default function InvestigationPage() {
         <Card className="mb-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <h2 className="text-[12px] font-semibold tracking-wide text-ink-2 uppercase">Summary</h2>
-            <ConfidenceMeter value={report.confidence} />
+            {/* With no fault hypothesis there is no hypothesis confidence to show; the assessment below carries its own. */}
+            {data.hypotheses.length > 0 && <ConfidenceMeter value={report.confidence} />}
           </div>
           <p className="mt-2 max-w-4xl text-[15px] leading-relaxed text-ink"><WithRefs text={report.summary} evidence={evidence} onSelect={select} /></p>
           <p className="mt-3 flex items-start gap-1.5 text-[12px] text-ink-2">
             <ShieldAlert className="mt-px size-3.5 shrink-0" aria-hidden />
             {report.analysisMode === 'heuristic' ? 'Produced by rule-based correlation, not a language model. ' : report.analysisMode === 'mock' ? 'Produced by a scripted mock, not a language model. ' : `Written by ${data.model ?? 'a language model'} from the evidence below. `}
-            These are hypotheses to verify, not a confirmed root cause.
+            {data.hypotheses.length > 0 ? 'These are hypotheses to verify, not a confirmed root cause.' : 'No fault hypothesis was put forward.'}
           </p>
+          {report.assessment && <div className="mt-4"><AssessmentCard assessment={report.assessment} renderRefs={(refs) => <Refs refs={refs} evidence={evidence} onSelect={select} />} /></div>}
+          {report.integrity && <div className="mt-3"><IntegritySummary integrity={report.integrity} /></div>}
         </Card>
       )}
 
@@ -281,14 +291,20 @@ export default function InvestigationPage() {
               <div className="space-y-5">
                 <section>
                   <h3 className="mb-2 text-[12px] font-semibold tracking-wide text-ink-2 uppercase">Hypotheses, most likely first</h3>
-                  {data.hypotheses.length === 0 ? <p className="text-sm text-ink-2">No hypothesis met the evidence bar. See what could not be determined below.</p> : (
+                  {data.hypotheses.length === 0 ? <p className="text-sm text-ink-2">{report.assessment?.outcome === 'HEALTHY' ? 'None: the evidence shows no fault to explain. A cause is not put forward when there is nothing to cause.' : 'No hypothesis met the evidence bar. See what could not be determined below.'}</p> : (
                     <div className="space-y-2">{data.hypotheses.map((h, i) => <HypothesisCard key={h.id} h={h} evidence={evidence} onSelect={select} top={i === 0} />)}</div>
                   )}
                 </section>
                 {report.facts.length > 0 && (
                   <section>
                     <h3 className="mb-2 text-[12px] font-semibold tracking-wide text-good-ink uppercase">Established facts</h3>
-                    <ul className="space-y-1.5 text-sm">{report.facts.map((f, i) => <li key={i} className="flex gap-2"><span aria-hidden className="mt-2 size-1.5 shrink-0 rounded-full bg-good" /><span>{f.statement} <Refs refs={f.evidenceRefs} evidence={evidence} onSelect={select} /></span></li>)}</ul>
+                    <ul className="space-y-1.5 text-sm">{report.facts.map((f, i) => <li key={i} className="flex gap-2"><span aria-hidden className="mt-2 size-1.5 shrink-0 rounded-full bg-good" /><span>{f.statement} <Refs refs={f.evidenceRefs} evidence={evidence} onSelect={select} /><VerificationMark verification={f.verification} /></span></li>)}</ul>
+                  </section>
+                )}
+                {(report.observations?.length ?? 0) > 0 && (
+                  <section>
+                    <h3 className="mb-2 text-[12px] font-semibold tracking-wide text-ink-2 uppercase">Observations that are not evidence of a fault</h3>
+                    <ul className="space-y-1.5 text-sm">{report.observations!.map((f, i) => <li key={i} className="flex gap-2"><span aria-hidden className="mt-2 size-1.5 shrink-0 rounded-full bg-line-strong" /><span>{f.statement} <Refs refs={f.evidenceRefs} evidence={evidence} onSelect={select} /><VerificationMark verification={f.verification} /></span></li>)}</ul>
                   </section>
                 )}
                 {report.assumptions.length > 0 && (
@@ -335,7 +351,7 @@ export default function InvestigationPage() {
                   <li key={r.id} className="border-b border-line last:border-0">
                     <Link href={`/remediation/${r.id}`} className="block px-4 py-3 hover:bg-sunken/60">
                       <div className="text-sm font-medium">{r.title}</div>
-                      <div className="mt-1.5 flex flex-wrap gap-1.5"><RemediationStatusBadge status={r.status} /><RiskBadge risk={r.risk} /><span className="text-[12px] text-ink-2">{titleCase(r.type)}</span></div>
+                      <div className="mt-1.5 flex flex-wrap gap-1.5"><RemediationStatusBadge status={r.status} /><EffectBadge effect={r.effect} /><RiskBadge risk={r.risk} /><span className="text-[12px] text-ink-2">{titleCase(r.type)}</span></div>
                     </Link>
                   </li>
                 ))}

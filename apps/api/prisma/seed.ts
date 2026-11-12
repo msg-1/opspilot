@@ -354,8 +354,8 @@ async function main() {
       services: { create: [{ serviceId: services['checkout-service']! }, { serviceId: services['api-gateway']! }] },
       events: {
         create: [
-          { type: 'created', message: 'Incident opened as SEV2', actorType: 'system', actorLabel: 'OpsPilot monitoring', createdAt: startedAt },
-          { type: 'alert', message: 'Alert firing: Checkout error rate high (error_rate averaged 14.2% over 5m)', actorType: 'system', actorLabel: 'OpsPilot monitoring', createdAt: startedAt },
+          { type: 'created', message: 'Incident opened as SEV2', actorType: 'system', actorLabel: 'OPSILUME monitoring', createdAt: startedAt },
+          { type: 'alert', message: 'Alert firing: Checkout error rate high (error_rate averaged 14.2% over 5m)', actorType: 'system', actorLabel: 'OPSILUME monitoring', createdAt: startedAt },
           { type: 'status_change', message: 'Status changed from OPEN to INVESTIGATING', actorId: users.lena, actorLabel: 'Lena Fischer', createdAt: ago(INCIDENT_AT - 4 * MIN) },
           { type: 'assignment', message: 'Assigned to Tomás Herrera', actorId: users.lena, actorLabel: 'Lena Fischer', createdAt: ago(INCIDENT_AT - 5 * MIN) },
           { type: 'comment', message: 'Payment provider status page is green. @Marcus Oyelaran can you confirm nothing odd on the payment side after this morning’s SDK upgrade?', actorId: users.lena, actorLabel: 'Lena Fischer', createdAt: ago(INCIDENT_AT - 9 * MIN) },
@@ -384,7 +384,7 @@ async function main() {
     data: {
       organizationId, incidentId: poolIncident, type: 'config_change', title: 'Raise checkout DB_POOL_MAX from 20 to 40', description: 'Set DB_POOL_MAX=40 for checkout-service in production and roll the deployment.', rationale: 'Pool wait time is the dominant contributor to checkout latency; orders-db has headroom (62 of 200 connections in use).', risk: 'MEDIUM', status: 'EXECUTED', serviceId: services['checkout-service'], parameters: { key: 'DB_POOL_MAX', from: 20, to: 40 },
       proposedByType: 'user', proposedById: users.lena, requestedById: users.lena, requestedAt, requiredApprovals: 1, executedById: users.lena, executedAt: new Date(requestedAt.getTime() + 14 * MIN),
-      executionResult: { mode: 'manual', success: true, summary: 'Carried out manually and attested by Lena Fischer. OpsPilot did not change any external system.' }, createdAt: new Date(requestedAt.getTime() - 5 * MIN),
+      executionResult: { mode: 'manual', success: true, summary: 'Carried out manually and attested by Lena Fischer. OPSILUME did not change any external system.' }, createdAt: new Date(requestedAt.getTime() - 5 * MIN),
       approvals: { create: { approverId: users.marcus!, decision: 'approved', comment: 'Headroom confirmed on the DB side.', createdAt: new Date(requestedAt.getTime() + 6 * MIN) } },
     },
   });

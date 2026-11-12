@@ -4,7 +4,7 @@ import { Sparkles } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { ConfidenceMeter, EngineBadge, InvestigationStatusBadge } from '@/components/badges';
+import { ConfidenceMeter, EngineBadge, InvestigationStatusBadge, OutcomeBadge } from '@/components/badges';
 import { type AiStatus, EngineNotice } from '@/components/engine-notice';
 import { Button, Card, EmptyState, ErrorState, FormError, PageHeader, Pagination, Select, Spinner, Textarea } from '@/components/ui';
 import { api, qs, useApi } from '@/lib/api';
@@ -39,7 +39,7 @@ export default function InvestigationsPage() {
 
   return (
     <>
-      <PageHeader title="Investigations" description="Ask a question in plain language. OpsPilot plans the investigation, queries your logs, deployments, code changes, metrics and knowledge base, and returns ranked hypotheses with the evidence behind each one." />
+      <PageHeader title="Investigations" description="Ask a question in plain language. OPSILUME plans the investigation, queries your logs, deployments, code changes, metrics and knowledge base, and returns ranked hypotheses with the evidence behind each one." />
       <div className="mb-4"><EngineNotice status={status.data} /></div>
 
       {canRun && (
@@ -79,7 +79,8 @@ export default function InvestigationsPage() {
                     {i.summary && <p className="mt-1 line-clamp-2 max-w-4xl text-[13px] text-ink-2">{i.summary}</p>}
                     {i.error && <p className="mt-1 text-[13px] text-critical-ink">{i.error}</p>}
                     <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-ink-2">
-                      {i.confidence !== null && <ConfidenceMeter value={i.confidence} />}
+                      {i.outcome && <OutcomeBadge outcome={i.outcome} />}
+                      {i.confidence !== null && i.outcome !== 'HEALTHY' && i.outcome !== 'UNDETERMINED' && <ConfidenceMeter value={i.confidence} />}
                       {i.incident && <span>INC-{i.incident.number}</span>}
                       <span>{i._count?.evidence ?? 0} evidence · {i._count?.hypotheses ?? 0} hypotheses</span>
                       <EngineBadge mode={i.analysisMode} provider={i.provider} model={i.model} attemptedProvider={i.attemptedProvider} />

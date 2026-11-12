@@ -109,7 +109,7 @@ async function presentMany(rows: Detailed[]) {
   return rows.map((r) => ({
     ...r,
     service: r.serviceId ? (services.get(r.serviceId) ?? null) : null,
-    proposedBy: r.proposedByType === 'ai_agent' ? { id: null, name: 'OpsPilot AI' } : person(r.proposedById),
+    proposedBy: r.proposedByType === 'ai_agent' ? { id: null, name: 'OPSILUME AI' } : person(r.proposedById),
     requestedBy: person(r.requestedById),
     executedBy: person(r.executedById),
     // An approval counts only for the content it was given for.
@@ -208,7 +208,7 @@ async function execute(action: RemediationAction, operator: { userId: string; la
   }
   const settings = await getSettings(action.organizationId);
   if (!settings.remediationWebhookUrl) {
-    return { mode: 'manual', success: true, outcome: 'applied', summary: `Carried out manually and attested by ${operator.label}. OpsPilot did not change any external system.`, detail: manualNotes ? { notes: manualNotes } : undefined };
+    return { mode: 'manual', success: true, outcome: 'applied', summary: `Carried out manually and attested by ${operator.label}. OPSILUME did not change any external system.`, detail: manualNotes ? { notes: manualNotes } : undefined };
   }
   const body = JSON.stringify({
     event: 'remediation.execute',

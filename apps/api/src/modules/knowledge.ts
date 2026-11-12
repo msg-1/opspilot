@@ -241,7 +241,7 @@ knowledgeRouter.get('/documents/:id/plan', requirePermission('read'), async (req
     ...plan,
     readOnly: plan.steps.length - plan.stateChanging,
     note: plan.steps.length
-      ? 'Steps are classified from their text. Anything that is not clearly a check is treated as state-changing. Nothing is executed by OpsPilot.'
+      ? 'Steps are classified from their text. Anything that is not clearly a check is treated as state-changing. Nothing is executed by OPSILUME.'
       : 'No list items or numbered steps were found, so the document cannot be shown to be harmless and is treated as state-changing.',
   });
 });

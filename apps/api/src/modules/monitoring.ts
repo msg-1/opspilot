@@ -129,15 +129,15 @@ export async function evaluateAlerts(organizationId?: string) {
       });
       fired++;
       await prisma.serviceEvent.create({
-        data: { organizationId: rule.organizationId, serviceId: rule.serviceId, type: 'alert', title: `Alert firing: ${rule.name}`, details: message, source: 'monitoring', actor: 'OpsPilot monitoring' },
+        data: { organizationId: rule.organizationId, serviceId: rule.serviceId, type: 'alert', title: `Alert firing: ${rule.name}`, details: message, source: 'monitoring', actor: 'OPSILUME monitoring' },
       });
-      await writeAudit({ organizationId: rule.organizationId, actorType: 'system', actorLabel: 'OpsPilot monitoring', action: 'alert.fire', resourceType: 'alert', resourceId: alert.id, metadata: { rule: rule.name, value } });
+      await writeAudit({ organizationId: rule.organizationId, actorType: 'system', actorLabel: 'OPSILUME monitoring', action: 'alert.fire', resourceType: 'alert', resourceId: alert.id, metadata: { rule: rule.name, value } });
       if (rule.autoIncident) {
         try {
           const incident = await createIncident(
             rule.organizationId,
             { title: `${rule.service.name}: ${rule.name}`, description: message, severity: rule.severity, environment: 'production', serviceIds: [rule.serviceId], source: 'alert' },
-            { kind: 'system', label: 'OpsPilot monitoring' },
+            { kind: 'system', label: 'OPSILUME monitoring' },
           );
           await prisma.alert.update({ where: { id: alert.id }, data: { incidentId: incident.id } });
           await notifyRoles(['OWNER', 'ADMIN', 'ENGINEER'], {

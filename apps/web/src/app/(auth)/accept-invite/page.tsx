@@ -42,7 +42,7 @@ function AcceptForm() {
       </div>
       <FormError error={error} />
       {!hasAccount && <Field label="Your name">{(id) => <Input id={id} required value={name} onChange={(e) => setName(e.target.value)} />}</Field>}
-      <Field label={hasAccount ? 'Your existing OpsPilot password' : 'Choose a password'} hint={hasAccount ? undefined : 'At least 10 characters, with a letter and a number.'}>
+      <Field label={hasAccount ? 'Your existing OPSILUME password' : 'Choose a password'} hint={hasAccount ? undefined : 'At least 10 characters, with a letter and a number.'}>
         {(id) => <Input id={id} type="password" required minLength={hasAccount ? 1 : 10} autoComplete={hasAccount ? 'current-password' : 'new-password'} value={password} onChange={(e) => setPassword(e.target.value)} />}
       </Field>
       <Button type="submit" variant="primary" loading={busy} className="w-full">

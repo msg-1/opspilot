@@ -153,7 +153,7 @@ describe('investigations', () => {
     // The recommendation exists only as a proposal attributed to the AI.
     expect(inv.remediations).toEqual([expect.objectContaining({ type: 'rollback_deployment', status: 'PROPOSED' })]);
     const action = (await org.owner.get(`/api/v1/remediations/${inv.remediations[0].id}`)).body;
-    expect(action).toMatchObject({ proposedByType: 'ai_agent', proposedBy: { name: 'OpsPilot AI' }, service: { slug: 'checkout' } });
+    expect(action).toMatchObject({ proposedByType: 'ai_agent', proposedBy: { name: 'OPSILUME AI' }, service: { slug: 'checkout' } });
     expect(await prisma.deployment.count({ where: { organizationId: org.organizationId } })).toBe(0);
     const timeline = (await org.owner.get(`/api/v1/incidents/${incident.id}`)).body.timeline.map((e: { type: string }) => e.type);
     expect(timeline.filter((t: string) => t === 'investigation')).toHaveLength(2);

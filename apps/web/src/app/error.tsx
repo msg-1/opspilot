@@ -11,7 +11,7 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
   return (
     <div role="alert" className="mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center gap-3 p-6 text-center">
       <h1 className="text-xl font-semibold tracking-tight">Something went wrong on this page</h1>
-      <p className="text-sm text-ink-2">The rest of OpsPilot is unaffected. You can try again, or go back to the overview.</p>
+      <p className="text-sm text-ink-2">The rest of OPSILUME is unaffected. You can try again, or go back to the overview.</p>
       {error.digest && <p className="font-mono text-[12px] text-ink-3">Reference: {error.digest}</p>}
       <div className="mt-2 flex gap-2">
         <button type="button" onClick={reset} className="h-9 rounded-md bg-ink px-3.5 text-sm font-medium text-white hover:bg-black">Try again</button>
