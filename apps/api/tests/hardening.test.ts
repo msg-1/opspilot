@@ -60,3 +60,33 @@ describe('input validation', () => {
     expect(csv).not.toMatch(/,"=HYPERLINK/);
   });
 });
+
+describe('recovery of stranded work', () => {
+  it('fails interrupted investigations and executions honestly, and leaves fresh ones alone', async () => {
+    const { reapStranded } = await import('../src/modules/system');
+    const { prisma } = await import('./helpers');
+    const org = await createOrg();
+    const incident = (await org.owner.post('/api/v1/incidents').send({ title: 'Stranded work incident' })).body;
+    const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000);
+    const mk = (status: 'RUNNING' | 'QUEUED', startedAt: Date | null, createdAt: Date) => prisma.investigation.create({ data: { organizationId: org.organizationId, question: 'why did it stop?', status, startedAt, createdAt } });
+    const [staleRunning, freshRunning, staleQueued, freshQueued] = await Promise.all([mk('RUNNING', ago(45), ago(46)), mk('RUNNING', ago(2), ago(3)), mk('QUEUED', null, ago(90)), mk('QUEUED', null, ago(5))]);
+    const action = await prisma.remediationAction.create({ data: { organizationId: org.organizationId, incidentId: incident.id, type: 'restart_service', title: 'Restart checkout', description: 'Rolling restart', status: 'EXECUTING' } });
+    await prisma.$executeRaw`UPDATE "RemediationAction" SET "updatedAt" = ${ago(30)} WHERE "id" = ${action.id}`;
+
+    await reapStranded();
+
+    const status = async (id: string) => (await prisma.investigation.findUniqueOrThrow({ where: { id } })).status;
+    expect([await status(staleRunning.id), await status(freshRunning.id), await status(staleQueued.id), await status(freshQueued.id)]).toEqual(['FAILED', 'RUNNING', 'FAILED', 'QUEUED']);
+    const detail = (await org.owner.get(`/api/v1/investigations/${staleRunning.id}`)).body;
+    expect(detail.error).toContain('worker stopped');
+    expect(detail.steps.at(-1)).toMatchObject({ type: 'error', title: 'Investigation interrupted' });
+
+    const reaped = (await org.owner.get(`/api/v1/remediations/${action.id}`)).body;
+    expect(reaped).toMatchObject({ status: 'FAILED', executionResult: { mode: 'unknown', success: false } });
+    expect(reaped.executionResult.summary).toContain('outcome is unknown');
+    // A failed action can be retried by a person; nothing was re-executed automatically.
+    const timeline = (await org.owner.get(`/api/v1/incidents/${incident.id}`)).body.timeline.map((e: { message: string }) => e.message);
+    expect(timeline.some((m: string) => m.startsWith('Remediation outcome unknown'))).toBe(true);
+    expect((await reapStranded())).toMatchObject({ remediations: 0 });
+  });
+});

@@ -375,7 +375,13 @@ investigationsRouter.post('/', requirePermission('investigation:run'), async (re
   });
   await audit(req, 'investigation.start', 'investigation', investigation.id, { incident: incident ? incidentKey(incident.number) : null });
   if (incident) await addIncidentEvent(incident.id, 'investigation', `AI investigation started: "${body.question.slice(0, 200)}"`, auth, { investigationId: investigation.id });
-  await enqueue('investigation', { investigationId: investigation.id });
+  try {
+    await enqueue('investigation', { investigationId: investigation.id });
+  } catch (err) {
+    // Never leave a row that looks queued when nothing will ever pick it up.
+    await prisma.investigation.update({ where: { id: investigation.id }, data: { status: 'FAILED', error: (err as Error).message, completedAt: new Date() } });
+    throw err;
+  }
   res.status(202).json(await prisma.investigation.findUnique({ where: { id: investigation.id }, select: listSelect }));
 });
 
