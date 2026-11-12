@@ -178,4 +178,48 @@ Small, low-risk Medium items fixed alongside because they share the same code: M
 
 ## Remediation results
 
-_Filled in as fixes land; see the end of this document._
+Fixes were made on `bugfix/*` branches, each tested and merged into `develop`. "Live" means the original probe was repeated against the rebuilt Docker stack.
+
+| Finding | Status | What changed | Verification |
+|---|---|---|---|
+| C1 Data stores exposed | **Fixed** | All published ports bound to `127.0.0.1`; database password configurable | Live: 0 ports on `0.0.0.0`, 7 on loopback |
+| H1 Fallback secrets | **Fixed** | Compose requires the three secrets; API rejects the published placeholders in production | Live: Compose refuses to start without them. 3 new tests |
+| H2 Rate-limit bypass | **Fixed** | Proxy headers ignored unless `TRUST_PROXY` is set; sign-in throttled per account (10 failures in 15 minutes) | Live: with a forged address on every request, 20 of 30 attempts rejected (previously 0). 3 new tests |
+| H3 Webhook request forgery | **Fixed** | Only http(s) to publicly routable addresses, checked on save and before each call; redirects not followed; response body no longer stored | 2 new tests, including a URL that was valid when saved and is refused at execution |
+| H4 Hang when Redis is down | **Fixed** | Fail-fast producer connection with a 3 s limit; failed enqueue marks the investigation failed | Live: `POST /investigations` → 503 in 3.0 s (previously no answer in 40 s); `/ready` → 503 in 3.0 s; normal service after Redis returned |
+| H5 Stranded work | **Fixed** | Once-a-minute sweep fails interrupted investigations and executions with an honest message and re-queues stuck indexing | 1 new test covering stale and fresh rows |
+| H6 No restart after crash | **Fixed** | `restart: unless-stopped`; health checks for web, AI and worker | Live: API and worker processes ended from inside their containers came back on their own (restart count 1). Note: `docker kill` is treated by Docker as a deliberate stop and is not restarted |
+| H7 Model path | **Defect fixed; verification still blocked** | Typed remediation parameters in the model schema | Regression test captures the real request to the provider. Running against a live model still needs a credential |
+| H8 Vulnerable dependencies | **Partly fixed** | OpenTelemetry and Vitest upgraded | Advisories: 2 critical → 0, 10 high → 5. See below |
+| M2 500 on bad filters | **Fixed** | Enum-validated list filters | Live: 400. 1 new test over 8 routes |
+| M3 Unsafe link schemes | **Fixed** | http/https only | Live: 400. 1 new test |
+| M4 CSV formula injection | **Fixed** | Formula cells prefixed with `'` | 1 new test |
+| M5 Worker metrics | **Fixed** | Worker serves `/metrics` and `/health`; Prometheus scrapes it | Live: job and investigation series now present |
+
+A defect introduced and caught during remediation: after the OpenTelemetry upgrade npm placed some packages inside the API workspace, and the image copied only the root `node_modules`, so the rebuilt API crash-looped with `MODULE_NOT_FOUND`. The image now ships workspace-local modules. The new restart policy and health checks are what made the failure visible immediately.
+
+### H8: what remains and why
+
+Five high advisories remain. Each needs a major-version upgrade, which is too large a change to make inside an audit pass:
+
+| Package | Advisory | Exposure here | Fix |
+|---|---|---|---|
+| `zod` 3.x | Memory exhaustion validating oversized constrained collections | Request bodies are capped at 5 MB and arrays have explicit maximums, which bounds the input | Zod 4 |
+| `prisma` CLI, `@prisma/config`, `deepmerge-ts` | Stack exhaustion merging recursive objects | Build and migration time only; the input is our own configuration | Prisma 7 |
+| `postcss` (via Next) | XSS and file read through crafted CSS | Build time only; the CSS is our own | Next 16 |
+
+These should be scheduled as their own `feature/` branches, one major at a time, each with the full test suite.
+
+### Test totals after remediation
+
+| Suite | Before | After |
+|---|---|---|
+| API integration | 28 | 39 |
+| AI service | 23 | 25 |
+| Web unit | 10 | 10 |
+| Browser end-to-end | 9 | 9 |
+| Agent evaluations | 5/5 | 5/5 |
+
+### Still open
+
+All remaining Medium and Low findings, in the order given in the remediation plan. The most valuable next items are M1 (token revocation), M8 (marking tool output as untrusted for the model), M12 (503 during database outages), M15 (error boundary) and the test gaps in M11.
