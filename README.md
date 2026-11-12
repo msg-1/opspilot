@@ -67,3 +67,7 @@ Step-by-step setup, costs, spending limits and troubleshooting: [docs/claude-int
 ## Contributing
 
 `main` holds released code, `develop` is the integration branch, and work happens on `feature/*` and `bugfix/*` branches. Releases go through `release/*`, urgent fixes through `hotfix/*`. See [CONTRIBUTING.md](CONTRIBUTING.md), [docs/git-workflow.md](docs/git-workflow.md) and [docs/release-process.md](docs/release-process.md).
+
+## Licence
+
+MIT. See [LICENSE](LICENSE).

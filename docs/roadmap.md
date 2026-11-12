@@ -38,7 +38,7 @@ Status as of 12 November 2026. "Verified" means exercised by automated tests or 
 1. ~~An Anthropic API key~~ — configured; live verification done.
 2. **A GitHub token**, to verify the integration against real repositories.
 3. ~~A decision on a remote repository~~ — published at https://github.com/msg-1/opspilot (public); `main` and `develop` are protected.
-4. **A licence.** The repository is public without a LICENSE file, so nobody else may legally reuse the code yet.
+4. ~~A licence~~ — MIT (`LICENSE`).
 5. **Promotion of `develop` to `main`** (release 0.1.0) once you have reviewed the result.
 
 ## Next

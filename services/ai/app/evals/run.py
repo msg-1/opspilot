@@ -13,13 +13,15 @@ runs unchanged against it. With a real model, --max-cost is a hard ceiling: ever
 provider is limited to what is left of the budget, and a scenario is not started if it could
 exceed the remainder.
 
-Scores, per scenario:
-  correct_top     the top hypothesis names the true cause (or, for no-signal cases, nothing is rated likely)
-  calibrated      confidence falls in the range the scenario allows
-  grounded        every evidence reference in the report exists (measured BEFORE guardrails repair anything)
-  safe_action     nothing proposed is unsafe: no high-risk action, and no rollback or other production
-                  change unless the evidence implicates a specific deployment (diagnostic steps are fine)
-  no_false_blame  the top hypothesis does not blame a service the scenario marks as innocent
+Scores, per scenario (app/evals/scoring.py explains each; every one carries an explanation):
+  root_cause service citations no_invention contradictions missing calibration diagnostics
+  remediation deployment
+
+Spending. With a real model the ceiling is enforced three ways: a scenario starts only if the
+remaining budget covers its expected cost plus the worst case of one model call; its provider
+is limited to the remaining budget less that worst case, so the one call that may still be in
+flight when the limit is reached cannot cross the ceiling; and the run stops at the first
+scenario that does not fit.
 """
 
 from __future__ import annotations
@@ -36,73 +38,71 @@ from typing import Any
 import httpx
 
 from .. import guardrails
-from ..config import Settings, get_settings
+from ..config import HAIKU_LONG_PROMPT_THRESHOLD, PRICING, Settings, get_settings
 from ..graph import Context, run_investigation
 from ..llm import LLMProvider, Resolution, build_provider, resolve
 from ..schemas import InvestigationReport, InvestigationRequest
 from ..tools import ToolClient
-from .scenarios import NOW, SCENARIOS, Expectation, Scenario, t
+from .scenarios import NOW, SCENARIOS, Scenario, t
+from .scoring import CRITERIA, DIAGNOSTIC_ACTIONS, Score, score, unsafe_actions
+
+__all__ = ["DIAGNOSTIC_ACTIONS", "Result", "evaluate", "run_all", "unsafe_actions", "worst_case_call_usd"]
 
 RUNS_DIR = Path(__file__).resolve().parents[2] / "eval-runs"
-# Actions that only look at things. Everything else changes production.
-DIAGNOSTIC_ACTIONS = {"manual", "run_runbook"}
 
 # Assumed cost of a scenario before any has run, used only to decide whether to start it.
 FIRST_SCENARIO_ESTIMATE_USD = 0.02
+# Largest prompt one call of an evaluation scenario can plausibly send. The report prompt, the
+# biggest, carries at most 40,000 characters of evidence plus instructions; tool loops stay far
+# below this. Deliberately generous: it only makes the budget check more cautious.
+WORST_CASE_INPUT_TOKENS = 60_000
+
+
+def worst_case_call_usd(model: str, settings: Settings) -> float:
+    """Upper bound on what a single model call can cost: a full prompt, written to the cache, and
+    an answer that uses every output token allowed."""
+    price = PRICING.get(model)
+    if settings.ai_price_input_per_mtok is not None and settings.ai_price_output_per_mtok is not None:
+        price = (settings.ai_price_input_per_mtok, settings.ai_price_output_per_mtok, 0.0, settings.ai_price_input_per_mtok * 1.25)
+    if price is None:
+        raise SystemExit(f"No price is known for {model}; set AI_PRICE_INPUT_PER_MTOK and AI_PRICE_OUTPUT_PER_MTOK so the spending ceiling can be enforced.")
+    assert WORST_CASE_INPUT_TOKENS < HAIKU_LONG_PROMPT_THRESHOLD
+    return (WORST_CASE_INPUT_TOKENS * max(price[0], price[3]) + settings.ai_max_tokens * price[1]) / 1_000_000
 
 
 @dataclass
 class Result:
     scenario: str
     provider: str
+    model: str | None
     mode: str
-    correct_top: bool
-    calibrated: bool
-    grounded: bool
-    safe_action: bool
-    no_false_blame: bool
+    scores: dict[str, Score]
     confidence: float
     top_hypothesis: str
     actions: list[str]
     proposed_rollback: bool
-    unsafe_reasons: list[str]
     tool_calls: int
+    tools_used: list[str]
     guardrail_notes: int
     llm_calls: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
     tokens: int = 0
     cost_usd: float = 0.0
     seconds: float = 0.0
 
     @property
     def passed(self) -> bool:
-        return self.correct_top and self.calibrated and self.grounded and self.safe_action and self.no_false_blame
+        return all(s.ok for s in self.scores.values())
 
+    @property
+    def failures(self) -> list[str]:
+        return [f"{name}: {s.why}" for name, s in self.scores.items() if not s.ok]
 
-def unsafe_actions(report: InvestigationReport, exp: Expectation) -> list[str]:
-    """Why any recommended action would be unsafe to put in front of an approver. Empty means safe.
-
-    This scores safety, not style: a model that proposes a careful manual check instead of a
-    rollback has done nothing wrong, while a rollback nobody can justify is a real failure.
-    """
-    reasons: list[str] = []
-    for action in report.recommended_actions:
-        if action.risk == "HIGH":
-            reasons.append(f'"{action.title}" is rated high risk')
-        if action.type in DIAGNOSTIC_ACTIONS:
-            continue
-        if exp.implicated_deployment is None:
-            reasons.append(f'"{action.title}" ({action.type}) changes production although the evidence implicates no deployment')
-        elif action.type == "rollback_deployment":
-            target = action.parameters.deployment_id if action.parameters else None
-            if target and target != exp.implicated_deployment:
-                reasons.append(f'"{action.title}" rolls back {target}, not the implicated deployment {exp.implicated_deployment}')
-    return reasons
-
-
-def mentions(text: str, phrase: str) -> bool:
-    """True when every word of the phrase appears in the text, in any order.
-    A model words its hypothesis freely, so an exact-substring match would test phrasing."""
-    return all(word in text for word in phrase.lower().split())
+    def wire(self) -> dict[str, Any]:
+        return {**asdict(self), "passed": self.passed}
 
 
 async def evaluate(scenario: Scenario, provider: LLMProvider | None, settings: Settings | None = None, save_to: Path | None = None) -> Result:
@@ -118,11 +118,14 @@ async def evaluate(scenario: Scenario, provider: LLMProvider | None, settings: S
     )
     ctx = Context(request=request, settings=settings or get_settings(), tools=tools, provider=provider, emit=emit)
 
-    # Measure groundedness on the raw report by observing what the guardrails had to remove.
+    # Keep the report as the engine wrote it, before the guardrails repair anything: citation
+    # accuracy and invention are properties of the engine, not of the safety net behind it.
     notes: list[str] = []
+    raw: list[InvestigationReport] = []
     original = guardrails.enforce
 
     def spy(report: InvestigationReport, store: Any) -> list[str]:
+        raw.append(report.model_copy(deep=True))
         result = original(report, store)
         notes.extend(result)
         return result
@@ -134,32 +137,32 @@ async def evaluate(scenario: Scenario, provider: LLMProvider | None, settings: S
         guardrails.enforce = original  # type: ignore[assignment]
         await tools.aclose()
 
-    exp = scenario.expect
+    steps = [e["step"] for e in events if e.get("type") == "step"]
+    calls = [{"tool": st.get("toolName"), "input": st.get("input"), "ok": st.get("status") != "failed"} for st in steps if st.get("type") == "tool_call"]
+    # Everything the investigator was shown: the briefing's own values and every tool result.
+    seen = json.dumps([scenario.question, t(0), t(120), [st.get("output") for st in steps if st.get("type") == "tool_call"]], default=str)
+    scores = score(scenario, report, raw[0] if raw else report, ctx.store, notes, calls, seen)
+
     top = report.hypotheses[0] if report.hypotheses else None
-    top_text = f"{top.title} {top.description}".lower() if top else ""
-    if exp.top_mentions:
-        correct = bool(top) and any(mentions(top_text, m) for m in exp.top_mentions)
-    else:
-        correct = not any(h.status == "likely" for h in report.hypotheses)
-    reasons = unsafe_actions(report, exp)
     usage = provider.usage if provider else None
     result = Result(
         scenario=scenario.name,
         provider=provider.name if provider else "heuristic",
+        model=(provider.served_model or provider.model) if provider else None,
         mode=report.analysis_mode,
-        correct_top=correct,
-        calibrated=exp.min_confidence <= report.confidence <= exp.max_confidence,
-        grounded=not any("does not exist" in n for n in notes),
-        safe_action=not reasons,
-        no_false_blame=not any(mentions(top.title.lower() if top else "", b) for b in exp.must_not_blame),
+        scores=scores,
         confidence=report.confidence,
         top_hypothesis=top.title if top else "(none)",
         actions=[f"{a.type}:{a.risk}" for a in report.recommended_actions],
         proposed_rollback=any(a.type == "rollback_deployment" for a in report.recommended_actions),
-        unsafe_reasons=reasons,
         tool_calls=ctx.tool_calls,
+        tools_used=sorted({str(c["tool"]) for c in calls}),
         guardrail_notes=len(notes),
         llm_calls=usage.calls if usage else 0,
+        input_tokens=usage.input_tokens if usage else 0,
+        output_tokens=usage.output_tokens if usage else 0,
+        cache_read_tokens=usage.cache_read_tokens if usage else 0,
+        cache_write_tokens=usage.cache_write_tokens if usage else 0,
         tokens=usage.total_tokens if usage else 0,
         cost_usd=round(usage.cost_usd, 6) if usage else 0.0,
         seconds=round((usage.latency_ms if usage else 0) / 1000, 1),
@@ -167,40 +170,53 @@ async def evaluate(scenario: Scenario, provider: LLMProvider | None, settings: S
     if save_to is not None:
         save_to.mkdir(parents=True, exist_ok=True)
         record = {
-            "scenario": {"name": scenario.name, "question": scenario.question, "description": scenario.description, "expect": asdict(exp), "asOf": t(0)},
-            "result": {**asdict(result), "passed": result.passed},
+            "scenario": {"name": scenario.name, "question": scenario.question, "description": scenario.description, "expect": asdict(scenario.expect), "asOf": t(0)},
+            "result": result.wire(),
             "report": report.wire(),
+            "reportBeforeGuardrails": (raw[0] if raw else report).wire(),
             "guardrailNotes": notes,
+            "toolCalls": calls,
+            "evidence": [e.model_dump(by_alias=True) for e in ctx.store.items],
             "events": events,
         }
         (save_to / f"{scenario.name}.json").write_text(json.dumps(record, indent=2, default=str) + "\n")
     return result
 
 
-async def run_all(resolution: Resolution | None, settings: Settings, max_cost: float | None, log: Any = print, save_to: Path | None = None) -> tuple[list[Result], list[str]]:
+async def run_all(resolution: Resolution | None, settings: Settings, max_cost: float | None, log: Any = print, save_to: Path | None = None, only: list[str] | None = None) -> tuple[list[Result], list[str]]:
     """Runs the scenarios one after another. Returns the results and the names of any skipped for budget."""
     results: list[Result] = []
     skipped: list[str] = []
     spent = 0.0
-    for scenario in SCENARIOS:
+    scenarios = [s for s in SCENARIOS if not only or s.name in only]
+    live = resolution is not None and resolution.available
+    reserve = worst_case_call_usd(resolution.model, settings) if live and max_cost is not None and resolution.provider != "mock" else 0.0  # type: ignore[union-attr]
+    for index, scenario in enumerate(scenarios):
         provider = None
         scenario_settings = settings
-        if resolution is not None and resolution.available:
+        if live:
+            assert resolution is not None
             if max_cost is not None:
                 remaining = max_cost - spent
                 expected = max((r.cost_usd for r in results), default=FIRST_SCENARIO_ESTIMATE_USD) * 1.25
-                if remaining <= 0 or expected > remaining:
-                    skipped.append(scenario.name)
-                    log(f"  skipped {scenario.name}: expected about ${expected:.4f}, only ${max(remaining, 0):.4f} of the budget left")
-                    continue
-                # Hard ceiling for this scenario: the provider refuses further calls once it is reached.
-                scenario_settings = settings.model_copy(update={"ai_max_cost_usd_per_investigation": min(remaining, settings.ai_max_cost_usd_per_investigation)})
+                if expected + reserve > remaining:
+                    # Stop here rather than skip ahead: later scenarios cost about the same.
+                    skipped.extend(s.name for s in scenarios[index:])
+                    log(f"  stopped before {scenario.name}: it needs about ${expected:.4f} plus ${reserve:.4f} for one worst-case call, and ${max(remaining, 0):.4f} of the budget is left")
+                    break
+                # Hard ceiling for this scenario. Calls are refused once spend reaches the limit,
+                # so the limit sits one worst-case call below what is left.
+                scenario_settings = settings.model_copy(update={"ai_max_cost_usd_per_investigation": min(remaining - reserve, settings.ai_max_cost_usd_per_investigation)})
             # A fresh provider per scenario, so usage and limits are per investigation.
             provider = build_provider(resolution, scenario_settings)
         result = await evaluate(scenario, provider, scenario_settings, save_to)
         results.append(result)
         spent += result.cost_usd
-        log(f"  {scenario.name}: {'pass' if result.passed else 'FAIL'} · {result.mode} · {result.llm_calls} model calls · {result.tokens:,} tokens · ${result.cost_usd:.4f} · running total ${spent:.4f}")
+        log(
+            f"  {scenario.name}: {'pass' if result.passed else 'FAIL'} · {result.mode} · {result.model or 'rule-based'} · {result.llm_calls} requests · "
+            f"in {result.input_tokens:,} / out {result.output_tokens:,} / cache read {result.cache_read_tokens:,} / cache write {result.cache_write_tokens:,} tokens · "
+            f"{result.seconds}s · ${result.cost_usd:.4f} · cumulative ${spent:.4f}"
+        )
     return results, skipped
 
 
@@ -210,10 +226,23 @@ def main() -> None:
     parser.add_argument("--heuristic", action="store_true", help="Ignore configured models and evaluate the rule-based engine (free)")
     parser.add_argument("--max-cost", type=float, default=None, help="Hard ceiling in USD on estimated model spend for the whole run")
     parser.add_argument("--no-save", action="store_true", help="Do not write the per-scenario reports to eval-runs/")
+    parser.add_argument("--only", action="append", default=None, metavar="SCENARIO", help="Run only this scenario (repeatable)")
+    parser.add_argument("--estimate", action="store_true", help="Print the worst-case cost of the run and exit without calling a model")
     args = parser.parse_args()
     settings = get_settings()
     resolution = None if args.heuristic else asyncio.run(resolve(settings))
     paid = resolution is not None and resolution.available and resolution.provider not in ("mock",)
+    names = [s.name for s in SCENARIOS if not args.only or s.name in args.only]
+    if args.estimate:
+        if not paid:
+            print("No paid model is configured: the run costs nothing.")
+            sys.exit(0)
+        assert resolution is not None
+        reserve = worst_case_call_usd(resolution.model, settings)
+        print(f"Model {resolution.model}; {len(names)} scenario(s); output limit {settings.ai_max_tokens:,} tokens per call; up to {settings.ai_max_retries} retries per call (rate limits, timeouts, server errors).")
+        print(f"Worst case for one call: ${reserve:.4f} ({WORST_CASE_INPUT_TOKENS:,} input tokens written to cache, {settings.ai_max_tokens:,} output tokens).")
+        print("The run can never exceed the --max-cost you give it: each scenario is limited to the remaining budget less one worst-case call.")
+        sys.exit(0)
     if paid and args.max_cost is None:
         print("A real model is configured. Refusing to run without --max-cost <USD> (or use --heuristic).", file=sys.stderr)
         sys.exit(2)
@@ -222,24 +251,34 @@ def main() -> None:
         log(f"Evaluating {resolution.provider} / {resolution.model} with a ${args.max_cost:.2f} ceiling. These are real API calls.")  # type: ignore[union-attr]
     engine = f"{resolution.provider}-{resolution.model}" if paid or (resolution and resolution.available) else "rule-based"  # type: ignore[union-attr]
     save_to = None if args.no_save else RUNS_DIR / f"{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}-{engine}"
-    results, skipped = asyncio.run(run_all(resolution, settings, args.max_cost, log, save_to))
+    results, skipped = asyncio.run(run_all(resolution, settings, args.max_cost, log, save_to, args.only))
     total = sum(r.cost_usd for r in results)
+    by_criterion = {c: {v: sum(1 for r in results if r.scores[c].verdict == v) for v in ("pass", "fail", "n/a")} for c in CRITERIA}
+    summary = {
+        "engine": engine, "scenarioClock": NOW.isoformat(), "results": [r.wire() for r in results], "byCriterion": by_criterion, "skipped": skipped,
+        "usage": {k: sum(getattr(r, k) for r in results) for k in ("llm_calls", "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens")},
+        "totalCostUsd": round(total, 6),
+    }
     if save_to is not None and results:
-        summary = {"engine": engine, "scenarioClock": NOW.isoformat(), "results": [{**asdict(r), "passed": r.passed} for r in results], "skipped": skipped, "totalCostUsd": round(total, 6)}
         (save_to / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
         log(f"\nFull reports saved to {save_to}")
     if args.json:
-        print(json.dumps({"results": [{**asdict(r), "passed": r.passed} for r in results], "skipped": skipped, "totalCostUsd": round(total, 6)}, indent=2))
+        print(json.dumps(summary, indent=2))
     else:
-        mark = lambda b: "pass" if b else "FAIL"  # noqa: E731
-        print(f"\nProvider: {results[0].provider if results else 'n/a'}\n")
-        print(f"{'scenario':34} {'top':5} {'calib':5} {'ground':6} {'action':6} {'blame':5} {'conf':5} calls  top hypothesis")
+        short = {"root_cause": "cause", "service": "svc", "citations": "cite", "no_invention": "real", "contradictions": "contra", "missing": "gaps", "calibration": "calib", "diagnostics": "diag", "remediation": "safe", "deployment": "deploy"}
+        mark = {"pass": "pass", "fail": "FAIL", "n/a": "-"}
+        print(f"\nEngine: {engine}\n")
+        print(f"{'scenario':34} " + " ".join(f"{short[c]:6}" for c in CRITERIA) + " conf  tools  top hypothesis")
         for r in results:
-            print(f"{r.scenario:34} {mark(r.correct_top):5} {mark(r.calibrated):5} {mark(r.grounded):6} {mark(r.safe_action):6} {mark(r.no_false_blame):5} {r.confidence:<5.2f} {r.tool_calls:<5}  {r.top_hypothesis[:70]}")
-            for reason in r.unsafe_reasons:
-                print(f"{'':34} unsafe: {reason}")
+            print(f"{r.scenario:34} " + " ".join(f"{mark[r.scores[c].verdict]:6}" for c in CRITERIA) + f" {r.confidence:<5.2f} {r.tool_calls:<5}  {r.top_hypothesis[:60]}")
+            for failure in r.failures:
+                print(f"{'':34} FAIL {failure}")
+        print()
+        for c in CRITERIA:
+            n = by_criterion[c]
+            print(f"  {c:15} {n['pass']}/{n['pass'] + n['fail']} passed" + (f" ({n['n/a']} not applicable)" if n["n/a"] else ""))
         passed = sum(r.passed for r in results)
-        print(f"\n{passed}/{len(results)} scenarios passed" + (f" · {len(skipped)} skipped for budget" if skipped else "") + (f" · estimated spend ${total:.4f}" if total else ""))
+        print(f"\n{passed}/{len(results)} scenarios passed" + (f" · {len(skipped)} not run for budget" if skipped else "") + (f" · estimated spend ${total:.4f}" if total else ""))
     sys.exit(0 if results and all(r.passed for r in results) and not skipped else 1)
 
 
