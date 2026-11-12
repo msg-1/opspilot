@@ -25,7 +25,7 @@ test.describe.configure({ mode: 'serial' });
 // refuses to run unless the deterministic or mock engine is active.
 let paidModel: string | null = null;
 test.beforeAll(async ({ browser }) => {
-  const { page, close } = await as(browser, 'demo@opspilot.dev');
+  const { page, close } = await as(browser, 'demo@example.com');
   const status = await (await page.request.get('/api/v1/investigations/ai-status')).json();
   if (status.llm?.available && status.llm.provider !== 'mock') paidModel = `${status.llm.provider} ${status.llm.model}`;
   await close();
@@ -37,14 +37,14 @@ test.beforeEach(() => {
 test('unauthenticated visitors are sent to sign-in, and bad credentials are rejected', async ({ page }) => {
   await page.goto('/incidents');
   await expect(page).toHaveURL(/\/login\?next=%2Fincidents/);
-  await page.getByLabel('Email').fill('demo@opspilot.dev');
+  await page.getByLabel('Email').fill('demo@example.com');
   await page.getByLabel('Password').fill('definitely-wrong-1');
   await page.getByRole('button', { name: 'Sign in' }).click();
   await expect(page.getByText('Invalid email or password')).toBeVisible();
 });
 
 test('overview shows the active incident and navigation works', async ({ page }) => {
-  await signIn(page, 'demo@opspilot.dev');
+  await signIn(page, 'demo@example.com');
   await expect(page.getByRole('link', { name: /Checkout requests failing with 503s/ }).first()).toBeVisible();
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Services' }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'Services' })).toBeVisible();
@@ -58,7 +58,7 @@ let incidentUrl = '';
 const title = `E2E checkout latency ${stamp}`;
 
 test('an engineer declares an incident, updates it and comments', async ({ browser }) => {
-  const { page, close } = await as(browser, 'lena@opspilot.dev');
+  const { page, close } = await as(browser, 'lena@example.com');
   await page.goto('/incidents');
   await page.getByRole('button', { name: 'Declare incident' }).click();
   const dialog = page.getByRole('dialog');
@@ -84,7 +84,7 @@ test('an engineer declares an incident, updates it and comments', async ({ brows
 let actionUrl = '';
 
 test('an AI investigation gathers evidence, ranks hypotheses and proposes remediation', async ({ browser }) => {
-  const { page, close } = await as(browser, 'lena@opspilot.dev');
+  const { page, close } = await as(browser, 'lena@example.com');
   await page.goto(incidentUrl);
   await page.getByRole('button', { name: 'Investigate with AI' }).click();
   await page.getByRole('dialog').getByRole('button', { name: 'Start investigation' }).click();
@@ -108,18 +108,18 @@ test('an AI investigation gathers evidence, ranks hypotheses and proposes remedi
 });
 
 test('remediation needs an independent human approval before it can be executed', async ({ browser }) => {
-  const requester = await as(browser, 'lena@opspilot.dev');
+  const requester = await as(browser, 'lena@example.com');
   await requester.page.goto(actionUrl);
   await requester.page.getByRole('button', { name: 'Submit for approval' }).click();
   await expect(requester.page.getByText('so someone else must approve it')).toBeVisible();
   await expect(requester.page.getByRole('button', { name: 'Approve' })).toHaveCount(0);
 
-  const viewer = await as(browser, 'aiko@opspilot.dev');
+  const viewer = await as(browser, 'aiko@example.com');
   await viewer.page.goto(actionUrl);
   await expect(viewer.page.getByText('Your role cannot approve remediation actions')).toBeVisible();
   await viewer.close();
 
-  const approver = await as(browser, 'marcus@opspilot.dev');
+  const approver = await as(browser, 'marcus@example.com');
   await approver.page.goto('/remediation');
   await expect(approver.page.getByRole('link', { name: /Roll back checkout-service to v2\.13\.2/ }).first()).toBeVisible();
   await approver.page.goto(actionUrl);
@@ -143,7 +143,7 @@ test('remediation needs an independent human approval before it can be executed'
 });
 
 test('viewers get a read-only interface', async ({ browser }) => {
-  const { page, close } = await as(browser, 'aiko@opspilot.dev');
+  const { page, close } = await as(browser, 'aiko@example.com');
   await page.goto('/incidents');
   await expect(page.getByRole('heading', { level: 1, name: 'Incidents' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Declare incident' })).toHaveCount(0);
@@ -154,7 +154,7 @@ test('viewers get a read-only interface', async ({ browser }) => {
 });
 
 test('log explorer filters and the knowledge base search return real results', async ({ page }) => {
-  await signIn(page, 'demo@opspilot.dev');
+  await signIn(page, 'demo@example.com');
   await page.goto('/logs?from=6h');
   await page.getByLabel('Search log messages').fill('timeout acquiring connection');
   await expect(page.getByText(/timeout acquiring connection from pool/).first()).toBeVisible();
@@ -168,7 +168,7 @@ test('log explorer filters and the knowledge base search return real results', a
 });
 
 test('the audit log records human and AI activity', async ({ page }) => {
-  await signIn(page, 'demo@opspilot.dev');
+  await signIn(page, 'demo@example.com');
   await page.goto('/settings');
   await page.getByRole('tab', { name: 'Audit log' }).click();
   await page.getByLabel('Area').selectOption('remediation');
@@ -180,7 +180,7 @@ test('the audit log records human and AI activity', async ({ page }) => {
 test('pages do not scroll sideways on a phone', async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 800 } });
   const page = await context.newPage();
-  await signIn(page, 'demo@opspilot.dev');
+  await signIn(page, 'demo@example.com');
   for (const path of ['/', '/incidents', '/monitoring', '/logs', '/remediation', '/analytics']) {
     await page.goto(path);
     await page.waitForLoadState('networkidle');

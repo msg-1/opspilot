@@ -58,11 +58,11 @@ All use the password `OpsPilot-demo-1`. These exist only in seeded demo data.
 
 | Email | Role | Use it to |
 |---|---|---|
-| demo@opspilot.dev | Owner | See everything |
-| marcus@opspilot.dev | Admin | Approve actions, including high-risk ones |
-| lena@opspilot.dev | Engineer | Run investigations, request approvals |
-| tomas@opspilot.dev | Engineer | Second engineer for approvals |
-| aiko@opspilot.dev | Viewer | See the read-only experience |
+| demo@example.com | Owner | See everything |
+| marcus@example.com | Admin | Approve actions, including high-risk ones |
+| lena@example.com | Engineer | Run investigations, request approvals |
+| tomas@example.com | Engineer | Second engineer for approvals |
+| aiko@example.com | Viewer | See the read-only experience |
 
 `npm run db:seed` recreates only the demo organisation (`meridian-demo`); other organisations are untouched. Seeded timestamps are relative to when you seed, so reseed if the "active incident" has gone stale. Service health turns to "No data" 15 minutes after seeding unless you run the simulator (below).
 

@@ -14,7 +14,7 @@ cp .env.example .env          # then replace the three secrets (see comments in 
 docker compose --profile app up -d --build
 ```
 
-Open <http://localhost:3000> and sign in with `demo@opspilot.dev` / `OpsPilot-demo-1`. The first start migrates the database and loads a demo organisation with an active incident. Other demo users (admin, engineers, viewer) are listed in [docs/setup-guide.md](docs/setup-guide.md).
+Open <http://localhost:3000> and sign in with `demo@example.com` / `OpsPilot-demo-1`. The first start migrates the database and loads a demo organisation with an active incident. Other demo users (admin, engineers, viewer) are listed in [docs/setup-guide.md](docs/setup-guide.md).
 
 Try it: open incident **INC-10**, click **Investigate with AI**, read the hypotheses and evidence, then open the proposed rollback under **Approvals** and walk it through approval as a second user.
 
