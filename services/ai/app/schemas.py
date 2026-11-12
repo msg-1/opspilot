@@ -175,15 +175,84 @@ class InvestigationReport(CamelModel):
         return data
 
 
+class TimelineEntryRequired(CamelModel):
+    timestamp: str = Field(description="ISO-8601 time of the event, taken from the evidence")
+    description: str
+    evidence_refs: list[str]
+
+
+class FactRequired(CamelModel):
+    statement: str = Field(description="Something directly observed in the evidence, not an inference")
+    evidence_refs: list[str] = Field(description="Evidence references that show this")
+
+
+# ───────────────────────── What the model is asked to write ─────────────────────────
+#
+# Providers compile a structured-output schema into a grammar, and a schema with many optional
+# or nullable fields compiles into one that is too large to accept (found in live testing: the
+# first version of this schema was rejected by the Anthropic API). So the model-facing schema is
+# deliberately flat: every field required, no nullable fields, no nested optional objects.
+# An empty string or empty list means "not applicable". to_report() converts it to the wire model.
+
+
+class LLMHypothesis(CamelModel):
+    title: str
+    description: str = Field(description="The causal mechanism proposed and how the evidence supports it")
+    confidence: float = Field(description="Between 0 and 1")
+    status: Literal["likely", "possible", "unlikely"]
+    evidence_refs: list[str] = Field(description="Evidence references that support it, e.g. E3")
+    contradicting_evidence_refs: list[str] = Field(description="Evidence references that argue against it; empty if none")
+    contradictions: list[str] = Field(description="What in the evidence does not fit; empty if you checked and found nothing")
+    assumptions: list[str] = Field(description="What is assumed but not verified")
+    gaps: list[str] = Field(description="Missing evidence that would confirm or refute it")
+
+
+class LLMAction(CamelModel):
+    type: RemediationType
+    title: str
+    description: str
+    rationale: str
+    risk: Literal["LOW", "MEDIUM", "HIGH"]
+    service_slug: str = Field(description="Slug of the service the action applies to, or an empty string")
+    deployment_id: str = Field(description="For rollback_deployment: sourceId of the deployment evidence to roll back; otherwise an empty string")
+    to_version: str = Field(description="For rollback_deployment: the version to return to; otherwise an empty string")
+    evidence_refs: list[str]
+
+
 class LLMReport(CamelModel):
-    """What the model is asked to produce. Mode and confirmation flags are set by the service, not the model."""
+    """Mode and confirmation flags are set by the service, never by the model."""
 
     summary: str = Field(description="3-6 sentences: what happened, the leading explanation, and how sure we are")
     confidence: float = Field(description="Overall confidence between 0 and 1 in the leading hypothesis")
-    timeline: list[TimelineEntry]
-    facts: list[Fact]
+    timeline: list[TimelineEntryRequired]
+    facts: list[FactRequired]
     assumptions: list[str]
     uncertainties: list[str]
-    hypotheses: list[HypothesisOut]
+    hypotheses: list[LLMHypothesis]
     next_steps: list[str]
-    recommended_actions: list[RecommendedAction]
+    recommended_actions: list[LLMAction]
+
+
+def to_report(draft: LLMReport, mode: str) -> InvestigationReport:
+    """Converts the model's flat answer into the report that is validated, stored and shown."""
+    return InvestigationReport(
+        summary=draft.summary, confidence=max(0.0, min(1.0, draft.confidence)), analysis_mode=mode,  # type: ignore[arg-type]
+        timeline=[TimelineEntry(timestamp=t.timestamp, description=t.description, evidence_refs=t.evidence_refs) for t in draft.timeline],
+        facts=[Fact(statement=f.statement, evidence_refs=f.evidence_refs) for f in draft.facts],
+        assumptions=draft.assumptions, uncertainties=draft.uncertainties, next_steps=draft.next_steps,
+        hypotheses=[
+            HypothesisOut(
+                title=h.title, description=h.description, confidence=max(0.0, min(1.0, h.confidence)), status=h.status, evidence_refs=h.evidence_refs,
+                contradicting_evidence_refs=h.contradicting_evidence_refs, contradictions=h.contradictions, assumptions=h.assumptions, gaps=h.gaps,
+            )
+            for h in draft.hypotheses
+        ],
+        recommended_actions=[
+            RecommendedAction(
+                type=a.type, title=a.title, description=a.description, rationale=a.rationale or None, risk=a.risk, service_slug=a.service_slug or None,
+                parameters=RemediationParameters(deployment_id=a.deployment_id or None, to_version=a.to_version or None) if (a.deployment_id or a.to_version) else None,
+                evidence_refs=a.evidence_refs,
+            )
+            for a in draft.recommended_actions
+        ],
+    )

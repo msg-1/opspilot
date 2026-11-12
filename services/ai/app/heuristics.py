@@ -325,20 +325,20 @@ def analyse(question: str, store: EvidenceStore, *, scope: list[str], window: tu
     observed = facts[0].statement if facts else "No dominant error pattern was found."
     if not strong_signal:
         summary = (
-            f"Heuristic analysis (no LLM configured). No significant problem signal was found in the window examined: no high-volume error pattern, "
+            f"Rule-based analysis (no language model wrote these conclusions). No significant problem signal was found in the window examined: no high-volume error pattern, "
             f"no sharp metric shift and no firing alert. {observed if dominant else ''} "
             + (f"The nearest candidate explanation is weak: {top.title} ({_pct(top.confidence)} confidence)." if top else "Nothing links the observations to a recent change.")
         ).replace("  ", " ")
         uncertainties.append("With no clear error signal, the question may concern a different time window or service than the ones examined.")
     elif top:
         summary = (
-            f"Heuristic analysis (no LLM configured). {observed} "
+            f"Rule-based analysis (no language model wrote these conclusions). {observed} "
             f"The leading hypothesis is: {top.title} ({_pct(top.confidence)} confidence, {top.status}). {top.description} "
             f"{alternatives} The cause has not been verified."
         )
     else:
         summary = (
-            "Heuristic analysis (no LLM configured). The collected evidence does not point to a specific cause: "
+            "Rule-based analysis (no language model wrote these conclusions). The collected evidence does not point to a specific cause: "
             + ("error patterns were found but no deployment, configuration change, dependency problem or similar past incident could be linked to them." if dominant else "no anomalous errors, changes or metric shifts were found in the window examined.")
         )
         uncertainties.append("No hypothesis met the minimum evidence bar; widen the time window or name the affected service.")

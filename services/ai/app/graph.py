@@ -29,7 +29,7 @@ from .config import Settings
 from .evidence import EvidenceStore
 from .heuristics import iso, parse_time
 from .llm import LLMError, LLMProvider, scrub
-from .schemas import InvestigationPlan, InvestigationReport, InvestigationRequest, LLMReport
+from .schemas import InvestigationPlan, InvestigationReport, InvestigationRequest, LLMReport, to_report
 from .tools import TOOLS, ToolClient, ToolError, to_json
 
 Emit = Callable[[dict[str, Any]], Awaitable[None]]
@@ -62,7 +62,7 @@ REPORT_INSTRUCTIONS = """Write the investigation report as structured output.
 - timeline: key events in chronological order with ISO timestamps taken from the evidence.
 - uncertainties: what you could not check or what the data does not show.
 - nextSteps: concrete checks for a human, most valuable first.
-- recommendedActions: 0 to 3 actions a human could approve. Use rollback_deployment only when a specific deployment is implicated, and include parameters {"deploymentId": <sourceId of that deployment evidence>, "toVersion": <previous version>} and serviceSlug. Prefer the least risky action that would mitigate. Cite evidence for each.
+- recommendedActions: 0 to 3 actions a human could approve. Use rollback_deployment only when a specific deployment is implicated: set deploymentId to the sourceId of that deployment's evidence item, toVersion to the version that was running before it, and serviceSlug. For other action types leave deploymentId and toVersion as empty strings. Prefer the least risky action that would mitigate. Cite evidence for each.
 
 Use only evidence references from the catalogue below."""
 
@@ -304,7 +304,7 @@ def build_graph(ctx: Context):
         )
         try:
             draft = await ctx.provider.structured([SystemMessage(SYSTEM_PROMPT), HumanMessage(prompt)], LLMReport)
-            report = InvestigationReport(**draft.model_dump(), analysis_mode=ctx.provider.mode)
+            report = to_report(draft, ctx.provider.mode)
             await _step(ctx, "evaluation", "Evaluate evidence and form hypotheses", detail=f"{len(ctx.store.items)} evidence items evaluated by {ctx.provider.name} / {ctx.provider.model}.")
         except (LLMError, ValueError) as exc:
             await _step(ctx, "error", "The model could not produce a report; falling back to rule-based analysis", detail=str(exc)[:2000], status="failed")
