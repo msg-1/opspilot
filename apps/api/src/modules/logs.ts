@@ -19,7 +19,7 @@ const logItem = z.object({
   host: z.string().max(200).optional(),
   traceId: z.string().max(100).optional(),
   spanId: z.string().max(100).optional(),
-  attributes: z.record(z.unknown()).optional(),
+  attributes: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const ingestBody = z.object({
@@ -219,7 +219,7 @@ const filterQuery = z.object({
   environment: z.string().optional(),
   traceId: z.string().optional(),
   fingerprint: z.string().optional(),
-  from: timeParam.default('1h'),
+  from: timeParam.prefault('1h'),
   to: timeParam.optional(),
 });
 

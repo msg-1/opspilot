@@ -120,7 +120,7 @@ export async function analyticsOverview(organizationId: string, from: Date, to: 
 }
 
 export const analyticsRouter = Router();
-const rangeQuery = z.object({ from: timeParam.default('30d'), to: timeParam.optional() });
+const rangeQuery = z.object({ from: timeParam.prefault('30d'), to: timeParam.optional() });
 
 analyticsRouter.get('/overview', requirePermission('read'), async (req, res) => {
   const q = rangeQuery.parse(req.query);

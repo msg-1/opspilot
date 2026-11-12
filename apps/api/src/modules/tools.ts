@@ -29,7 +29,7 @@ toolsRouter.use((req, _res, next) => {
   next();
 });
 
-const windowQuery = z.object({ from: timeParam.default('6h'), to: timeParam.optional() });
+const windowQuery = z.object({ from: timeParam.prefault('6h'), to: timeParam.optional() });
 const clip = (text: string | null | undefined, max = 400) => (text && text.length > max ? `${text.slice(0, max)}…` : (text ?? null));
 
 function windowOf(q: { from: Date; to?: Date }) {
@@ -194,7 +194,7 @@ toolsRouter.get('/logs/histogram', async (req, res) => {
   res.json({ window: { from: filter.from, to: filter.to }, bucketSeconds: h.bucketSeconds, buckets: h.buckets.map((b) => ({ timestamp: b.timestamp, errors: Number(b.ERROR) + Number(b.FATAL), warnings: b.WARN, total: b.total })) });
 });
 
-const changeQuery = windowQuery.extend({ from: timeParam.default('24h'), service: csv, limit: z.coerce.number().int().min(1).max(50).default(20) });
+const changeQuery = windowQuery.extend({ from: timeParam.prefault('24h'), service: csv, limit: z.coerce.number().int().min(1).max(50).default(20) });
 
 toolsRouter.get('/deployments', async (req, res) => {
   const { organizationId } = authOf(req);
