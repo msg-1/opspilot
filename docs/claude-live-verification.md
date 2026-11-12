@@ -98,5 +98,50 @@ The browser suite now checks which engine is active and skips itself when a paid
 2. **Duration.** About a minute of model time. Acceptable for an investigation, but the interface only shows progress per completed step.
 3. **Claude's first code-change query used too narrow a time window** and returned nothing; it recovered with a wider query two rounds later. The tool description could state that merges usually precede the deployment by hours.
 4. **It did not find the previous deployment**, because it listed deployments from 08:00 that day and the earlier version was two days old. A tool that returns "the previous successful deployment of this service" would let it propose a concrete rollback.
-5. **One investigation is one data point.** The evaluation scenarios have not yet been run against the model. Five investigations would cost roughly $0.05 to $0.10 on Haiku.
+5. **The evaluation set has now been run once against the model** (see "Live evaluation" below). It exposed flaws in the harness that must be fixed before its scores mean much.
 6. **Sonnet and Opus are untested live.** Only Haiku was exercised, as requested.
+
+## Live evaluation: five scenarios
+
+Run once on 12 November 2026 with `uv run python -m app.evals.run --max-cost 0.10`, model `claude-haiku-5-5`, effort `medium`. Approved ceiling $0.10; **estimated spend $0.0355**. All five reports were written by the model (`analysisMode: llm`); none fell back to rules. No scenario was skipped for budget.
+
+| Scenario | Model calls | Tokens | Cost | Top cause | Calibration | Grounded | Action | No false blame | Confidence | Top hypothesis (as worded by the model) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Bad deploy with a matching change | 6 | 58,428 | $0.0076 | fail | fail | pass | fail | pass | 0.30 | v4.2.0 changed the cache entry schema to v3 without flushing… |
+| Upstream dependency down | 6 | 50,904 | $0.0064 | pass | pass | pass | fail | pass | 0.30 | auth-service outage is causing web-app errors |
+| Healthy service, no signal | 7 | 60,095 | $0.0070 | pass | fail | pass | fail | pass | 0.45 | Data availability gap: the tools are not returning current data… |
+| Red herring closer in time | 5 | 44,447 | $0.0073 | pass | pass | pass | pass | pass | 0.72 | payments-api's mTLS CA bundle rotation (v3.1.0)… |
+| Tool failures | 6 | 51,735 | $0.0072 | pass | pass | pass | fail | pass | 0.20 | Cache schema mismatch after a change |
+
+**Strict result: 1 of 5 scenarios passed every check.** Per check: grounded 5/5, no false blame 5/5, top cause 4/5, calibration 3/5, action 1/5.
+
+### What this does and does not show
+
+Holds up:
+- **No invented evidence in any run.** The guardrails had no non-existent citation to remove in five investigations.
+- **No innocent service was blamed**, including the scenario built to tempt it with a change closer in time.
+- **The cause was right in substance in all four scenarios that have one.** The single "top cause" failure is the scorer, not the model: the hypothesis names the v4.2.0 cache-schema change, which is the planted cause, but did not repeat the service name in the text the scorer reads.
+
+Does not hold up, and why the headline number should not be read as model quality:
+1. **The scenarios use a fixed clock.** Their data is stamped 1 June 2026, while the prompt tells the model the real current time. To a model, the evidence looks five months stale. That is the likely reason for the low confidence in the first scenario (0.30 against an expected 0.55 or more) and for the "healthy" scenario's top hypothesis being that the tools return out-of-date data. The rule-based engine ignores the clock, so this flaw was invisible until a model ran. This is a defect in the harness.
+2. **The action check was written for the rule-based engine.** It expects exactly "rollback" or exactly "no action". A model often proposes a low-risk manual check instead, which is reasonable and is scored as a failure. The run did not save the full reports, so which actions were proposed in the four failing cases is not known.
+3. **One run per scenario.** Model output varies between runs; these are single samples.
+
+### Follow-up before evaluating again
+
+- Make the scenario clock relative to now, or pass the scenario's clock to the agent as the current time.
+- Score actions by safety (no rollback without an implicated deployment; nothing high-risk) rather than by exact type.
+- Save each report to disk during a run so failures can be read afterwards without paying again.
+- Then repeat, and compare `ANTHROPIC_EFFORT=low` with `medium`.
+
+No further paid calls were made after this run.
+
+## Total API spend to date
+
+| Activity | Estimated cost |
+|---|---|
+| Live verification (12 requests) | $0.0211 |
+| Five-scenario evaluation (30 requests) | $0.0355 |
+| **Total** | **$0.0566** |
+
+These are estimates from list prices. The Anthropic Console shows what was actually billed.

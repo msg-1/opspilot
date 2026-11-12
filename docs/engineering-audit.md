@@ -286,7 +286,7 @@ Second pass, same day. "Verified" names how the fix was checked; nothing is mark
 
 ### Open items, in order
 
-1. Run the evaluation scenarios against the live model and compare effort levels (an extension of H7, which is closed).
+1. Fix the evaluation harness (fixed scenario clock, action scoring tuned to the rule-based engine, reports not saved), then re-run it against the model. The first live run is recorded in claude-live-verification.md.
 2. **M11:** a test through real BullMQ; team and settings routes; page-level web tests.
 3. **M13, M20:** scaling work, when data volume or a second API instance calls for it.
 4. **M14:** split the larger modules as they are next touched.
