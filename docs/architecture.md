@@ -79,7 +79,12 @@ Every report states which engine produced it, and the investigation record store
 | Input | Control characters stripped; instruction-like phrases in the question are flagged in the steps and treated as data. Questions, incident text and tool output are wrapped as untrusted data in prompts. |
 | Tools | Read-only, argument-validated, bounded result size, 24 calls and 10 rounds per investigation. |
 | Output (AI service) | Unknown citations removed; uncited "facts" become assumptions; hypotheses without evidence capped at 30%; confidence capped at 90% (model) or 75% (rules); a rollback proposal must cite a deployment; "confirmed root cause" wording rewritten. |
+| Outcome (AI service) | Whether there is a fault at all is computed from the evidence for every engine: `HEALTHY`, `DEGRADED`, `INCIDENT` or `UNDETERMINED`. With no fault in evidence, hypotheses are limited to 20% and marked unlikely. |
+| Actions (AI service, repeated in the API) | Each action is labelled read-only or state-changing from its type and text. A production change is withdrawn, with the reason, when the outcome is not an incident, when it rests on a hypothesis rated unlikely, or when it is a rollback whose target the evidence does not bear out; a high-risk action is withdrawn when a lower-risk one is proposed. |
+| Figures (AI service) | Every number, timestamp, version, commit, pull request number and incident key is compared with the evidence its statement cites and labelled exact, rounded, calculated, estimate, uncited or unsupported. |
 | Output (API) | The same citation and confidence checks are re-applied to whatever the AI service returned, against the evidence actually stored. `rootCauseConfirmed` can only be `false`. |
+
+The rules, their thresholds and their limits are in [reliability.md](reliability.md).
 
 ## Knowledge base (RAG)
 
@@ -93,6 +98,8 @@ PROPOSED ─▶ PENDING_APPROVAL ─▶ APPROVED ─▶ EXECUTING ─▶ EXECUTE
    └─ CANCELLED ◀─┴─ REJECTED       └─ CANCELLED
 ```
 
+Every action is read-only or state-changing. A read-only diagnostic needs no approval and is never sent to the webhook; a state-changing action needs at least one approval, bound to a hash of its content. Editing it supersedes the approvals. A webhook timeout or a 5xx is recorded as outcome unknown, and such an action is retried only after a person confirms nothing was applied. Details: [reliability.md](reliability.md).
+
 Required approvals come from organisation settings by risk level (defaults 1 / 1 / 2). Approvers must differ from the proposer and requester unless self-approval is switched on. High-risk actions need an admin or owner. State changes use conditional updates, so two simultaneous requests cannot both succeed. Execution either POSTs an HMAC-signed payload to the organisation's webhook, or records an operator's attestation that they performed the action; both are mirrored onto the service's deployment or event history.
 
 ## Security summary
@@ -105,6 +112,18 @@ Required approvals come from organisation settings by risk level (defaults 1 / 1
 - Webhooks in: GitHub HMAC-SHA256 over the raw body, constant-time comparison. Webhooks out: HMAC-signed.
 - Rate limits: 20/min on auth endpoints, 1,200/min per IP on the API.
 - Logs: credentials masked at ingestion; request logs carry method, path and status only.
+
+## Telemetry sources
+
+| Signal | How it arrives | Stored in OPSILUME |
+|---|---|---|
+| Logs | `POST /api/v1/logs` (API key) | Yes, with trace ids |
+| Metrics | `POST /api/v1/monitoring/metrics` (API key) | Yes |
+| Deployments, service events | `POST /api/v1/deployments`, `/service-events` | Yes |
+| Code changes | GitHub REST sync and webhooks | Yes |
+| Traces | Queried from a Jaeger-compatible API (`TRACES_URL`) when an investigation asks | No |
+
+The local demonstration environment (`demo/`) connects all of these to three instrumented services: see [demo/README.md](../demo/README.md).
 
 ## Observability
 

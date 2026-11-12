@@ -71,7 +71,8 @@ function errorMessage(span: JaegerSpan): string | null {
 
 /** What kind of call a span is (postgresql, redis, http) and whom it was made to, when the span says. */
 function target(span: JaegerSpan): { system: string | null; peer: string | null } {
-  const system = tag(span, 'db.system') ?? (tag(span, 'http.method') || tag(span, 'http.request.method') ? 'http' : null);
+  // Both the older and the current OpenTelemetry attribute names are read.
+  const system = tag(span, 'db.system.name') ?? tag(span, 'db.system') ?? (tag(span, 'http.method') || tag(span, 'http.request.method') ? 'http' : null);
   const peer = tag(span, 'peer.service') ?? tag(span, 'net.peer.name') ?? tag(span, 'server.address') ?? null;
   return { system: typeof system === 'string' ? system : null, peer: typeof peer === 'string' ? peer : null };
 }

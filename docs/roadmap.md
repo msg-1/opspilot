@@ -27,11 +27,22 @@ Status as of 12 November 2026. "Verified" means exercised by automated tests or 
 
 | Suite | Count | Scope |
 |---|---|---|
-| API integration (Vitest + Supertest) | 55 | HTTP → PostgreSQL, all modules |
-| AI service (pytest, mocked model APIs) | 64 | Agent graph, guardrails, providers, embeddings, HTTP API, MCP |
-| Web (Vitest + Testing Library) | 11 | API client, formatting, accessible components |
+| API integration (Vitest + Supertest) | 68 | HTTP → PostgreSQL, all modules |
+| AI service (pytest, mocked model APIs) | 110 | Agent graph, guardrails, providers, embeddings, HTTP API, MCP |
+| Web (Vitest + Testing Library) | 14 | API client, formatting, accessible components |
 | End-to-end (Playwright) | 9 | Sign-in, incident, investigation, approval, RBAC, logs, knowledge, audit, mobile layout |
-| Agent evaluations | 6 scenarios | Cause, service, citations, invention, contradictory and missing evidence, calibration, diagnostics, remediation safety, deployment-tool use |
+| Agent evaluations | 11 scenarios | Outcome, cause, service, citations, invention, contradictory and missing evidence, calibration, diagnostics, remediation safety, deployment-tool use |
+| Local demo, end to end | 10 scenarios | Real telemetry and failures, rule-based engine: outcomes, blame, proposals, evidence provenance, recovery, runbook safety (run locally, not in CI) |
+
+## Milestone 4: reliability and real-system validation
+
+Done: outcome assessment (healthy, degraded, incident, undetermined), action effects and runbook plans, approvals bound to content, unknown execution outcomes, checked figures, trace retrieval, the local demo environment with seven failure scenarios, and the OPSILUME working name. See [reliability.md](reliability.md) and [demo/README.md](../demo/README.md).
+
+Not done, and why:
+
+- **No model was run in this milestone** (no budget). The changed report instructions and schema, the new `get_traces` tool and the demo environment are untested with a language model.
+- **The name is not cleared.** Trademark and domain checks are listed in [branding/opsilume-branding.md](branding/opsilume-branding.md).
+- **The demo is not in CI.** It needs the whole stack and about 25 minutes; it was run locally.
 
 ## Needs the owner's input
 
@@ -40,6 +51,8 @@ Status as of 12 November 2026. "Verified" means exercised by automated tests or 
 3. ~~A decision on a remote repository~~ — published at https://github.com/msg-1/opspilot (public); `main` and `develop` are protected.
 4. ~~A licence~~ — MIT (`LICENSE`).
 5. **Promotion of `develop` to `main`** (release 0.1.0) once you have reviewed the result.
+6. **A budget for a live model run** of the eleven evaluation scenarios and of the demo environment, if you want the Milestone 4 changes validated with a model.
+7. **Clearance of the OPSILUME name** (trademark, domains) before it is used beyond a working name.
 
 ## Next
 

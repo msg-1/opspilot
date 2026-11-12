@@ -8,7 +8,7 @@
 //   HOLD_S=100 SETTLE_S=150 npm run demo:e2e
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { JAEGER, ROOT, Session, assertNoPaidModel, iso, log, sleep, state } from './lib.mjs';
+import { JAEGER, ROOT, Session, assertNoPaidModel, iso, log, sleep, state, waitFor } from './lib.mjs';
 import { SCENARIOS, baseline, probe, verifyRecovered } from './scenarios.mjs';
 
 const HOLD_S = Number(process.env.HOLD_S ?? 100); // how long a failure runs before it is investigated
@@ -174,6 +174,17 @@ for (let i = 0; i < 60; i++) {
   if (i === 0) log('  waiting for four minutes of baseline telemetry …');
   await sleep(10_000);
 }
+
+// The run must start from a clean baseline in OPSILUME's own data, not only in live requests:
+// a failure that ended a minute ago is still inside the window the first scenario looks at.
+await waitFor('five minutes of clean telemetry (an earlier failure may still be in the window)', async () => {
+  for (const service of ['shop-gateway', 'shop-orders', 'shop-payments']) {
+    const m = await s.get(`/tools/metrics?service=${service}&from=${encodeURIComponent(iso(new Date(Date.now() - 300_000)))}`);
+    const max = (name) => m.metrics.find((x) => x.metric === name)?.window?.max ?? 0;
+    if (max('error_rate') >= 1 || max('latency_p95_ms') >= 400) return null;
+  }
+  return true;
+}, { timeoutMs: 600_000, everyMs: 15_000 });
 
 if (wanted('healthy-baseline')) {
   log('▶ healthy-baseline: nothing is wrong');

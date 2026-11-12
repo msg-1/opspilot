@@ -85,6 +85,7 @@ API key scopes: `ingest:logs`, `ingest:deployments`, `ingest:events`, `ingest:me
 | Method and path | Description |
 |---|---|
 | `GET/POST /documents`, `GET/PATCH/DELETE /documents/:id` | `title`, `type`, `content` (Markdown), `service`, `tags`, `sourceUrl` |
+| `GET /documents/:id/plan` | The document as an execution plan: its list items and numbered steps, each with `effect` and `reasons`, plus `effect`, `stateChanging` and `readOnly` for the whole. Nothing is executed |
 | `POST /documents/:id/reindex`, `POST /reindex` | Re-embed one or all documents |
 | `POST /search` | `{ query, limit?, types?, service? }` → `{ mode: "hybrid"|"keyword", note?, hits: [...] }` |
 
@@ -99,11 +100,15 @@ API key scopes: `ingest:logs`, `ingest:deployments`, `ingest:events`, `ingest:me
 ### Remediation — `/remediations`
 | Method and path | Description |
 |---|---|
-| `GET /`, `POST /`, `GET /:id` | `type`, `title`, `description`, `rationale`, `risk`, `incidentId`, `serviceId`, `parameters` |
-| `POST /:id/request-approval` | `PROPOSED` → `PENDING_APPROVAL` |
-| `POST /:id/approve`, `/reject` | Signed-in users only. `comment` optional for approve, required for reject |
-| `POST /:id/execute` | `APPROVED` only. Without a webhook configured, requires `{ confirmManual: true, notes? }` |
-| `POST /:id/retry`, `/cancel` | Return a failed action to `APPROVED`; cancel before execution |
+| `GET /`, `POST /`, `GET /:id` | `type`, `title`, `description`, `rationale`, `risk`, `incidentId`, `serviceId`, `parameters`. The response adds `effect` (`read_only` or `state_changing`, decided from the type and text, and from the runbook in `parameters.runbookDocumentId`), `effectReasons`, `currentHash`, `attempts`, and per approval `counts` and `supersededAt` |
+| `PATCH /:id` | Edit before execution. Changing anything an approver was shown supersedes the approvals and returns the action to `PROPOSED` |
+| `POST /:id/request-approval` | `PROPOSED` → `PENDING_APPROVAL`. Refused for read-only diagnostics, which need none |
+| `POST /:id/approve`, `/reject` | Signed-in users only. `comment` optional for approve, required for reject. `expectedHash` (the `currentHash` that was displayed) makes approval fail with 409 if the action changed meanwhile |
+| `POST /:id/execute` | State-changing: `APPROVED` only, and only if the approvals were given for the current content (409 otherwise). Without a webhook configured, requires `{ confirmManual: true, notes? }`. Read-only: from `PROPOSED`, always `{ confirmManual: true, notes? }`, never sent to the webhook. `executionResult.outcome` is `applied`, `not_applied` or `unknown` |
+| `POST /:id/retry` | Returns a failed action to `APPROVED`. After an `unknown` outcome it requires `{ confirmNotApplied: true }` |
+| `POST /:id/cancel` | Cancel before execution |
+
+The webhook request carries `Idempotency-Key: <action id>` (the same for every attempt), `X-OpsPilot-Attempt`, and in the body `idempotencyKey`, `attempt`, `effect`, `contentHash` and `approvals`. A timeout (`REMEDIATION_WEBHOOK_TIMEOUT_MS`, default 30 s), a dropped connection or a 5xx is recorded as outcome `unknown`. See [reliability.md](reliability.md).
 
 ### Organisation and governance
 | Method and path | Description |
@@ -120,9 +125,24 @@ API key scopes: `ingest:logs`, `ingest:deployments`, `ingest:events`, `ingest:me
 ### Tool API — `/tools` (agent, MCP)
 Read-only and compact. Accepts a user session, an API key with `tools:read`, or the investigation's tool token.
 
-`GET /services`, `/services/:ref`, `/incidents`, `/incidents/:id/context`, `/logs/search`, `/logs/patterns`, `/logs/anomalies`, `/logs/histogram`, `/deployments`, `/deployment-context`, `/code-changes`, `/service-events`, `/metrics`; `POST /knowledge/search`.
+`GET /services`, `/services/:ref`, `/incidents`, `/incidents/:id/context`, `/logs/search`, `/logs/patterns`, `/logs/anomalies`, `/logs/histogram`, `/deployments`, `/deployment-context`, `/traces`, `/code-changes`, `/service-events`, `/metrics`; `POST /knowledge/search`.
 
 `GET /deployment-context?service=<slug|id>[&deploymentId=][&environment=]` answers the questions asked about a deployment in one call: what it replaced (`previousSuccessful`, skipping failed releases and with no age limit), the ready-made `rollbackTarget`, `changes` (commits and merged pull requests between the two deployments, the deployed commit first), `errorLogs` before and after it over an equal window, `incidentsAfter`, `alreadyRolledBack` and `recentDeployments`. Without `deploymentId` it describes the service's latest deployment; `deployment` is `null` when there is none.
+
+`GET /traces?service=<slug>&from=&to=&limit=&errorsOnly=` summarises traces from the Jaeger-compatible trace store configured in `TRACES_URL`: per trace its duration, the services crossed, the span with the largest self time (`slowestSpan`, with `system` and `peer` when the span says) and the spans that failed (`errorSpans`), plus `sampled`, `failed`, `p50Ms` and `p95Ms`. Failed traces come first, then the slowest. `available: false` with a `note` when no trace store is configured or it cannot be reached. The trace store is not tenant-aware: the service must belong to the caller's organisation, and its slug must equal its OpenTelemetry `service.name`.
+
+### Investigation report
+
+Besides `summary`, `confidence`, `hypotheses`, `facts`, `timeline`, `assumptions`, `uncertainties`, `nextSteps` and `recommendedActions`, a report carries:
+
+| Field | Content |
+|---|---|
+| `outcome` | `HEALTHY`, `DEGRADED`, `INCIDENT` or `UNDETERMINED`. Also stored on the investigation and returned in lists |
+| `assessment` | `outcome`, `confidence` (in the outcome, not in a hypothesis), `rationale`, `supportingRefs`, `signals[]` (`level`, `kind`, `text`, `evidenceRefs`), `missingTelemetry[]` |
+| `observations[]` | Statements with evidence references that are not evidence of a fault |
+| `facts[].verification`, `observations[].verification` | `status` (`verified`, `partly`, `unsupported`, `no_claims`) and `checks[]` (`text`, `kind`, `status`, `detail`, `evidenceRef`) |
+| `integrity` | `checked`, `supported`, `flagged[]` (`where`, `text`, `status`, `detail`) |
+| `recommendedActions[].effect`, `.effectReasons` | Recomputed by the API from the type and text |
 
 ## AI service (internal)
 

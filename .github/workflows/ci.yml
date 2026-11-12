@@ -117,3 +117,11 @@ jobs:
         run: |
           cp .env.example .env
           docker compose --profile app build
+      # The demo environment is exercised locally (it needs the whole stack and about 25
+      # minutes). Here it only has to build, parse and install without high advisories.
+      - name: Demo environment builds
+        run: |
+          for f in demo/scripts/*.mjs demo/services/src/*.cjs; do node --check "$f"; done
+          docker compose --profile demo config -q
+          docker build -q demo/services
+          (cd demo/services && npm audit --omit=dev --audit-level=high)

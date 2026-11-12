@@ -26,6 +26,16 @@ Things that turned out to matter while building this, written for whoever works 
 - Inconsistent test data reads as a model failure. A scenario that said "week-old deployment" but dated it ten minutes before the warnings, and a log pattern with no log line behind it, were both reported by the model as things to check. A test now asserts that each scenario agrees with itself.
 - Save the report before the guardrails touch it. That is what makes it possible to re-score real model output for free after changing the scorer or the guardrails.
 
+## Real telemetry (Milestone 4)
+- The first run against real services falsified two rules within minutes that eleven synthetic scenarios had passed. A pool gauge averaging 0.1 connections fell to 0, "down 100%", and a healthy service was reported as degraded. A service that sent no telemetry was reported as healthy because its empty log contained no errors. Synthetic data has round numbers and no silence; real data has both.
+- Every relative threshold needs an absolute floor, and "nothing found" needs to be told apart from "nothing sent".
+- A metric that goes from zero to something has no percentage change. A service with no errors has a baseline of exactly zero, so the most important change of all was filed as "steady".
+- Relabelling an unsafe action is not making it safe. A rollback downgraded to "manual" is the same rollback with fewer checks. Applying the new scorer to saved model output showed it immediately.
+- The validator needed validating. Run over real model reports it flagged 25 figures, and most were its own mistakes: "502s", a date without a time, "12-minute", the report's own confidence. Reading the flags was faster than reasoning about what a model might write.
+- Saved reports paid for themselves again. Every guardrail and scorer change in this milestone was checked against the nine real-model reports from Milestone 3 without a single model call.
+- A timeout is not a failure. The request was sent; whether it was applied is unknown, and a retry button that ignores that applies changes twice.
+- Classifying text by verbs is crude and errs one way on purpose. "Read the eviction log" needs approval because of "eviction". That direction of error costs a click.
+
 ## Claude API specifics
 - Current Claude models reject `budget_tokens`, sampling parameters and forced `tool_choice`. Depth is controlled with `output_config.effort`; thinking is adaptive by default.
 - During a tool loop the assistant's content blocks, including thinking blocks, must be sent back unchanged. The adapter keeps the raw blocks next to the LangChain message for that reason.

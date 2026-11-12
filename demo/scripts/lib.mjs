@@ -103,9 +103,12 @@ export async function waitFor(what, check, { timeoutMs = 120_000, everyMs = 2000
  * start investigations, and an investigation on a paid model costs money.
  */
 export async function assertNoPaidModel(session) {
-  const status = await session.get('/system/status');
+  // The AI service may have just been restarted: give it a minute before giving up.
+  const status = await waitFor('the AI service', async () => {
+    const current = await session.get('/system/status');
+    return current.ai?.reachable ? current : null;
+  }, { timeoutMs: 90_000 });
   const llm = status.ai?.llm;
-  if (!status.ai?.reachable) throw new Error('The AI service is not reachable.');
   if (llm?.available && !['heuristic', 'mock'].includes(llm.provider)) {
     throw new Error(`A paid model is active (${llm.provider} / ${llm.model}). Start the stack with \`npm run demo:up\`, which sets AI_PROVIDER=deterministic.`);
   }
