@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect } from 'react';
 
 /** Catches render errors anywhere in the app so a failure shows a way forward, not a blank page. */
@@ -14,7 +15,7 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
       {error.digest && <p className="font-mono text-[12px] text-ink-3">Reference: {error.digest}</p>}
       <div className="mt-2 flex gap-2">
         <button type="button" onClick={reset} className="h-9 rounded-md bg-ink px-3.5 text-sm font-medium text-white hover:bg-black">Try again</button>
-        <a href="/" className="inline-flex h-9 items-center rounded-md border border-line-strong bg-surface px-3.5 text-sm font-medium hover:bg-sunken">Go to overview</a>
+        <Link href="/" className="inline-flex h-9 items-center rounded-md border border-line-strong bg-surface px-3.5 text-sm font-medium hover:bg-sunken">Go to overview</Link>
       </div>
     </div>
   );
