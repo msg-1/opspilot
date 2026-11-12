@@ -19,8 +19,8 @@ export interface TraceSummary {
   spanCount: number;
   services: string[];
   /** The span with the largest self time: where the trace actually spent its time. */
-  slowestSpan: { service: string; operation: string; durationMs: number; selfMs: number } | null;
-  errorSpans: { service: string; operation: string; message: string | null }[];
+  slowestSpan: { service: string; operation: string; durationMs: number; selfMs: number; system: string | null; peer: string | null } | null;
+  errorSpans: { service: string; operation: string; message: string | null; system: string | null; peer: string | null }[];
 }
 
 export interface TraceResult {
@@ -69,6 +69,13 @@ function errorMessage(span: JaegerSpan): string | null {
   return status ? `HTTP ${String(status)}` : null;
 }
 
+/** What kind of call a span is (postgresql, redis, http) and whom it was made to, when the span says. */
+function target(span: JaegerSpan): { system: string | null; peer: string | null } {
+  const system = tag(span, 'db.system') ?? (tag(span, 'http.method') || tag(span, 'http.request.method') ? 'http' : null);
+  const peer = tag(span, 'peer.service') ?? tag(span, 'net.peer.name') ?? tag(span, 'server.address') ?? null;
+  return { system: typeof system === 'string' ? system : null, peer: typeof peer === 'string' ? peer : null };
+}
+
 export function summarise(trace: JaegerTrace): TraceSummary | null {
   if (!trace.spans?.length) return null;
   const ids = new Set(trace.spans.map((s) => s.spanID));
@@ -92,8 +99,8 @@ export function summarise(trace: JaegerTrace): TraceSummary | null {
     rootOperation: root.operationName,
     spanCount: trace.spans.length,
     services: [...new Set(trace.spans.map(service))].sort(),
-    slowestSpan: slowest ? { service: service(slowest.span), operation: slowest.span.operationName, durationMs: ms(slowest.span.duration), selfMs: ms(slowest.self) } : null,
-    errorSpans: trace.spans.filter(failed).slice(0, 5).map((s) => ({ service: service(s), operation: s.operationName, message: errorMessage(s) })),
+    slowestSpan: slowest ? { service: service(slowest.span), operation: slowest.span.operationName, durationMs: ms(slowest.span.duration), selfMs: ms(slowest.self), ...target(slowest.span) } : null,
+    errorSpans: trace.spans.filter(failed).slice(0, 5).map((s) => ({ service: service(s), operation: s.operationName, message: errorMessage(s), ...target(s) })),
   };
 }
 

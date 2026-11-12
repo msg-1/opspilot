@@ -258,6 +258,8 @@ def build_graph(ctx: Context):
         catalogue = {s["slug"]: s for s in state.get("catalogue", [])}
 
         await run_tool(ctx, "find_log_anomalies", {"services": scope, "from_time": w_from, "to_time": w_to}, "Detect new or spiking error patterns")
+        # Whether the services logged at all: silence is not the same as a clean log.
+        await run_tool(ctx, "get_log_histogram", {"services": scope, "from_time": w_from, "to_time": w_to}, "Count the log lines received in the window")
         if not ctx.store.by_kind("log_pattern"):
             await run_tool(ctx, "get_log_patterns", {"services": scope, "from_time": w_from, "to_time": w_to}, "Group warning and error logs into patterns")
         if not scope:
@@ -277,6 +279,16 @@ def build_graph(ctx: Context):
             await run_tool(ctx, "get_metrics", {"service": slug, "from_time": w_from, "to_time": w_to}, f"Compare metrics for {slug} with the preceding window")
         for slug in scope[:3]:
             await run_tool(ctx, "get_service", {"service": slug}, f"Check health and upstream dependencies of {slug}")
+        # An unhealthy dependency may itself be failing because of one further down. Follow the
+        # chain (at most three levels, six services) so the report names where it starts.
+        looked = set(scope[:3])
+        for _ in range(3):
+            frontier = [d.service for d in ctx.store.by_kind("dependency") if d.service and d.service not in looked and d.service in catalogue][: 6 - min(6, len(looked))]
+            if not frontier:
+                break
+            for slug in frontier:
+                looked.add(slug)
+                await run_tool(ctx, "get_service", {"service": slug}, f"Check what the unhealthy dependency {slug} itself depends on")
         for slug in scope[:2]:
             await run_tool(ctx, "get_traces", {"service": slug, "from_time": w_from, "to_time": w_to}, f"Sample slow and failed traces through {slug}")
         query = str((dominant.data or {}).get("sample") or "") if dominant else ""

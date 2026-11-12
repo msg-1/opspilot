@@ -214,7 +214,7 @@ def analyse(question: str, store: EvidenceStore, *, scope: list[str], window: tu
                 against += [c.ref for c in linked[:3]]
         elif change.kind == "deployment":
             assumptions.append("No commits or pull requests could be linked to this deployment, so what it changed is unknown.")
-        moved = [m for m in metrics if m.service == change.service and abs((m.data or {}).get("changePercent") or 0) >= 50]
+        moved = [m for m in metrics if m.service == change.service and (abs((m.data or {}).get("changePercent") or 0) >= 50 or (m.data or {}).get("fromZero"))]
         if moved:
             score += 0.05
             refs += [m.ref for m in moved[:3]]
@@ -247,15 +247,79 @@ def analyse(question: str, store: EvidenceStore, *, scope: list[str], window: tu
                 ))
 
     # ── Rule 2: an unhealthy upstream dependency ──
-    for dep in store.by_kind("dependency"):
-        if dep.service in affected:
-            continue  # it is one of the services under investigation, not an independent cause
+    # When dependencies fail in a chain (gateway → orders → payments → redis), the one with no
+    # unhealthy dependency of its own is where the chain starts; those above it are consequences.
+    unhealthy = {d.service: d for d in store.by_kind("dependency") if d.service}
+    for slug, dep in unhealthy.items():
+        if slug in scope:
+            continue  # it is the service being asked about, not an independent cause
+        below = [x for x in store.depends_on.get(slug, []) if x in unhealthy]
+        down = (dep.data or {}).get("health") == "DOWN" or "DOWN" in dep.title
+        path = _path_to(slug, scope, store.depends_on)
+        via = f" The path from the service in question is {' → '.join(path)}." if len(path) > 2 else ""
+        if below:
+            if slug in affected:
+                continue  # already showing the symptoms: a link in the chain, not its start
+            score, role = 0.2, f"It depends in turn on {', '.join(below)}, which is also unhealthy, so its trouble may be a consequence rather than the cause."
+        else:
+            score, role = (0.45 if down else 0.3), "Nothing it depends on is recorded as unhealthy, so the chain of failures appears to start here."
         hypotheses.append(HypothesisOut(
-            title=f"Degradation of upstream dependency {dep.service}",
-            description=f"{dep.summary} Failures there could surface as errors in the services that call it.",
-            confidence=0.3, status="possible", evidence_refs=[dep.ref], facts=[f"{dep.title} ({dep.ref})."],
+            title=f"{'Failure' if down else 'Degradation'} of upstream dependency {slug}",
+            description=f"{dep.summary} Failures there could surface as errors in the services that call it. {role}{via}",
+            confidence=score, status="possible" if score >= 0.25 else "unlikely", evidence_refs=[dep.ref], facts=[f"{dep.title} ({dep.ref})."],
             assumptions=["The dependency's degradation is assumed to be a cause rather than a consequence of the same incident."],
-            gaps=[f"Check whether {dep.service} errors started before or after the errors in its callers."],
+            gaps=[f"Check whether {slug} errors started before or after the errors in its callers.", f"Check {slug} itself: is it running, reachable and within its limits?"],
+        ))
+
+    # ── Rule 4: traces show where time is lost or where requests fail ──
+    traces = store.by_kind("trace")
+    slow: dict[tuple[str, str], list[EvidenceItem]] = {}
+    broken: dict[tuple[str, str], list[EvidenceItem]] = {}
+    for tr in traces:
+        d = tr.data or {}
+        span = d.get("slowestSpan") or {}
+        # A span that takes two fifths of a slow request is where to look, even when the request
+        # makes the same slow call twice.
+        if span and (d.get("durationMs") or 0) >= 200 and (span.get("selfMs") or 0) >= 0.4 * (d.get("durationMs") or 0):
+            slow.setdefault((str(span.get("service")), _callee(span)), []).append(tr)
+        errors = d.get("errorSpans") or []
+        if errors:
+            # The span furthest down the call chain that carries a message of its own is the origin;
+            # the "HTTP 502" spans above it only pass the failure on.
+            origin = next((e for e in reversed(errors) if e.get("message") and not str(e["message"]).startswith("HTTP ")), errors[-1])
+            broken.setdefault((str(origin.get("service")), _callee(origin) + "|" + re.sub(r"\d+", "<n>", str(origin.get("message") or ""))[:120]), []).append(tr)
+    latency_up = [m for m in metrics if any(k in str((m.data or {}).get("metric")) for k in ("latency", "duration")) and _rose(m)]
+    errors_up = [m for m in metrics if "error" in str((m.data or {}).get("metric")) and _rose(m)]
+    for (service, callee), group in slow.items():
+        if len(group) < 2:
+            continue
+        spans = [(g.data or {})["slowestSpan"] for g in group]
+        score = 0.35 + (0.1 if latency_up else 0) + (0.05 if len(group) >= 4 else 0)
+        where = f"{service}'s calls to {callee}" if callee else f"{service} itself ({spans[0].get('operation')})"
+        hypotheses.append(HypothesisOut(
+            title=f"Time is being lost in {where}",
+            description=f"In {len(group)} sampled traces, a single span in {service} ({spans[0].get('operation')}) accounts for most of the request time: "
+            f"{min(sp.get('selfMs') or 0 for sp in spans):.0f} to {max(sp.get('selfMs') or 0 for sp in spans):.0f} ms of requests lasting "
+            f"{min((g.data or {}).get('durationMs') or 0 for g in group):.0f} to {max((g.data or {}).get('durationMs') or 0 for g in group):.0f} ms. This locates the delay; it does not say why {callee or service} is slow.",
+            confidence=round(score, 2), status="likely" if score >= 0.55 else "possible", evidence_refs=_unique([g.ref for g in group[:4]] + [m.ref for m in latency_up[:2]]),
+            facts=[f"{g.title}: {g.summary} ({g.ref})" for g in group[:2]],
+            assumptions=["The sampled traces are assumed to be representative of the slow requests."],
+            gaps=[f"Check the load, locks and health of {callee or service} at the same time.", "Compare with a trace from before the slowdown."],
+        ))
+    for (service, key), group in broken.items():
+        if len(group) < 2:
+            continue
+        callee, message = key.split("|", 1)
+        score = 0.35 + (0.1 if errors_up else 0) + (0.05 if len(group) >= 4 else 0)
+        where = f"{service}'s calls to {callee}" if callee else service
+        hypotheses.append(HypothesisOut(
+            title=f"Requests are failing in {where}",
+            description=f"In {len(group)} sampled traces the failure starts in {service}" + (f" when it calls {callee}" if callee else "") + (f": \"{message}\"." if message else ".")
+            + " The services above it in the trace only pass the error on. This locates the failure; the reason for it is not in the traces.",
+            confidence=round(score, 2), status="likely" if score >= 0.55 else "possible", evidence_refs=_unique([g.ref for g in group[:4]] + [m.ref for m in errors_up[:2]]),
+            facts=[f"{g.title}: {g.summary} ({g.ref})" for g in group[:2]],
+            assumptions=["The sampled traces are assumed to be representative of the failing requests."],
+            gaps=[f"Check {callee or service} directly: is it reachable and healthy?", "Read the error logs of the same trace ids."],
         ))
 
     # ── Rule 3: recurrence of a known failure ──
@@ -369,6 +433,32 @@ def analyse(question: str, store: EvidenceStore, *, scope: list[str], window: tu
         assumptions=_unique([a for h in hypotheses[:2] for a in h.assumptions]), uncertainties=uncertainties,
         hypotheses=hypotheses, next_steps=_unique(next_steps)[:8], recommended_actions=actions[:3],
     )
+
+
+def _rose(metric: EvidenceItem, percent: float = 50) -> bool:
+    data = metric.data or {}
+    return bool(data.get("fromZero")) or (data.get("changePercent") or 0) >= percent
+
+
+def _callee(span: dict) -> str:
+    """What a span was calling, as far as it says: a named peer, else the kind of system."""
+    return str(span.get("peer") or span.get("system") or "")
+
+
+def _path_to(target: str, scope: list[str], depends_on: dict[str, list[str]]) -> list[str]:
+    """Shortest chain of dependencies from a service in scope to the target, if one is known."""
+    for start in scope:
+        queue: list[list[str]] = [[start]]
+        seen = {start}
+        while queue:
+            path = queue.pop(0)
+            if path[-1] == target:
+                return path
+            for nxt in depends_on.get(path[-1], []):
+                if nxt not in seen and len(path) < 5:
+                    seen.add(nxt)
+                    queue.append([*path, nxt])
+    return [target]
 
 
 def _linked(code: EvidenceItem, change: EvidenceItem, sha: str) -> bool:

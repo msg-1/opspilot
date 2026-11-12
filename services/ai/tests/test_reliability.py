@@ -91,6 +91,35 @@ async def test_healthy_confidence_follows_coverage_and_is_not_a_constant():
     assert any("Most recent deployment on record" in o.statement and "v8.4.0" in o.statement for o in old.observations)
 
 
+async def test_a_service_that_sends_nothing_is_undetermined_however_clean_its_empty_log_looks():
+    """Found with real telemetry: a service registered in the catalogue but not instrumented was
+    reported healthy, because the log queries succeeded and returned no errors."""
+    silent = Scenario(name="silent", question="Is ledger-api healthy?", description="", expect=BY_NAME["healthy_clean"].expect, services=[svc("ledger-api")], log_lines=0)
+    report, _, failures = await investigate(silent)
+    assert not failures and report.outcome == "UNDETERMINED" and report.assessment.confidence == 0
+    assert "sent no metric samples and no log lines" in report.assessment.rationale
+    assert any("No log lines of any level" in m for m in report.assessment.missing_telemetry) and any("No metric samples" in m for m in report.assessment.missing_telemetry)
+    # The same service with metrics but still no logs can be judged, and the report says on what.
+    metered = Scenario(**{**silent.__dict__, "name": "metered", "metrics": {"ledger-api": [metric("error_rate", "Error rate", "%", 0.1, 0.1)]}})
+    healthy = (await investigate(metered))[0]
+    assert healthy.outcome == "HEALTHY" and "rests on metrics" in healthy.assessment.rationale
+
+
+def test_percentages_on_values_near_zero_are_not_signals():
+    """Found with real telemetry: a pool gauge averaging 0.1 connections fell to 0 (down 100%) and
+    p95 latency moved from 20 ms to 27 ms (up 35%). The healthy service was reported as degraded."""
+    store = EvidenceStore()
+    store.ingest("get_metrics", {"service": "x", "metrics": [
+        metric("db_connections", "DB connections", "", 0.0, 0.1), metric("latency_p95_ms", "p95", "ms", 27, 20), metric("latency_p50_ms", "p50", "ms", 9, 5),
+        metric("requests_per_min", "Throughput", "req/min", 180, 360), metric("queue_depth", "Queue depth", "", 0.4, 0.0),
+    ]})
+    levels = {s.text.split(" for ")[0]: s.level for s in find_signals(store)}
+    assert levels == {"DB connections": "weak", "p95": "weak", "p50": "weak", "Throughput": "moderate", "Queue depth": "weak"}
+    real = EvidenceStore()
+    real.ingest("get_metrics", {"service": "x", "metrics": [metric("latency_p95_ms", "p95", "ms", 950, 45), metric("latency_p50_ms", "p50", "ms", 70, 45), metric("db_connections", "DB connections", "", 6, 1.2)]})
+    assert {s.text.split(" for ")[0]: s.level for s in find_signals(real)} == {"p95": "strong", "p50": "moderate", "DB connections": "moderate"}
+
+
 async def test_no_telemetry_is_undetermined_not_healthy():
     silent = Scenario(name="no_telemetry", question="Is ledger-api healthy?", description="", expect=BY_NAME["healthy_clean"].expect, services=[svc("ledger-api")], fail_paths=["/logs", "/metrics"])
     report, _, _ = await investigate(silent)
@@ -127,6 +156,22 @@ async def test_a_report_that_calls_a_failing_service_healthy_is_corrected_too():
     assert rosy.outcome == "DEGRADED" and rosy.assessment.signals[0].level == "strong"
     assert any("concluded HEALTHY; the evidence supports DEGRADED" in n for n in notes)
     assert "does not establish what caused it" in rosy.assessment.rationale
+
+
+def test_a_metric_that_rises_from_zero_is_a_change_although_it_has_no_percentage():
+    """Found with real telemetry: a service with no errors at all has a baseline of zero, so an
+    error rate of 28% had no percentage change and was filed as steady."""
+    store = EvidenceStore()
+    store.ingest("get_metrics", {"service": "x", "metrics": [metric("error_rate", "Error rate", "%", 28.0, 0.0), metric("queue_depth", "Queue depth", "", 3.0, 0.0), metric("latency_p95_ms", "p95", "ms", 40, 40)]})
+    kinds = {e.kind: e for e in store.items}
+    assert [e.title for e in store.by_kind("metric")] == ["Error rate for x up from zero", "Queue depth for x up from zero"]
+    assert "latency_p95_ms" in kinds["metric_baseline"].summary and "error_rate" not in kinds["metric_baseline"].summary
+    levels = {s.text: s.level for s in find_signals(store)}
+    assert levels == {"Error rate for x up from zero": "strong", "Queue depth for x up from zero": "moderate"}
+    # A rate that leaves zero but stays negligible is not a failure.
+    quiet = EvidenceStore()
+    quiet.ingest("get_metrics", {"service": "x", "metrics": [metric("error_rate", "Error rate", "%", 0.2, 0.0)]})
+    assert [s.level for s in find_signals(quiet)] == ["weak"]
 
 
 def test_signal_strength_follows_size_not_mere_presence():
@@ -384,3 +429,86 @@ def test_a_report_is_labelled_fact_by_fact_and_the_tally_reaches_the_reader():
     wire = report.wire()
     assert wire["facts"][2]["verification"]["status"] == "unsupported" and wire["integrity"]["flagged"][0]["where"]
     assert verify_report(InvestigationReport(summary="Nothing to report.", confidence=0), s).checked == 0
+
+
+# ───────────────────────── Dependency chains and traces ─────────────────────────
+
+
+def _dep(slug: str, health: str) -> dict[str, Any]:
+    return {"slug": slug, "name": slug, "health": health, "healthNote": f"alert firing on {slug}" if health != "HEALTHY" else None, "kind": "sync"}
+
+
+def _trace(id_: str, root: str, duration: float, slowest: dict[str, Any] | None = None, errors: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    return {"traceId": id_, "startedAt": t(5), "durationMs": duration, "rootService": root, "rootOperation": "POST /checkout", "spanCount": 6, "services": ["shop-gateway", "shop-orders", "shop-payments"], "slowestSpan": slowest, "errorSpans": errors or []}
+
+
+async def test_a_chain_of_failing_dependencies_is_followed_to_where_it_starts():
+    """gateway → orders → payments → redis, with redis down. The services in between are
+    unhealthy too, but only as a consequence: the report must name redis and blame nothing else."""
+    scenario = Scenario(
+        name="chain", question="Why are checkouts failing on shop-gateway?", description="", expect=BY_NAME["upstream_dependency_down"].expect,
+        services=[svc("shop-gateway", ["shop-orders"], "DEGRADED"), svc("shop-orders", ["shop-payments", "shop-postgres"], "DEGRADED"), svc("shop-payments", ["shop-redis"], "DEGRADED"), svc("shop-redis", health="DOWN"), svc("shop-postgres")],
+        anomalies=[pattern("g1", "shop-gateway", "upstream shop-orders returned 502", 240, 6)],
+        logs=[{"id": "lg", "timestamp": t(3), "level": "ERROR", "service": "shop-gateway", "message": "upstream shop-orders returned 502", "traceId": "t1", "fingerprint": "g1", "attributes": None}],
+        metrics={"shop-gateway": [metric("error_rate", "Error rate", "%", 28.0, 0.0)]},
+        service_details={
+            "shop-gateway": {"health": "DEGRADED", "dependsOn": [_dep("shop-orders", "DEGRADED")]},
+            "shop-orders": {"health": "DEGRADED", "dependsOn": [_dep("shop-payments", "DEGRADED"), _dep("shop-postgres", "HEALTHY")]},
+            "shop-payments": {"health": "DEGRADED", "dependsOn": [_dep("shop-redis", "DOWN")]},
+            "shop-redis": {"health": "DOWN", "dependsOn": []},
+        },
+    )
+    report, store, _ = await investigate(scenario)
+    assert report.outcome == "INCIDENT"
+    top = report.hypotheses[0]
+    assert top.title == "Failure of upstream dependency shop-redis" and top.confidence == 0.45
+    assert "shop-gateway → shop-orders → shop-payments → shop-redis" in top.description and "appears to start here" in top.description
+    # The healthy database is not mentioned as a suspect, and the links in between rank below the origin.
+    assert not any("shop-postgres" in h.title for h in report.hypotheses)
+    assert all(h.confidence < top.confidence for h in report.hypotheses[1:])
+    assert store.depends_on["shop-payments"] == ["shop-redis"]
+    # Asked about the service next to the failure, the answer is the same.
+    direct = Scenario(**{**scenario.__dict__, "name": "direct", "question": "Why is shop-payments returning errors?"})
+    assert (await investigate(direct))[0].hypotheses[0].title == "Failure of upstream dependency shop-redis"
+
+
+async def test_traces_locate_where_time_is_lost_without_claiming_to_know_why():
+    slowest = {"service": "shop-orders", "operation": "pg.query:SELECT", "durationMs": 1520, "selfMs": 1500, "system": "postgresql", "peer": "demo-postgres"}
+    scenario = Scenario(
+        name="slow_db", question="Why is shop-orders slow?", description="", expect=BY_NAME["upstream_dependency_down"].expect,
+        services=[svc("shop-orders", ["shop-postgres"]), svc("shop-postgres")],
+        metrics={"shop-orders": [metric("latency_p95_ms", "p95 latency", "ms", 1650, 45), metric("error_rate", "Error rate", "%", 0.0, 0.0)]},
+        traces=[_trace(f"t{i}", "shop-orders", 1700 - i * 10, slowest) for i in range(4)] + [_trace("fast", "shop-orders", 40, {"service": "shop-orders", "operation": "GET /orders/:id", "durationMs": 40, "selfMs": 12, "system": "http", "peer": None})],
+        service_details={"shop-orders": {"health": "HEALTHY", "dependsOn": [_dep("shop-postgres", "HEALTHY")]}},
+    )
+    report, store, _ = await investigate(scenario)
+    top = report.hypotheses[0]
+    assert report.outcome == "INCIDENT" and top.title == "Time is being lost in shop-orders's calls to demo-postgres"
+    assert top.confidence == 0.5 and top.status == "possible"  # located, not explained
+    assert "does not say why demo-postgres is slow" in top.description
+    cited = {e.kind for e in store.items if e.ref in top.evidence_refs}
+    assert cited == {"trace", "metric"}
+    # Every figure in the hypothesis is found in the traces it cites.
+    assert not [f for f in report.integrity.flagged if f.status == "unsupported"], report.integrity.flagged
+    # One slow trace is an anecdote, not a pattern.
+    lone = Scenario(**{**scenario.__dict__, "name": "lone", "traces": scenario.traces[:1]})
+    assert not (await investigate(lone))[0].hypotheses
+
+
+async def test_traces_locate_where_requests_fail_at_the_deepest_span_with_a_message():
+    errors = [
+        {"service": "shop-gateway", "operation": "POST /checkout", "message": "HTTP 502", "system": "http", "peer": None},
+        {"service": "shop-orders", "operation": "POST", "message": "HTTP 503", "system": "http", "peer": "demo-payments"},
+        {"service": "shop-payments", "operation": "set", "message": "Stream isn't writeable and enableOfflineQueue options is false", "system": "redis", "peer": "demo-redis"},
+    ]
+    scenario = Scenario(
+        name="failed", question="Why are checkouts failing on shop-gateway?", description="", expect=BY_NAME["upstream_dependency_down"].expect,
+        services=[svc("shop-gateway", ["shop-orders"])],
+        metrics={"shop-gateway": [metric("error_rate", "Error rate", "%", 30.0, 0.0)]},
+        traces=[_trace(f"f{i}", "shop-gateway", 60, None, errors) for i in range(3)],
+    )
+    report, _, _ = await investigate(scenario)
+    top = report.hypotheses[0]
+    assert top.title == "Requests are failing in shop-payments's calls to demo-redis" and top.confidence == 0.45
+    assert "only pass the error on" in top.description and "enableOfflineQueue" in top.description
+    assert report.outcome == "INCIDENT" and not [a for a in report.recommended_actions if a.effect == "state_changing"]

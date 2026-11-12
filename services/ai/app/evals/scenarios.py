@@ -120,6 +120,8 @@ class Scenario:
     #: the deployment-context tool. Derived from the anomalies when a deployment is not listed.
     deployment_errors: dict[str, tuple[int, int]] = field(default_factory=dict)
     traces: list[dict[str, Any]] = field(default_factory=list)
+    #: Log lines of all levels the services sent in the window. Zero: the services are silent.
+    log_lines: int = 600
 
     def handler(self) -> Callable[[httpx.Request], httpx.Response]:
         def handle(request: httpx.Request) -> httpx.Response:
@@ -145,7 +147,7 @@ class Scenario:
             if path == "/logs/search":
                 return httpx.Response(200, json={"window": window, "totalMatching": len(self.logs), "returned": len(self.logs), "logs": pick(self.logs)})
             if path == "/logs/histogram":
-                return httpx.Response(200, json={"window": window, "bucketSeconds": 300, "buckets": []})
+                return httpx.Response(200, json={"window": window, "bucketSeconds": 300, "buckets": [{"timestamp": t(60), "errors": 0, "warnings": 0, "total": self.log_lines}] if self.log_lines else []})
             if path == "/deployment-context":
                 # Mirrors deploymentContext() in apps/api/src/modules/tools.ts.
                 slug = request.url.params.get("service", "")
