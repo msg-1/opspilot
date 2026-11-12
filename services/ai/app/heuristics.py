@@ -110,6 +110,7 @@ def build_plan(question: str, services: list[str], window: tuple[datetime, datet
         PlanStep(description="Read concrete examples of the dominant error pattern", tool="search_logs"),
         PlanStep(description="List deployments from the 24 hours before the window to find changes that preceded the errors", tool="list_deployments"),
         PlanStep(description="Retrieve the commits and pull requests shipped by those deployments", tool="get_code_changes"),
+        PlanStep(description="Examine the latest deployment of each service in scope: what it shipped, error rates before and after, and the version to roll back to", tool="get_deployment_context"),
         PlanStep(description="List config, feature-flag, scaling and restart events in the same period", tool="list_service_events"),
         PlanStep(description="Compare key metrics in the window with the preceding window for each service in scope", tool="get_metrics"),
         PlanStep(description="Check upstream dependencies of the affected services for degradation", tool="get_service"),

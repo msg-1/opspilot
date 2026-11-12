@@ -282,3 +282,82 @@ toolsRouter.post('/knowledge/search', async (req, res) => {
     results: result.hits.map((h) => ({ chunkId: h.chunkId, documentId: h.documentId, title: h.title, type: h.type, section: h.heading, content: clip(h.content, 1400), similarity: h.similarity, matchedBy: h.matchedBy })),
   });
 });
+
+/**
+ * Deployment intelligence: everything needed to judge one deployment as a suspect and to
+ * propose a concrete rollback. Without this the agent has to guess a time window wide enough
+ * to contain the previous version, and often cannot name a rollback target at all.
+ */
+export async function deploymentContext(organizationId: string, serviceRef: string, opts: { deploymentId?: string; environment?: string } = {}) {
+  const service = await requireService(organizationId, serviceRef);
+  const environment = opts.environment ?? 'production';
+  const scope = { organizationId, serviceId: service.id, environment };
+  const target = opts.deploymentId
+    ? await prisma.deployment.findFirst({ where: { ...scope, id: opts.deploymentId } })
+    : await prisma.deployment.findFirst({ where: { ...scope, isRollback: false }, orderBy: { startedAt: 'desc' } });
+  if (!target) return { service: service.slug, environment, deployment: null, note: 'No deployment is recorded for this service in this environment.' };
+
+  const windowMs = 30 * 60_000;
+  const now = Date.now();
+  const after = new Date(Math.min(now, target.startedAt.getTime() + windowMs));
+  const [previous, recent, commit, pulls, rollbacks, errorsBefore, errorsAfter, incidentsAfter] = await Promise.all([
+    // The rollback target: the last version that deployed successfully before this one.
+    prisma.deployment.findFirst({ where: { ...scope, status: 'SUCCEEDED', isRollback: false, startedAt: { lt: target.startedAt } }, orderBy: { startedAt: 'desc' } }),
+    prisma.deployment.findMany({ where: scope, orderBy: { startedAt: 'desc' }, take: 6 }),
+    target.commitSha ? prisma.commit.findFirst({ where: { sha: { startsWith: target.commitSha.slice(0, 7) }, repository: { organizationId } }, include: { repository: { select: { fullName: true, isMock: true } } } }) : null,
+    target.commitSha ? prisma.pullRequest.findMany({ where: { mergeCommitSha: { startsWith: target.commitSha.slice(0, 7) }, repository: { organizationId } }, include: { repository: { select: { fullName: true, isMock: true } } } }) : [],
+    prisma.deployment.findMany({ where: { ...scope, rollbackOfId: target.id }, select: { id: true, version: true, startedAt: true } }),
+    prisma.logEntry.count({ where: { organizationId, serviceId: service.id, level: { in: ['ERROR', 'FATAL'] }, timestamp: { gte: new Date(target.startedAt.getTime() - windowMs), lt: target.startedAt } } }),
+    prisma.logEntry.count({ where: { organizationId, serviceId: service.id, level: { in: ['ERROR', 'FATAL'] }, timestamp: { gte: target.startedAt, lte: after } } }),
+    prisma.incident.findMany({
+      where: { organizationId, services: { some: { serviceId: service.id } }, startedAt: { gte: target.startedAt, lte: new Date(target.startedAt.getTime() + 6 * 3600_000) } },
+      select: { id: true, number: true, title: true, severity: true, status: true, startedAt: true },
+    }),
+  ]);
+  // Everything merged to the linked repositories between the previous deployment and this one:
+  // the complete set of changes this deployment could have shipped.
+  const between = previous
+    ? await prisma.commit.findMany({
+        where: { repository: { organizationId, serviceId: service.id }, committedAt: { gt: previous.startedAt, lte: target.startedAt } },
+        orderBy: { committedAt: 'desc' },
+        take: 15,
+        include: { repository: { select: { fullName: true, isMock: true } } },
+      })
+    : [];
+  const shape = (d: typeof target) => ({ id: d.id, service: service.slug, version: d.version, environment: d.environment, status: d.status, commitSha: d.commitSha, branch: d.branch, deployedBy: d.deployedBy, startedAt: d.startedAt, finishedAt: d.finishedAt, isRollback: d.isRollback, description: clip(d.description, 300) });
+  const commitShape = (c: NonNullable<typeof commit>) => ({ id: c.id, sha: c.sha.slice(0, 12), repository: c.repository.fullName, service: service.slug, sampleData: c.repository.isMock, message: clip(c.message, 400), author: c.authorLogin ?? c.authorName, committedAt: c.committedAt, additions: c.additions, deletions: c.deletions, files: Array.isArray(c.filesChanged) ? (c.filesChanged as { filename: string }[]).slice(0, 15).map((f) => f.filename) : [] });
+  const commits = [...(commit ? [commit] : []), ...between.filter((b) => b.id !== commit?.id)].map(commitShape);
+  const windowMinutes = Math.round((after.getTime() - target.startedAt.getTime()) / 60_000);
+  return {
+    service: service.slug,
+    environment,
+    deployment: shape(target),
+    minutesSinceDeployment: Math.round((now - target.startedAt.getTime()) / 60_000),
+    isLatest: recent[0]?.id === target.id,
+    previousSuccessful: previous ? shape(previous) : null,
+    // Ready to use as the parameters of a rollback_deployment recommendation.
+    rollbackTarget: previous ? { deploymentId: target.id, fromVersion: target.version, toVersion: previous.version, previousDeployedAt: previous.startedAt } : null,
+    alreadyRolledBack: rollbacks.length > 0 || target.status === 'ROLLED_BACK',
+    changes: {
+      commits,
+      pullRequests: pulls.map((p) => ({ id: p.id, number: p.number, repository: p.repository.fullName, service: service.slug, sampleData: p.repository.isMock, title: p.title, body: clip(p.body, 500), author: p.authorLogin, state: p.state, mergedAt: p.mergedAt, mergeCommitSha: p.mergeCommitSha?.slice(0, 12) ?? null, labels: p.labels })),
+      note: !target.commitSha ? 'This deployment records no commit SHA, so its code changes cannot be identified exactly.' : !commit && !pulls.length ? 'No synced commit or pull request matches this deployment (repository not connected or not yet synced).' : undefined,
+    },
+    errorLogs: {
+      windowMinutes,
+      before: errorsBefore,
+      after: errorsAfter,
+      // Per-minute rates, because the "after" window is shorter than 30 minutes for a very recent deployment.
+      beforePerMinute: Math.round((errorsBefore / 30) * 100) / 100,
+      afterPerMinute: windowMinutes ? Math.round((errorsAfter / windowMinutes) * 100) / 100 : null,
+    },
+    incidentsAfter: incidentsAfter.map((i) => ({ id: i.id, key: incidentKey(i.number), title: i.title, severity: i.severity, status: i.status, startedAt: i.startedAt })),
+    recentDeployments: recent.map(shape),
+  };
+}
+
+toolsRouter.get('/deployment-context', async (req, res) => {
+  const { organizationId } = authOf(req);
+  const q = z.object({ service: z.string().min(1), deploymentId: z.string().optional(), environment: z.string().max(40).optional() }).parse(req.query);
+  res.json(await deploymentContext(organizationId, q.service, q));
+});

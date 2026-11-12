@@ -1,5 +1,5 @@
 {
-  "summary": "Heuristic analysis (no LLM configured). The most frequent error pattern is \"failed to deserialize cache entry for key order:<n>: unexpected schema version\" in orders-api, seen 420 times since 2026-06-01T11:30:00Z. The leading hypothesis is: Regression introduced by Deployment of orders-api v4.2.0 (succeeded) (64% confidence, likely). The error signal began about 8 minutes after this deployment. The shipped change touches cache, matching the failure mode in the logs. No alternative hypotheses met the evidence bar. The cause has not been verified.",
+  "summary": "Rule-based analysis (no language model wrote these conclusions). The most frequent error pattern is \"failed to deserialize cache entry for key order:<n>: unexpected schema version\" in orders-api, seen 420 times since 2026-06-01T11:30:00Z. The leading hypothesis is: Regression introduced by Deployment of orders-api v4.2.0 (succeeded) (64% confidence, likely). The error signal began about 8 minutes after this deployment. The shipped change touches cache, matching the failure mode in the logs. No alternative hypotheses met the evidence bar. The cause has not been verified.",
   "confidence": 0.64,
   "analysisMode": "heuristic",
   "rootCauseConfirmed": false,
@@ -42,7 +42,7 @@
     {
       "statement": "Error rate for orders-api up 2900%: error_rate averaged 12% (max 15.6%) between 2026-06-01T10:00:00Z and 2026-06-01T12:00:00Z, versus 0.4% in the preceding window",
       "evidenceRefs": [
-        "E7"
+        "E8"
       ]
     }
   ],
@@ -63,7 +63,7 @@
         "E1",
         "E5",
         "E6",
-        "E7"
+        "E8"
       ],
       "contradictingEvidenceRefs": [],
       "contradictions": [],
@@ -71,7 +71,7 @@
         "Deployment of orders-api v4.2.0 (succeeded) happened at 2026-06-01T11:22:00Z, 8 minutes before the first anomalous error (E3).",
         "The dominant error pattern is in the same service as the change (E1).",
         "The code shipped by this change mentions cache, which also appear in the error messages (E5, E6).",
-        "Metrics for the service shifted sharply in the window: Error rate for orders-api up 2900% (E7)."
+        "Metrics for the service shifted sharply in the window: Error rate for orders-api up 2900% (E8)."
       ],
       "assumptions": [
         "Temporal proximity is treated as a signal of causation; it has not been verified."
@@ -86,7 +86,7 @@
     "Confirm by comparing error rate per version, or by rolling back in a controlled way.",
     "Review the diff of the linked change for the suspected mechanism.",
     "Open the log explorer filtered to pattern f1 and follow a trace id across services.",
-    "Follow the documented procedure in \"Runbook: Cache schema migrations \u203a Symptoms\" (E8)."
+    "Follow the documented procedure in \"Runbook: Cache schema migrations \u203a Symptoms\" (E9)."
   ],
   "recommendedActions": [
     {
