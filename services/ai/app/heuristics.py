@@ -76,8 +76,8 @@ def text_of(e: EvidenceItem) -> str:
     return f"{e.title} {e.summary} {extra} {files}"
 
 
-def default_window(incident_started: str | None, incident_resolved: str | None, requested: tuple[str, str] | None) -> tuple[datetime, datetime]:
-    now = datetime.now(UTC)
+def default_window(incident_started: str | None, incident_resolved: str | None, requested: tuple[str, str] | None, now: datetime | None = None) -> tuple[datetime, datetime]:
+    now = now or datetime.now(UTC)
     if requested:
         a, b = parse_time(requested[0]), parse_time(requested[1])
         if a and b:

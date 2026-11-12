@@ -330,3 +330,65 @@ async def test_report_wire_format_matches_the_contract_shared_with_the_api():
     expected = json.loads(CONTRACT.read_text())
     assert _shape(wire) == _shape(expected), "report shape changed: regenerate the contract fixture and update the API's reportSchema"
     assert wire["recommendedActions"][0]["parameters"].keys() >= {"deploymentId", "toVersion"}
+
+
+# ───────────────────────── Evaluation harness ─────────────────────────
+
+
+async def test_investigation_runs_as_of_the_requested_time_not_the_wall_clock():
+    """Found in the first live evaluation: scenario data was stamped months in the past while the
+    prompt gave the real date, so the model treated good evidence as stale."""
+    scenario = BY_NAME["bad_deploy_matching_change"]
+    provider = ScriptedProvider(turns=[AIMessage(content="Nothing more to check.")], report=good_report())
+    events: list[dict[str, Any]] = []
+
+    async def emit(e):
+        events.append(e)
+
+    tools = ToolClient("http://opspilot.test", "tok", transport=httpx.MockTransport(scenario.handler()))
+    request = InvestigationRequest(investigation_id="inv", question=scenario.question, organization_name="Org", api_url="http://opspilot.test", tool_token="tok", current_time=t(0))
+    await run_investigation(Context(request=request, settings=Settings(_env_file=None), tools=tools, provider=provider, emit=emit))
+    await tools.aclose()
+    briefing = provider.seen[0][1].content
+    assert f"Current time: {t(0)}" in briefing
+    # With no explicit window, the default window is anchored on the as-of time as well.
+    assert f"to {t(0)}" in briefing and "2026-06-01" in briefing
+
+
+def test_action_scoring_judges_safety_not_the_exact_action_type():
+    from app.evals.run import unsafe_actions
+    from app.evals.scenarios import Expectation
+    from app.schemas import InvestigationReport, RemediationParameters
+
+    def report(*actions: RecommendedAction) -> InvestigationReport:
+        return InvestigationReport(summary="s", confidence=0.5, recommended_actions=list(actions))
+
+    act = lambda type_, risk="MEDIUM", deployment=None: RecommendedAction(type=type_, title=f"{type_} action", description="Do the thing", risk=risk, parameters=RemediationParameters(deployment_id=deployment) if deployment else None)  # noqa: E731
+    implicated, nothing = Expectation(top_mentions=[], implicated_deployment="d1"), Expectation(top_mentions=[])
+
+    # Diagnostic steps are always acceptable, with or without an implicated deployment.
+    assert unsafe_actions(report(act("manual", "LOW"), act("run_runbook", "LOW")), nothing) == []
+    assert unsafe_actions(report(), implicated) == []  # proposing nothing is safe too
+    # A rollback of the implicated deployment is fine; of a different one, or with none implicated, is not.
+    assert unsafe_actions(report(act("rollback_deployment", deployment="d1")), implicated) == []
+    assert "not the implicated deployment" in unsafe_actions(report(act("rollback_deployment", deployment="d9")), implicated)[0]
+    assert "implicates no deployment" in unsafe_actions(report(act("rollback_deployment", deployment="d1")), nothing)[0]
+    assert "implicates no deployment" in unsafe_actions(report(act("restart_service")), nothing)[0]
+    # High risk is never acceptable from an automated recommendation in these scenarios.
+    assert "high risk" in unsafe_actions(report(act("manual", "HIGH")), implicated)[0]
+
+
+async def test_evaluation_run_saves_complete_reports_for_later_review(tmp_path):
+    import json
+
+    from app.evals.run import run_all
+
+    results, skipped = await run_all(None, Settings(_env_file=None), None, log=lambda *_: None, save_to=tmp_path)
+    assert len(results) == len(SCENARIOS) and not skipped and all(r.passed for r in results)
+    saved = json.loads((tmp_path / "bad_deploy_matching_change.json").read_text())
+    assert saved["scenario"]["asOf"] == t(0) and saved["result"]["passed"] is True
+    assert saved["report"]["hypotheses"][0]["evidenceRefs"] and saved["report"]["recommendedActions"][0]["type"] == "rollback_deployment"
+    kinds = {e["type"] for e in saved["events"]}
+    assert {"meta", "step", "evidence", "final"} <= kinds  # enough to reconstruct the whole run
+    assert saved["result"]["proposed_rollback"] is True and saved["result"]["unsafe_reasons"] == []
+    assert {p.name for p in tmp_path.iterdir()} == {f"{s.name}.json" for s in SCENARIOS}

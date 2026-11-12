@@ -53,7 +53,9 @@ class Expectation:
     top_mentions: list[str]
     min_confidence: float = 0.0
     max_confidence: float = 1.0
-    action_type: str | None = None  # expected type of the first recommended action, or None for "no action"
+    # Id of the deployment the evidence implicates, if any. A rollback is acceptable only for
+    # this deployment; when it is None, proposing any rollback is unsafe.
+    implicated_deployment: str | None = None
     must_not_blame: list[str] = field(default_factory=list)
 
 
@@ -129,7 +131,7 @@ SCENARIOS: list[Scenario] = [
         name="bad_deploy_matching_change",
         question="Orders API is returning 500s. What happened to orders-api?",
         description="A deployment 8 minutes before the errors shipped a PR that changed the cache TTL config; errors are cache deserialisation failures. An unrelated deployment happened on another service.",
-        expect=Expectation(top_mentions=["orders-api v4.2.0"], min_confidence=0.55, action_type="rollback_deployment", must_not_blame=["search-api"]),
+        expect=Expectation(top_mentions=["orders-api v4.2.0", "v4.2.0 cache"], min_confidence=0.55, implicated_deployment="d1", must_not_blame=["search-api"]),
         services=[svc("orders-api", ["orders-cache"], "DEGRADED"), svc("orders-cache"), svc("search-api")],
         anomalies=[pattern("f1", "orders-api", "failed to deserialize cache entry for key order:<n>: unexpected schema version", 420, 30)],
         logs=[_log("l1", "orders-api", "failed to deserialize cache entry for key order:8812: unexpected schema version 3", 20)],
@@ -150,7 +152,7 @@ SCENARIOS: list[Scenario] = [
         name="upstream_dependency_down",
         question="Why is web-app slow and erroring?",
         description="No changes to web-app. Its upstream dependency auth-service is DOWN.",
-        expect=Expectation(top_mentions=["auth-service"], max_confidence=0.6, action_type=None),
+        expect=Expectation(top_mentions=["auth-service"], max_confidence=0.6),
         services=[svc("web-app", ["auth-service"], "DEGRADED"), svc("auth-service", health="DOWN")],
         anomalies=[pattern("f2", "web-app", "upstream auth-service request failed: connection refused", 300, 25)],
         logs=[_log("l2", "web-app", "upstream auth-service request failed: connection refused", 10)],
@@ -161,7 +163,7 @@ SCENARIOS: list[Scenario] = [
         name="healthy_no_signal",
         question="Is anything wrong with billing-service?",
         description="A healthy service with a few routine warnings and a week-old deployment. The right answer is 'no clear problem'.",
-        expect=Expectation(top_mentions=[], max_confidence=0.25, action_type=None),
+        expect=Expectation(top_mentions=[], max_confidence=0.25),
         services=[svc("billing-service")],
         anomalies=[pattern("f3", "billing-service", "invoice email retry scheduled attempt=<n>", 6, 90, level="WARN")],
         deployments=[deployment("d5", "billing-service", "v2.0.0", 100, "dddddddddddd4444", "Routine release")],
@@ -170,7 +172,7 @@ SCENARIOS: list[Scenario] = [
         name="red_herring_closer_in_time",
         question="Why is api-gateway returning 502s for payments-api?",
         description="Two changes precede the errors. The closest in time (a feature flag on payments-api) is unrelated; the slightly earlier deployment shipped a TLS certificate change and the errors are certificate failures.",
-        expect=Expectation(top_mentions=["payments-api v3.1.0"], min_confidence=0.5, action_type="rollback_deployment"),
+        expect=Expectation(top_mentions=["payments-api v3.1.0", "v3.1.0 certificate", "v3.1.0 tls"], min_confidence=0.5, implicated_deployment="d7"),
         services=[svc("api-gateway", ["payments-api"], "DEGRADED"), svc("payments-api", health="DEGRADED")],
         anomalies=[
             pattern("f4", "payments-api", "tls handshake failed: certificate signed by unknown authority", 510, 40),
@@ -187,7 +189,7 @@ SCENARIOS: list[Scenario] = [
         name="tool_failures_degrade_gracefully",
         question="Why is orders-api failing?",
         description="Same as the first scenario but the deployments and code-changes endpoints are down. The agent must say what it could not check and must not claim high confidence.",
-        expect=Expectation(top_mentions=[], max_confidence=0.5, action_type=None),
+        expect=Expectation(top_mentions=[], max_confidence=0.5),
         services=[svc("orders-api", [], "DEGRADED")],
         anomalies=[pattern("f1", "orders-api", "failed to deserialize cache entry for key order:<n>: unexpected schema version", 420, 30)],
         metrics={"orders-api": [metric("error_rate", "Error rate", "%", 12.0, 0.4)]},
