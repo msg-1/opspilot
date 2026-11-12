@@ -30,7 +30,7 @@ feature/bugfix    ●─●          ●───●
 ```bash
 # 1. Start from an up-to-date develop
 git checkout develop
-git pull --ff-only origin develop          # skip while there is no remote
+git pull --ff-only origin develop
 
 # 2. Create the branch
 git checkout -b feature/log-live-tail
@@ -54,9 +54,9 @@ gh pr merge --merge --delete-branch
 
 A `bugfix/*` branch follows exactly the same steps.
 
-### Without a remote
+### Without network access
 
-Until the repository has a GitHub remote there are no pull requests or CI. The local equivalent is to run the checks yourself, then:
+`develop` and `main` are protected on GitHub, so a local merge cannot be pushed to them: changes arrive through a pull request whose checks pass. Working offline, run the checks yourself and keep the work on its feature branch until it can be pushed. In a private fork without protection, the local equivalent of a pull request is:
 
 ```bash
 git checkout develop
@@ -125,11 +125,11 @@ Never rebase or force-push `main` or `develop`. Rebasing your own unpublished fe
 | `e2e.yml` | Pull requests into `main`; pushes to `release/**`, `hotfix/**`; manual | Starts the whole stack with Docker Compose and runs the browser tests |
 | `release.yml` | Push of a `vX.Y.Z` tag | Checks the tag is on `main` and matches `package.json`, then publishes a GitHub release |
 
-**These workflows have not run yet**: there is no remote repository. They are valid YAML and every command in them has been run locally.
+The repository is published at https://github.com/msg-1/opspilot. `ci.yml` runs on every pull request and has passed on `develop`; `e2e.yml` has passed on `release/0.1.0`. `release.yml` has never run, because no version tag has been pushed.
 
-## Branch protection (to configure on GitHub)
+## Branch protection
 
-Not active until someone applies it to the real repository. Recommended settings:
+Applied to `main` and `develop` on GitHub (pull request required, required checks, branch must be up to date, administrators included, no force pushes, no deletions). The required approval count is currently 0 because the project has one maintainer; raise it when there are reviewers. Recommended settings for a team:
 
 **`main`**
 - Require a pull request before merging; 1 approval; dismiss stale approvals
