@@ -306,6 +306,9 @@ Found and fixed in this milestone. None was in the original audit; each was foun
 | An uninstrumented service was reported as healthy | Medium | First run against the demo environment | Fixed: `UNDETERMINED` unless metric samples or log lines exist |
 | A metric rising from zero was filed as steady | Medium | Reasoning about the demo's error-rate baseline of zero | Fixed |
 | A hypothesis citing only symptoms made the outcome an incident with an "established cause" | Medium | Re-scoring saved model output | Fixed: the leading hypothesis must cite something that can be a cause |
+| After a bad release was rolled back, an unrelated slowdown was blamed on the rollback deployment by timing, and a rollback to the bad release was proposed | High | Full end-to-end run on the demo, with an earlier scenario's deployments in the history | Fixed: deployments can be recorded as rollbacks; a rolled-back version is never a target; a deployment after which errors fell, or that is itself a rollback, loses standing |
+| Trace sampling saw only the last ten seconds of the window, which are also excluded as unsettled, so an investigation right after a failure found no traces | Medium | Same run | Fixed: the window is sampled in slices |
+| The in-memory trace store was killed by its memory limit after twenty minutes | Low (demo only) | Same run | Fixed: bounded retention |
 | Free-text figures were not checked against evidence | Medium | Known issue from Milestone 3 | Fixed for numbers, timestamps, versions, commits, pull requests and incident keys; words such as "doubled" are not checked |
 
 Still open: everything under "Open items" above, plus the limits listed in [reliability.md](reliability.md) and [demo/README.md](../demo/README.md). The changes to the model-facing instructions and schema in this milestone have not been run against a model.

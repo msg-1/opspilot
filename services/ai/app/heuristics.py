@@ -183,7 +183,7 @@ def analyse(question: str, store: EvidenceStore, *, scope: list[str], window: tu
             continue  # after the errors began, or too long before
         score = 0.42 if lead <= 30 else 0.34 if lead <= 120 else 0.22
         refs = [change.ref]
-        facts = [f"{change.title} happened at {change.occurred_at}, {max(0, round(lead))} minutes before the first anomalous error ({change.ref})."]
+        facts = [f"{change.title} happened at {change.occurred_at}, {max(0, round(lead))} minutes before the first anomalous error ({change.ref})." if onset_ev else f"{change.title} happened at {change.occurred_at} ({change.ref})."]
         assumptions = ["Temporal proximity is treated as a signal of causation; it has not been verified."]
         contradictions: list[str] = []
         against: list[str] = []
@@ -197,6 +197,21 @@ def analyse(question: str, store: EvidenceStore, *, scope: list[str], window: tu
             contradictions.append(f"The change was made to {change.service}, which is not where the errors are occurring.")
         if lead > 120:
             contradictions.append(f"It happened {round(lead)} minutes before the errors began; a regression would usually show sooner.")
+        cdata = change.data or {}
+        if change.kind == "deployment" and cdata.get("status") == "ROLLED_BACK":
+            # No longer running: it cannot be causing what is happening now.
+            score -= 0.3
+            contradictions.append("This deployment has already been rolled back, so its code is no longer running.")
+        if change.kind == "deployment" and cdata.get("isRollback"):
+            score -= 0.15
+            contradictions.append("This deployment returned the service to a version that ran before, which makes a new regression unlikely.")
+        impact = next((i for i in store.by_kind("deployment_impact") if i.source_id == change.source_id), None)
+        errors = ((impact.data or {}).get("errorLogs") or {}) if impact else {}
+        if impact and errors.get("beforePerMinute") is not None and errors.get("afterPerMinute") is not None and errors["afterPerMinute"] <= errors["beforePerMinute"] and (errors.get("before") or 0) >= 5:
+            # Errors fell after it. Whatever is wrong now, this deployment made things better.
+            score -= 0.25
+            contradictions.append(f"Error logs fell after this deployment, from {errors['beforePerMinute']}/min to {errors['afterPerMinute']}/min ({impact.ref}).")
+            against.append(impact.ref)
         # Linked code: commits / PRs for the same service close to the change, or matching the deployed commit.
         sha = str((change.data or {}).get("commitSha") or "")[:10]
         linked = [c for c in store.by_kind("commit", "pull_request") if _linked(c, change, sha)]
@@ -228,13 +243,13 @@ def analyse(question: str, store: EvidenceStore, *, scope: list[str], window: tu
         what = "deployment" if change.kind == "deployment" else "change"
         hypotheses.append(HypothesisOut(
             title=f"Regression introduced by {change.title[:110]}",
-            description=f"The error signal began about {max(0, round(lead))} minutes after this {what}."
+            description=(f"The error signal began about {max(0, round(lead))} minutes after this {what}." if onset_ev else f"This {what} was made shortly before the window examined. No error onset could be determined, so there is no timing to compare with.")
             + (f" The shipped change touches {', '.join(sorted(mechanism))}, matching the failure mode in the logs." if mechanism else " The link is based on timing" + (" and service match." if same_service else ".")),
             confidence=round(score, 2), status="likely" if score >= 0.55 else "possible" if score >= 0.25 else "unlikely",
             evidence_refs=_unique(refs), contradicting_evidence_refs=_unique(against), contradictions=contradictions, facts=facts, assumptions=assumptions,
             gaps=["Confirm by comparing error rate per version, or by rolling back in a controlled way.", "Review the diff of the linked change for the suspected mechanism."],
         ))
-        if change.kind == "deployment" and score >= 0.45 and not (change.data or {}).get("isRollback"):
+        if change.kind == "deployment" and score >= 0.45 and not cdata.get("isRollback") and cdata.get("status") != "ROLLED_BACK":
             previous = next((d for d in deployments if d.service == change.service and (d.occurred_at or "") < (change.occurred_at or "") and (d.data or {}).get("status") == "SUCCEEDED"), None)
             if previous and not any(a.type == "rollback_deployment" for a in actions):
                 prev_version = (previous.data or {}).get("version")

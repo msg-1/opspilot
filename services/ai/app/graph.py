@@ -274,6 +274,11 @@ def build_graph(ctx: Context):
         # For each service in scope, what its latest deployment shipped and replaced.
         for slug in scope[:2]:
             await run_tool(ctx, "get_deployment_context", {"service": slug}, f"Examine the latest deployment of {slug} and its rollback target")
+            # The most recent deployment may be a rollback, which the call above passes over. What
+            # happened to the error rate after it is exactly what says whether it helped or hurt.
+            latest = max((d for d in ctx.store.by_kind("deployment") if d.service == slug and d.occurred_at), key=lambda d: d.occurred_at or "", default=None)
+            if latest and not any(i.source_id == latest.source_id for i in ctx.store.by_kind("deployment_impact")):
+                await run_tool(ctx, "get_deployment_context", {"service": slug, "deployment_id": latest.source_id}, f"Examine the most recent deployment of {slug} and the error rate around it")
         await run_tool(ctx, "list_service_events", {"services": wide, "from_time": day_before, "to_time": w_to}, "List config, flag, scaling and restart events")
         for slug in scope[:4]:
             await run_tool(ctx, "get_metrics", {"service": slug, "from_time": w_from, "to_time": w_to}, f"Compare metrics for {slug} with the preceding window")

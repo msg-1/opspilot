@@ -43,7 +43,8 @@ export const SCENARIOS = {
     },
     off: async () => {
       await admin('shop-orders', '/deploy', { version: 'v1.4.0' });
-      return record({ service: 'shop-orders', version: 'v1.4.0', commitSha: 'abababab1400', branch: 'main', deployedBy: 'demo-scenario', description: 'Roll back to v1.4.0 after errors in v1.5.0' });
+      // Recorded as a rollback of v1.5.0, which marks that deployment as rolled back.
+      return record({ service: 'shop-orders', version: 'v1.4.0', commitSha: 'abababab1400', branch: 'main', deployedBy: 'demo-scenario', description: 'Roll back to v1.4.0 after errors in v1.5.0', rollbackOf: 'v1.5.0' });
     },
   },
   'upstream-down': {

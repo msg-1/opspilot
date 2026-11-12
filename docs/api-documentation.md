@@ -53,7 +53,7 @@ API key scopes: `ingest:logs`, `ingest:deployments`, `ingest:events`, `ingest:me
 |---|---|
 | `GET/POST /services`, `GET/PATCH/DELETE /services/:id` | Catalogue. `GET /services/graph` returns nodes and edges |
 | `PUT /services/:id/dependencies` | Replace upstream dependencies: `{ dependencies: [{ serviceId, kind }] }` |
-| `GET/POST /deployments`, `GET/PATCH /deployments/:id` | Record and browse deployments. Detail includes the linked commit, pull requests, previous deployment and incidents that began within 6 hours |
+| `GET/POST /deployments`, `GET/PATCH /deployments/:id` | Record and browse deployments. Detail includes the linked commit, pull requests, previous deployment and incidents that began within 6 hours. `rollbackOf` (the id or version being rolled back) records a deployment as a rollback and marks the other as `ROLLED_BACK`, so that version is never offered as a rollback target |
 | `GET/POST /service-events` | Config changes, feature flags, scaling, restarts, maintenance |
 
 ### Logs — `/logs`

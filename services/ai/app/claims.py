@@ -307,7 +307,8 @@ class Checker:
         """A length of time that is the gap between two timestamps in the cited evidence."""
         if _dimension(claim.unit) != "time":
             return None
-        moments = sorted({(datetime.fromisoformat(t + ":00+00:00"), r) for r in refs for t in self.times[r]})[:60]
+        # The boundaries of the investigation window are moments too: "five minutes before the window".
+        moments = sorted({(datetime.fromisoformat(t + ":00+00:00"), r) for r in refs for t in self.times[r]} | {(datetime.fromisoformat(t + ":00+00:00"), "the window") for t in self.known_times})[:60]
         per_unit = UNITS[claim.unit][1] / 60_000  # minutes per unit of the claim
         for i, (a, ra) in enumerate(moments):
             for b, rb in moments[i + 1:]:

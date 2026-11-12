@@ -79,10 +79,20 @@ The guardrails (`services/ai/app/guardrails.py`, applied again in `apps/api/src/
 
 - it would change production and the outcome is not `INCIDENT`;
 - it would change production and rests only on a hypothesis rated unlikely;
-- it is a rollback whose target is not borne out: the deployment is not among those retrieved, the version to return to is not an earlier deployment of the same service, or that deployment did not succeed and so never ran;
+- it is a rollback whose target is not borne out: the deployment is not among those retrieved or has already been rolled back, the version to return to is not an earlier deployment of the same service, that deployment did not succeed and so never ran, or it was itself rolled back;
 - it is high risk and a lower-risk action is proposed.
 
 Such an action is withdrawn, not relabelled. Turning a rollback into a "manual" action would leave the same change waiting for approval.
+
+### Deployments as suspects (rule-based engine)
+
+Timing makes a deployment a candidate, not a culprit. A deployment shortly before a problem loses standing when the evidence speaks against it:
+
+- it has already been rolled back, so its code is not running;
+- it is itself a rollback, returning the service to a version that ran before;
+- error logs fell after it (from the deployment context).
+
+Each is stated as a contradiction on the hypothesis. This was added after a run on real telemetry in which a database slowed down minutes after a bad release had been rolled back: timing alone made the rollback deployment the leading suspect, and the proposed remedy was to return to the release that had just been removed. For that to be preventable, a rollback has to be recorded as one: `POST /deployments` accepts `rollbackOf`.
 
 ## 4. Approval and execution
 

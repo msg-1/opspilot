@@ -219,15 +219,28 @@ export const deploymentBody = z.object({
   description: z.string().trim().max(2000).nullable().optional(),
   startedAt: z.coerce.date().optional(),
   finishedAt: z.coerce.date().nullable().optional(),
+  // For a rollback: the id or the version of the deployment being rolled back (the most recent
+  // one of that version). That deployment is marked ROLLED_BACK, so it is never offered again
+  // as a version to return to.
+  rollbackOf: z.string().trim().min(1).max(120).optional(),
 });
 
 export async function recordDeployment(organizationId: string, input: z.infer<typeof deploymentBody>, source: string) {
   const service = await requireService(organizationId, input.service);
-  const { service: _s, ...rest } = input;
+  const { service: _s, rollbackOf, ...rest } = input;
   const startedAt = input.startedAt ?? new Date();
+  const undone = rollbackOf
+    ? await prisma.deployment.findFirst({
+        where: { organizationId, serviceId: service.id, environment: input.environment, OR: [{ id: rollbackOf }, { version: rollbackOf }] },
+        orderBy: { startedAt: 'desc' },
+      })
+    : null;
+  if (rollbackOf && !undone) throw badRequest(`rollbackOf: no deployment of ${service.slug} in ${input.environment} has the id or version "${rollbackOf}"`);
+  if (undone) await prisma.deployment.update({ where: { id: undone.id }, data: { status: 'ROLLED_BACK' } });
   return prisma.deployment.create({
     data: {
       ...rest,
+      ...(undone ? { isRollback: true, rollbackOfId: undone.id } : {}),
       startedAt,
       finishedAt: input.finishedAt ?? (['SUCCEEDED', 'FAILED', 'ROLLED_BACK'].includes(input.status) ? startedAt : null),
       organizationId,

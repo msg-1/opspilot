@@ -232,6 +232,8 @@ def test_a_rollback_is_offered_only_with_a_target_the_evidence_bears_out():
             {"id": "d11", "service": "checkout-api", "version": "v2.8.0", "status": "SUCCEEDED", "startedAt": t(24)},
             {"id": "d10", "service": "checkout-api", "version": "v2.7.5", "status": "FAILED", "startedAt": t(2880)},
             {"id": "d9", "service": "checkout-api", "version": "v2.7.4", "status": "SUCCEEDED", "startedAt": t(12960)},
+            {"id": "d8", "service": "checkout-api", "version": "v2.7.3", "status": "ROLLED_BACK", "startedAt": t(20000)},
+            {"id": "d7", "service": "checkout-api", "version": "v2.7.2", "status": "SUCCEEDED", "startedAt": t(30000)},
             {"id": "x1", "service": "other-api", "version": "v1.0.0", "status": "SUCCEEDED", "startedAt": t(9000)},
         ]})
         s.add("log_pattern", "640× ERROR in checkout-api (new pattern)", "pool", source_type="log_pattern", source_id="fp", service="checkout-api", occurred_at=t(19), data={"level": "ERROR", "count": 640, "kind": "new"})
@@ -259,6 +261,8 @@ def test_a_rollback_is_offered_only_with_a_target_the_evidence_bears_out():
         ({"deployment_id": "d11"}, "does not say which version to return to"),
         ({"to_version": "v2.7.4"}, "does not say which deployment to roll back"),
         ({"deployment_id": "d9", "to_version": "v2.7.4"}, "is not an earlier deployment"),  # a version cannot be rolled back to itself
+        ({"deployment_id": "d11", "to_version": "v2.7.3"}, "was itself rolled back, so it is not a version to return to"),
+        ({"deployment_id": "d8", "to_version": "v2.7.2"}, "has already been rolled back"),
     ]:
         action, notes = attempt(**params)
         assert any(reason in n and "not offered for approval" in n for n in notes), (params, notes)
@@ -512,3 +516,36 @@ async def test_traces_locate_where_requests_fail_at_the_deepest_span_with_a_mess
     assert top.title == "Requests are failing in shop-payments's calls to demo-redis" and top.confidence == 0.45
     assert "only pass the error on" in top.description and "enableOfflineQueue" in top.description
     assert report.outcome == "INCIDENT" and not [a for a in report.recommended_actions if a.effect == "state_changing"]
+
+
+async def test_a_rollback_deployment_after_which_errors_fell_is_not_blamed_for_what_happens_next():
+    """Found on real telemetry. A bad release had been rolled back minutes earlier. When the
+    database then slowed down, timing alone made the rollback deployment the leading suspect, and
+    the engine proposed rolling back to the release that had just been removed for being broken."""
+    slowest = {"service": "shop-orders", "operation": "pg.query:SELECT", "durationMs": 405, "selfMs": 403, "system": "postgresql", "peer": "demo-postgres"}
+    rollback = {"id": "d-undo", "service": "shop-orders", "version": "v1.4.0", "environment": "production", "status": "SUCCEEDED", "commitSha": "abababab1400", "branch": "main", "deployedBy": "ci", "startedAt": t(126), "finishedAt": t(126), "isRollback": True, "description": "Roll back to v1.4.0"}
+    bad = {**rollback, "id": "d-bad", "version": "v1.5.0", "status": "ROLLED_BACK", "commitSha": "abababab1500", "startedAt": t(129), "finishedAt": t(129), "isRollback": False, "description": "Simplify discount lookup"}
+    good = {**rollback, "id": "d-good", "status": "SUCCEEDED", "startedAt": t(4000), "finishedAt": t(4000), "isRollback": False, "description": "Order history pagination"}
+    scenario = Scenario(
+        name="after_rollback", question="Why is shop-orders slow?", description="", expect=BY_NAME["upstream_dependency_down"].expect,
+        services=[svc("shop-orders", ["shop-postgres"]), svc("shop-postgres")],
+        deployments=[rollback, bad, good],
+        metrics={"shop-orders": [metric("latency_p95_ms", "p95 latency", "ms", 780, 30), metric("error_rate", "Error rate", "%", 0.0, 0.0)]},
+        traces=[_trace(f"s{i}", "shop-orders", 850 - i, slowest) for i in range(5)],
+        service_details={"shop-orders": {"health": "DEGRADED", "dependsOn": [_dep("shop-postgres", "HEALTHY")]}},
+        deployment_errors={"d-undo": (180, 0)},
+    )
+    report, store, _ = await investigate(scenario)
+    top = report.hypotheses[0]
+    # The traces lead; the two deployments are still listed, with what speaks against each.
+    assert top.title == "Time is being lost in shop-orders's calls to demo-postgres" and report.outcome == "INCIDENT"
+    by_title = {h.title: h for h in report.hypotheses}
+    undo = next(h for title, h in by_title.items() if "v1.4.0" in title and "Rollback" in title)
+    assert undo.confidence < top.confidence
+    assert any("Error logs fell after this deployment" in c for c in undo.contradictions) and any("returned the service to a version that ran before" in c for c in undo.contradictions)
+    removed = next((h for title, h in by_title.items() if "v1.5.0" in title), None)
+    assert removed is None or (removed.confidence < 0.3 and any("already been rolled back" in c for c in removed.contradictions))
+    # Above all: nothing proposes returning to the release that was rolled back.
+    assert not [a for a in report.recommended_actions if a.type == "rollback_deployment"]
+    assert not any("v1.5.0" in step for step in report.next_steps)
+    assert "No error onset could be determined" in undo.description and not [f for f in report.integrity.flagged if f.status == "unsupported"], report.integrity.flagged

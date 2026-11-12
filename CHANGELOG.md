@@ -42,6 +42,8 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 - Failed sign-ins are audited; retrieved records are marked as untrusted data for the model.
 
 ### Fixed
+- After a bad release was rolled back, the rule-based engine could blame the rollback deployment for an unrelated problem and propose returning to the bad release. Deployments can now be recorded as rollbacks (`rollbackOf`), a rolled-back version is never a rollback target, and a deployment after which errors fell loses standing as a suspect.
+- Trace retrieval sampled only the end of the window.
 - A webhook timeout or server error was recorded as a plain failure and could be retried at once, which could apply a change twice.
 - A healthy service was reported as degraded when a near-zero gauge fell by a large percentage, and an uninstrumented service was reported as healthy because its empty log contained no errors. Both were found by running against real telemetry.
 - Deployment and commit evidence show the same 12-character commit prefix (a model reported the two lengths as a discrepancy).

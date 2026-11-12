@@ -60,8 +60,15 @@ def _valid_rollback(action, store: EvidenceStore) -> str | None:
     match = next((d for d in earlier if str((d.data or {}).get("version") or "").lower().removeprefix("v") == wanted), None)
     if match is None:
         return f"{params.to_version} is not an earlier deployment of {target.service} in the evidence"
-    if (match.data or {}).get("status") != "SUCCEEDED":
-        return f"{params.to_version} did not deploy successfully ({(match.data or {}).get('status')}), so it never ran"
+    status = (match.data or {}).get("status")
+    if status == "ROLLED_BACK":
+        return f"{params.to_version} was itself rolled back, so it is not a version to return to"
+    if status != "SUCCEEDED":
+        return f"{params.to_version} did not deploy successfully ({status}), so it never ran"
+    if wanted == str((target.data or {}).get("version") or "").lower().removeprefix("v"):
+        return f"{params.to_version} is the version that deployment installed, so there is nothing to roll back to"
+    if (target.data or {}).get("status") == "ROLLED_BACK":
+        return f"deployment {params.deployment_id} has already been rolled back"
     return None
 
 

@@ -229,6 +229,19 @@ describe('deployment intelligence', () => {
     expect(earliest).toMatchObject({ isLatest: false, previousSuccessful: null, rollbackTarget: null });
     expect(earliest.changes.note).toContain('no commit SHA');
 
+    // A rollback recorded as a rollback: the bad version is marked, and is never the version to return to.
+    const bad = (await org.owner.post('/api/v1/deployments').send({ service: 'checkout', version: 'v1.3.0', startedAt: minutesAgo(8) }).expect(201)).body;
+    const undo = (await org.owner.post('/api/v1/deployments').send({ service: 'checkout', version: 'v1.2.0', rollbackOf: 'v1.3.0', startedAt: minutesAgo(4) }).expect(201)).body;
+    expect(undo).toMatchObject({ isRollback: true, rollbackOfId: bad.id });
+    expect((await org.owner.get(`/api/v1/deployments/${bad.id}`)).body.status).toBe('ROLLED_BACK');
+    const afterRollback = (await ctx(`service=checkout&deploymentId=${undo.id}`)).body;
+    // The version before the rollback deployment that is safe to return to is not the one it undid.
+    expect(afterRollback.previousSuccessful.version).not.toBe('v1.3.0');
+    expect((await ctx(`service=checkout&deploymentId=${bad.id}`)).body).toMatchObject({ alreadyRolledBack: true, rollbackTarget: { toVersion: 'v1.2.0' } });
+    // The latest deployment that is not itself a rollback is the one examined by default.
+    expect((await ctx('service=checkout')).body.deployment.version).toBe('v1.3.0');
+    expect((await org.owner.post('/api/v1/deployments').send({ service: 'checkout', version: 'v1.2.0', rollbackOf: 'v9.9.9' })).status).toBe(400);
+
     // Scoped to the caller's organisation, and read-only for viewers of the tool API only.
     const otherKey = await createApiKey(other.owner, ['tools:read']);
     expect((await api().get('/api/v1/tools/deployment-context?service=checkout').set('x-api-key', otherKey)).body.deployment).toBeNull();
