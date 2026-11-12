@@ -1,17 +1,63 @@
 name: CI
 
+# Runs on every pull request and on pushes to the long-lived branches.
+# Each job is a required status check for develop and main (see docs/git-workflow.md).
 on:
-  push:
-    branches: [main, develop]
   pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop, main, "release/**", "hotfix/**"]
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
-  api:
-    name: API (lint, typecheck, integration tests)
+  commits:
+    name: Commit messages
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Check Conventional Commits and attribution rules
+        run: |
+          status=0
+          for sha in $(git rev-list --no-merges origin/${{ github.base_ref }}..${{ github.event.pull_request.head.sha }}); do
+            git log -1 --format=%B "$sha" > /tmp/msg
+            .githooks/commit-msg /tmp/msg || { echo "  in commit $sha"; status=1; }
+          done
+          exit $status
+
+  frontend:
+    name: Frontend (lint, typecheck, unit tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run lint -w @opspilot/web
+      - run: npm run typecheck -w @opspilot/web
+      - run: npm test -w @opspilot/web
+
+  backend:
+    name: Backend (lint, typecheck)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run db:generate -w @opspilot/api
+      - run: npm run lint -w @opspilot/api
+      - run: npm run typecheck -w @opspilot/api
+
+  database:
+    name: Database integration tests (PostgreSQL + pgvector)
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -25,30 +71,14 @@ jobs:
           --health-cmd "pg_isready -U opspilot" --health-interval 5s --health-timeout 3s --health-retries 20
     env:
       TEST_DATABASE_URL: postgresql://opspilot:opspilot@localhost:5432/opspilot_test?schema=public
-      DATABASE_URL: postgresql://opspilot:opspilot@localhost:5432/opspilot_test?schema=public
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
       - run: npm run db:generate -w @opspilot/api
-      - run: npm run lint -w @opspilot/api
-      - run: npm run typecheck -w @opspilot/api
+      # Applies every migration to an empty database, then runs the API suite against it.
       - run: npm test -w @opspilot/api
-      - run: npm run build -w @opspilot/api
-
-  web:
-    name: Web (lint, typecheck, unit tests, build)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm }
-      - run: npm ci
-      - run: npm run lint -w @opspilot/web
-      - run: npm run typecheck -w @opspilot/web
-      - run: npm test -w @opspilot/web
-      - run: npm run build -w @opspilot/web
 
   ai:
     name: AI service (lint, tests, agent evaluations)
@@ -65,10 +95,19 @@ jobs:
       # Regression gate for the investigation engine: every ground-truth scenario must pass.
       - run: uv run python -m app.evals.run --heuristic
 
-  docker:
-    name: Container images build
+  build:
+    name: Build verification
     runs-on: ubuntu-latest
-    needs: [api, web, ai]
     steps:
       - uses: actions/checkout@v4
-      - run: docker compose --profile app build
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run build
+      # Fails on critical advisories in shipped dependencies. Raise to "high" once the
+      # remaining major upgrades are done (docs/engineering-audit.md, H8).
+      - run: npm audit --omit=dev --audit-level=critical
+      - name: Container images
+        run: |
+          cp .env.example .env
+          docker compose --profile app build
