@@ -13,10 +13,11 @@ from app.evals.scenarios import SCENARIOS, t
 from app.graph import Context, run_investigation
 from app.llm import RAW_BLOCKS, AnthropicProvider, LLMError, LLMProvider, to_anthropic_messages
 from app.schemas import (
-    Fact,
-    HypothesisOut,
+    FactRequired,
     InvestigationPlan,
     InvestigationRequest,
+    LLMAction,
+    LLMHypothesis,
     LLMReport,
     PlanStep,
     RecommendedAction,
@@ -78,8 +79,8 @@ def call(name: str, args: dict, id_: str) -> dict:
 def good_report(**overrides) -> LLMReport:
     base = dict(
         summary="orders-api began failing after v4.2.0 changed the cache schema.", confidence=0.8, timeline=[], assumptions=[], uncertainties=["Diff not reviewed."], next_steps=["Review PR 77"],
-        facts=[Fact(statement="Errors are cache deserialisation failures.", evidence_refs=["E1"])],
-        hypotheses=[HypothesisOut(title="Cache schema change in orders-api v4.2.0", description="Schema v3 entries cannot be read.", confidence=0.8, status="likely", evidence_refs=["E1", "E2"])],
+        facts=[FactRequired(statement="Errors are cache deserialisation failures.", evidence_refs=["E1"])],
+        hypotheses=[LLMHypothesis(title="Cache schema change in orders-api v4.2.0", description="Schema v3 entries cannot be read.", confidence=0.8, status="likely", evidence_refs=["E1", "E2"], contradicting_evidence_refs=[], contradictions=[], assumptions=[], gaps=[])],
         recommended_actions=[],
     )
     return LLMReport(**{**base, **overrides})
@@ -113,9 +114,9 @@ async def test_guardrails_remove_hallucinated_citations_and_cap_unsupported_clai
         turns=[AIMessage(content="", tool_calls=[call("find_log_anomalies", {"from_time": t(120)}, "c1")])],
         report=good_report(
             summary="The confirmed root cause is a solar flare.", confidence=0.99,
-            facts=[Fact(statement="A solar flare hit the datacentre.", evidence_refs=["E99"])],
-            hypotheses=[HypothesisOut(title="Solar flare", description="Cosmic rays.", confidence=0.99, status="likely", evidence_refs=["E99", "E404"])],
-            recommended_actions=[RecommendedAction(type="rollback_deployment", title="Roll back everything", description="Roll back all services now.", evidence_refs=["E99"])],
+            facts=[FactRequired(statement="A solar flare hit the datacentre.", evidence_refs=["E99"])],
+            hypotheses=[LLMHypothesis(title="Solar flare", description="Cosmic rays.", confidence=0.99, status="likely", evidence_refs=["E99", "E404"], contradicting_evidence_refs=["E500"], contradictions=[], assumptions=[], gaps=[])],
+            recommended_actions=[LLMAction(type="rollback_deployment", title="Roll back everything", description="Roll back all services now.", rationale="", risk="HIGH", service_slug="", deployment_id="", to_version="", evidence_refs=["E99"])],
             uncertainties=[],
         ),
     )
@@ -264,9 +265,13 @@ async def test_report_schema_sent_to_claude_lets_the_model_fill_in_rollback_para
 
     schema = sent[0]["output_config"]["format"]["schema"]
     text = json.dumps(schema)
-    params = schema["$defs"]["RemediationParameters"]["properties"]
-    assert {"deploymentId", "toVersion", "fromVersion", "replicas", "featureFlag"} <= set(params)
+    assert {"deploymentId", "toVersion", "serviceSlug"} <= set(schema["$defs"]["LLMAction"]["properties"])
     assert '"properties": {}' not in text  # no empty objects anywhere in the contract
+    # Kept flat on purpose: nullable and optional fields make the compiled grammar too large
+    # for the API to accept (seen in live testing).
+    assert '"anyOf"' not in text and len(text) < 6000
+    for definition in schema["$defs"].values():
+        assert set(definition["required"]) == set(definition["properties"])
     assert '"evidenceRefs"' in text and '"evidence_refs"' not in text  # wire names are camelCase
     assert "thinking" not in sent[0] and "temperature" not in sent[0] and "tool_choice" not in sent[0]
 
@@ -285,8 +290,17 @@ def test_report_wire_format_carries_only_parameters_that_were_set():
     assert actions[0]["parameters"] == {"deploymentId": "dep_1", "toVersion": "v1"}
     assert actions[1]["parameters"] is None
     # A model answering in the wire format parses back into the typed object.
-    parsed = LLMReport.model_validate({"summary": "s", "confidence": 0.4, "timeline": [], "facts": [], "assumptions": [], "uncertainties": [], "hypotheses": [], "nextSteps": [], "recommendedActions": [{"type": "scale_service", "title": "Scale out api", "description": "Add replicas", "risk": "LOW", "serviceSlug": "api", "parameters": {"replicas": 6}, "evidenceRefs": []}]})
-    assert parsed.recommended_actions[0].parameters.replicas == 6
+    from app.schemas import to_report
+
+    parsed = LLMReport.model_validate({"summary": "s", "confidence": 1.4, "timeline": [], "facts": [], "assumptions": [], "uncertainties": [], "hypotheses": [], "nextSteps": [], "recommendedActions": [
+        {"type": "rollback_deployment", "title": "Roll back api", "description": "Return to v1", "rationale": "Errors began after v2", "risk": "MEDIUM", "serviceSlug": "api", "deploymentId": "dep_9", "toVersion": "v1", "evidenceRefs": ["E1"]},
+        {"type": "manual", "title": "Check dashboards", "description": "Look at the pool panel", "rationale": "", "risk": "LOW", "serviceSlug": "", "deploymentId": "", "toVersion": "", "evidenceRefs": []},
+    ]})
+    converted = to_report(parsed, "llm")
+    assert converted.confidence == 1.0  # out-of-range values from a model are clamped, not trusted
+    first, second = converted.wire()["recommendedActions"]
+    assert first["parameters"] == {"deploymentId": "dep_9", "toVersion": "v1"} and first["serviceSlug"] == "api"
+    assert second["parameters"] is None and second["serviceSlug"] is None and second["rationale"] is None
 
 
 CONTRACT = __import__("pathlib").Path(__file__).parent / "fixtures" / "report.contract.json"

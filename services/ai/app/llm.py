@@ -210,6 +210,8 @@ class AnthropicProvider(LLMProvider):
         super().__init__(name="anthropic", model=settings.anthropic_model, settings=settings)
         self._effort = settings.anthropic_effort
         self._max_tokens = settings.ai_max_tokens
+        # Schemas the provider refused to compile; these are requested as plain JSON instead.
+        self._plain_json: set[str] = set()
         # The SDK retries rate limits, timeouts and 5xx with exponential backoff, at most
         # ai_max_retries times; nothing here retries on top of that.
         self._client = client or anthropic.AsyncAnthropic(
@@ -263,10 +265,34 @@ class AnthropicProvider(LLMProvider):
         return AIMessage(content=text, tool_calls=calls, additional_kwargs={RAW_BLOCKS: raw})
 
     async def structured(self, messages: list[BaseMessage], schema: type[T]) -> T:
-        response = await self._call(self._client.messages.parse, **self._base(messages), output_format=schema)
-        if response.parsed_output is None:
-            raise LLMError("The model did not return output matching the expected schema.", "schema")
-        return response.parsed_output
+        if schema.__name__ not in self._plain_json:
+            try:
+                response = await self._call(self._client.messages.parse, **self._base(messages), output_format=schema)
+            except LLMError as exc:
+                # The API can refuse to compile a schema ("compiled grammar is too large"). That
+                # is a property of the schema, not of this request: remember it and ask for JSON
+                # in plain text instead, validated here.
+                if exc.kind != "bad_request" or not any(w in str(exc).lower() for w in ("grammar", "schema")):
+                    raise
+                self._plain_json.add(schema.__name__)
+            else:
+                if response.parsed_output is None:
+                    raise LLMError("The model did not return output matching the expected schema.", "schema")
+                return response.parsed_output
+        return await self._structured_as_text(messages, schema)
+
+    async def _structured_as_text(self, messages: list[BaseMessage], schema: type[T]) -> T:
+        instruction = (
+            "Reply with a single JSON object and nothing else: no prose, no code fence. It must validate against this JSON Schema:\n"
+            + json.dumps(schema.model_json_schema(by_alias=True), separators=(",", ":"))
+        )
+        response = await self._call(self._client.messages.create, **self._base([*messages, HumanMessage(instruction)]))
+        text = "".join(b.text for b in response.content if b.type == "text")
+        start, end = text.find("{"), text.rfind("}")
+        try:
+            return schema.model_validate(json.loads(text[start : end + 1]))
+        except Exception as exc:
+            raise LLMError(f"The model's answer did not match the expected format ({type(exc).__name__}).", "schema") from exc
 
     async def verify(self) -> tuple[bool, str]:
         """Looks the model up through the Models API: validates key and model id, costs nothing."""

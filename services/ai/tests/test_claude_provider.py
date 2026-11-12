@@ -53,9 +53,9 @@ REPORT = {
     "timeline": [{"timestamp": t(38), "description": "v4.2.0 deployed", "evidenceRefs": ["E2"]}],
     "facts": [{"statement": "Errors are cache deserialisation failures.", "evidenceRefs": ["E1"]}],
     "assumptions": ["Old cache entries were not flushed."], "uncertainties": ["The diff was not read."],
-    "hypotheses": [{"title": "Cache schema change in orders-api v4.2.0", "description": "Entries written with the old schema cannot be read.", "confidence": 0.8, "status": "likely", "evidenceRefs": ["E1", "E2"], "contradictingEvidenceRefs": [], "contradictions": ["search-api was also deployed, but its errors did not change."], "facts": [], "assumptions": [], "gaps": ["Compare error rate per version."]}],
+    "hypotheses": [{"title": "Cache schema change in orders-api v4.2.0", "description": "Entries written with the old schema cannot be read.", "confidence": 0.8, "status": "likely", "evidenceRefs": ["E1", "E2"], "contradictingEvidenceRefs": [], "contradictions": ["search-api was also deployed, but its errors did not change."], "assumptions": [], "gaps": ["Compare error rate per version."]}],
     "nextSteps": ["Review PR 77"],
-    "recommendedActions": [{"type": "rollback_deployment", "title": "Roll back orders-api to v4.1.9", "description": "Return to the previous version.", "rationale": "Errors began after v4.2.0.", "risk": "MEDIUM", "serviceSlug": "orders-api", "parameters": {"deploymentId": "d1", "fromVersion": "v4.2.0", "toVersion": "v4.1.9", "featureFlag": None, "enabled": None, "replicas": None, "configKey": None, "configValue": None, "runbook": None}, "evidenceRefs": ["E2"]}],
+    "recommendedActions": [{"type": "rollback_deployment", "title": "Roll back orders-api to v4.1.9", "description": "Return to the previous version.", "rationale": "Errors began after v4.2.0.", "risk": "MEDIUM", "serviceSlug": "orders-api", "deploymentId": "d1", "toVersion": "v4.1.9", "evidenceRefs": ["E2"]}],
 }
 
 
@@ -155,6 +155,28 @@ async def test_unusable_credentials_stop_all_model_calls_and_fall_back_honestly(
     # The fallback still investigated: the standard playbook gathered real evidence.
     assert report.hypotheses and report.hypotheses[0].evidence_refs
     assert FAKE_KEY not in json.dumps(events)
+
+
+async def test_schema_the_api_refuses_to_compile_is_requested_as_plain_json_instead():
+    """Regression test for the first live run, where the report schema was rejected with
+    'The compiled grammar is too large' and the investigation fell back to rules."""
+    from app.schemas import LLMReport
+
+    too_large = api_error(400, "invalid_request_error", "The compiled grammar is too large, which would cause performance issues. Simplify your tool schemas or reduce the number of strict tools.")
+    api = FakeAnthropic([too_large, message([text("Here is the report:\n```json\n" + json.dumps(REPORT) + "\n```")]), message([text(json.dumps(REPORT))])])
+    provider = api.provider()
+    first = await provider.structured([HumanMessage("write the report")], LLMReport)
+    assert first.hypotheses[0].title.startswith("Cache schema change") and first.recommended_actions[0].to_version == "v4.1.9"
+    fallback_request = api.requests[1]["body"]
+    assert "format" not in fallback_request["output_config"] and "JSON Schema" in fallback_request["messages"][-1]["content"]
+    # The refusal is remembered: the next report goes straight to plain JSON, with no wasted call.
+    await provider.structured([HumanMessage("write another")], LLMReport)
+    assert len(api.requests) == 3 and "format" not in api.requests[2]["body"]["output_config"]
+    # An answer that is not valid for the schema is an error, never a silently wrong report.
+    bad = FakeAnthropic([too_large, message([text('{"summary": "only this"}')])]).provider()
+    with pytest.raises(LLMError) as err:
+        await bad.structured([HumanMessage("write the report")], LLMReport)
+    assert err.value.kind == "schema"
 
 
 async def test_rate_limits_are_retried_a_bounded_number_of_times():
