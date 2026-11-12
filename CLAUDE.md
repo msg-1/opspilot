@@ -37,4 +37,8 @@ cd services/ai && uv run ruff check .
 
 ## Git workflow
 
-`feature/*` → `develop` (merge with `--no-ff` once tests pass) → `main` only for tested releases, on the owner's say-so.
+GitFlow: `feature/*` and `bugfix/*` from `develop` → `develop`; `release/*` from `develop` → `main` + back-merge; `hotfix/*` from `main` → `main` + back-merge. Merge commits (`--no-ff`), never rebase or force-push `main`/`develop`. Details in `docs/git-workflow.md` and `docs/release-process.md`.
+
+- Conventional Commits: `feat`, `fix`, `security`, `refactor`, `test`, `docs`, `chore`.
+- **No AI or tool attribution anywhere**: no `Co-Authored-By` trailers, no "generated with" lines, in commits, pull requests or documents. The `.githooks/commit-msg` check enforces this.
+- Do not push, create a remote, merge into `main`, tag, or change branch protection without the owner's explicit approval.

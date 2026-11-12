@@ -10,6 +10,7 @@ Requires Docker Desktop.
 
 ```bash
 cp .env.example .env          # then replace the three secrets (see comments in the file)
+                              # Compose will not start without them
 docker compose --profile app up -d --build
 ```
 
@@ -58,8 +59,9 @@ OLLAMA_MODEL=llama3.1         # a local Ollama model, if Ollama is running
 ## Documentation
 
 - [Setup guide](docs/setup-guide.md) · [Architecture](docs/architecture.md) · [API](docs/api-documentation.md) · [Database](docs/database-design.md)
+- [Engineering audit](docs/engineering-audit.md) · [Changelog](CHANGELOG.md)
 - [Decisions](docs/decisions.md) · [Roadmap](docs/roadmap.md) · [Backlog](docs/feature-backlog.md) · [Learning log](docs/learning-log.md)
 
-## Branching
+## Contributing
 
-`main` holds tested releases only. Work happens on `feature/*` branches that merge into `develop`; `develop` is promoted to `main` once the full test suite passes and the change has been reviewed.
+`main` holds released code, `develop` is the integration branch, and work happens on `feature/*` and `bugfix/*` branches. Releases go through `release/*`, urgent fixes through `hotfix/*`. See [CONTRIBUTING.md](CONTRIBUTING.md), [docs/git-workflow.md](docs/git-workflow.md) and [docs/release-process.md](docs/release-process.md).

@@ -1,0 +1,48 @@
+name: End-to-end
+
+# Full-stack browser tests against the Docker Compose deployment. This is the release gate:
+# it runs for release and hotfix branches and for every pull request into main.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: ["release/**", "hotfix/**"]
+  workflow_dispatch:
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: Browser end-to-end tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - name: Create .env with fresh secrets
+        run: |
+          cp .env.example .env
+          for v in JWT_SECRET INTERNAL_SERVICE_TOKEN ENCRYPTION_KEY; do
+            sed -i "s|^$v=.*|$v=$(openssl rand -hex 32)|" .env
+          done
+      - name: Start the stack (migrates and seeds the demo organisation)
+        run: docker compose --profile app up -d --build --wait --wait-timeout 300
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+        working-directory: apps/web
+      - run: npm run test:e2e
+      - name: Service logs
+        if: failure()
+        run: docker compose --profile app logs --no-color --tail 200
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report
+          retention-days: 7

@@ -22,7 +22,7 @@ openssl rand -hex 32    # INTERNAL_SERVICE_TOKEN (shared by API and AI service)
 openssl rand -hex 32    # ENCRYPTION_KEY (must be exactly 64 hex characters)
 ```
 
-The API refuses to start with missing or malformed values and tells you which. `.env` is git-ignored; never commit it. Changing `ENCRYPTION_KEY` later makes stored GitHub tokens and webhook secrets unreadable, so they must be re-entered.
+The API refuses to start with missing or malformed values and tells you which. Docker Compose refuses to start without all three, and the API rejects the placeholder values when `NODE_ENV=production`. All ports are published on `127.0.0.1` only. `.env` is git-ignored; never commit it. Changing `ENCRYPTION_KEY` later makes stored GitHub tokens and webhook secrets unreadable, so they must be re-entered.
 
 ## 2a. Run everything in Docker
 
@@ -120,8 +120,8 @@ Lets Claude Desktop, Claude Code or another MCP client query OpsPilot read-only.
 ## 9. Tests
 
 ```bash
-npm test                 # API: 28 integration tests on database opspilot_test · web: 10 tests
-npm run test:ai          # 23 tests
+npm test                 # API: 39 integration tests on database opspilot_test · web: 10 tests
+npm run test:ai          # 25 tests
 npm run evals -- --heuristic
 npm run db:seed && npm run test:e2e   # 9 browser tests; needs the stack running
 ```
