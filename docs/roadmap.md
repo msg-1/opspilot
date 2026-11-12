@@ -27,8 +27,8 @@ Status as of 12 November 2026. "Verified" means exercised by automated tests or 
 
 | Suite | Count | Scope |
 |---|---|---|
-| API integration (Vitest + Supertest) | 68 | HTTP → PostgreSQL, all modules |
-| AI service (pytest, mocked model APIs) | 110 | Agent graph, guardrails, providers, embeddings, HTTP API, MCP |
+| API integration (Vitest + Supertest) | 69 | HTTP → PostgreSQL, all modules |
+| AI service (pytest, mocked model APIs) | 115 | Agent graph, guardrails, providers, embeddings, HTTP API, MCP |
 | Web (Vitest + Testing Library) | 14 | API client, formatting, accessible components |
 | End-to-end (Playwright) | 9 | Sign-in, incident, investigation, approval, RBAC, logs, knowledge, audit, mobile layout |
 | Agent evaluations | 11 scenarios | Outcome, cause, service, citations, invention, contradictory and missing evidence, calibration, diagnostics, remediation safety, deployment-tool use |
@@ -42,7 +42,7 @@ Not done, and why:
 
 - **No model was run in this milestone** (no budget). The changed report instructions and schema, the new `get_traces` tool and the demo environment are untested with a language model.
 - **The name is not cleared.** Trademark and domain checks are listed in [branding/opsilume-branding.md](branding/opsilume-branding.md).
-- **The demo is not in CI.** It needs the whole stack and about 25 minutes; it was run locally.
+- **The demo is not in CI.** It needs the whole stack and about 25 minutes; it was run locally, and the recorded run is in [demo/README.md](../demo/README.md). CI checks only that it builds.
 
 ## Needs the owner's input
 

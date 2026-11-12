@@ -56,6 +56,7 @@ const stateChanging = (inv) => inv.remediations.filter((r) => r.effect === 'stat
 async function provenance(inv, from) {
   const window = `from=${encodeURIComponent(iso(new Date(from.getTime() - 400_000)))}&to=${encodeURIComponent(iso())}`;
   const out = { checked: 0, verified: 0, byKind: {}, failures: [] };
+  let events = null;
   const mark = (e, ok, why) => {
     out.checked += 1;
     out.byKind[e.kind] = out.byKind[e.kind] ?? { checked: 0, verified: 0 };
@@ -93,8 +94,14 @@ async function provenance(inv, from) {
         mark(e, svc.ok, 'service not found in the catalogue');
       } else if (e.kind === 'document') {
         mark(e, (await s.request('GET', `/knowledge/documents/${data.documentId}`)).ok, 'document not found');
-      } else if (e.kind === 'service_event' || e.kind === 'alert' || e.kind === 'incident' || e.kind === 'commit' || e.kind === 'pull_request') {
-        mark(e, !!e.sourceId, 'no source id');
+      } else if (e.kind === 'service_event') {
+        events ??= new Set((await s.get('/service-events?limit=100&from=2d')).data.map((x) => x.id));
+        mark(e, events.has(e.sourceId), 'service event not found in the service history');
+      } else if (e.kind === 'incident') {
+        mark(e, (await s.request('GET', `/incidents/${e.sourceId}`)).ok, 'incident not found');
+      } else if (e.kind === 'alert' || e.kind === 'commit' || e.kind === 'pull_request') {
+        // No lookup by id is exposed for these; none occurs in the demo. Counted as unverified.
+        mark(e, false, 'this kind of evidence cannot be looked up by the runner');
       } else {
         mark(e, false, 'unknown kind of evidence');
       }

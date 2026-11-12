@@ -155,4 +155,6 @@ Run over the nine reports saved from the live evaluation in Milestone 3, without
 | Trace retrieval | Yes (stub trace store) | Yes (Jaeger) | No |
 | Dependency-chain and trace reasoning | Yes | Yes | These are rule-based-engine rules; a model reasons its own way |
 
+The local demo was run once in full on 12 November 2026: nine of ten scenarios passed, and the tenth passed after the fix it prompted. The table and the caveats are in `demo/README.md`.
+
 See `docs/claude-live-verification.md` for the live runs and `demo/README.md` for the local demonstration.

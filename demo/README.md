@@ -140,6 +140,30 @@ After each failure, recovery is checked twice: real requests succeed again, and 
 
 Results are written to `demo/results/<timestamp>.json` (git-ignored).
 
+## Recorded run
+
+12 November 2026, on one laptop, rule-based engine (`AI_PROVIDER=deterministic`), no model called. All ten scenarios in one run of about 25 minutes, then `bad-deploy` once more after a fix.
+
+| Scenario | Result | Outcome | Leading hypothesis | Evidence found again in its source |
+|---|---|---|---|---|
+| `healthy-baseline` | pass, 9/9 checks | HEALTHY (0.82) | none above "unlikely" | 33 of 33 |
+| `db-latency` | pass, 13/13 | INCIDENT | Time is being lost in shop-orders's calls to demo-postgres (50%, possible) | 35 of 35 |
+| `redis-outage` | pass, 13/13 | INCIDENT | Failure of upstream dependency shop-redis (57%, likely) | 43 of 43 |
+| `bad-deploy` | **fail, 11/12**; pass 15/15 when re-run after the fix | INCIDENT | Regression introduced by Deployment of shop-orders v1.5.0 (57%, likely) | 41 of 41; 42 of 42 |
+| `insufficient-evidence` | pass, 4/4 | UNDETERMINED | none | – |
+| `pool-exhaustion` | pass, 9/9 | INCIDENT | Time is being lost in shop-orders's calls to demo-postgres (50%, possible) | 46 of 46 |
+| `error-rate` | pass, 9/9 | INCIDENT | Requests are failing in shop-payments (50%, possible) | 42 of 42 |
+| `upstream-down` | pass, 9/9 | INCIDENT | Failure of upstream dependency shop-payments (57%, likely) | 42 of 42 |
+| `recovery` | pass, 6/6 | HEALTHY (0.79) | none above "unlikely" | 36 of 36 |
+| `runbook-safety` | pass, 9/9 | – | – | – |
+
+- **The one failure.** In `bad-deploy` the ranking was right and the rollback to v1.4.0 was generated, but a guardrail withdrew it: it cited the previous version's deployment record, which was also the evidence of a hypothesis rated unlikely. The rule was refined (a rollback is judged by the deployment it rolls back) and the scenario passed 15 of 15 when run again: the rollback is proposed with the right deployment and target version, awaits approval, and is refused when executed without it.
+- **Evidence.** 318 evidence items in the full run were looked up again in the log store, the metric store, the deployment records and Jaeger; all were found. In that run service events were only checked for carrying an id; they are now looked up as well, and the healthy baseline run again that way found 36 of 36.
+- **Recovery.** After each failure, real requests through the gateway succeeded again with p95 of 30 to 50 ms, and for the three fully instrumented scenarios the gateway metrics held by OPSILUME returned to 0% errors and about 46 ms p95.
+- **During the failures**, as measured by real requests through the gateway: `db-latency` p95 852 ms with no errors; `redis-outage` 33% failed; `bad-deploy` 88% failed; `pool-exhaustion` 100% failed; `error-rate` 7% failed in that sample; `upstream-down` 33% failed.
+
+Getting to this run took several earlier ones, and each found something real: a healthy service reported as degraded, a silent service reported as healthy, traces sampled from the wrong ten seconds, a rollback proposed to the release that had just been removed, a failure placed at the edge instead of where it began. They are listed in the addendum to `docs/engineering-audit.md`. These results are from the rule-based engine on one machine, once; they are not a claim about a model or about production.
+
 ## Stop and clean up
 
 ```bash
