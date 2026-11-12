@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api:
+    name: API (lint, typecheck, integration tests)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: opspilot
+          POSTGRES_PASSWORD: opspilot
+          POSTGRES_DB: opspilot_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U opspilot" --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgresql://opspilot:opspilot@localhost:5432/opspilot_test?schema=public
+      DATABASE_URL: postgresql://opspilot:opspilot@localhost:5432/opspilot_test?schema=public
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run db:generate -w @opspilot/api
+      - run: npm run lint -w @opspilot/api
+      - run: npm run typecheck -w @opspilot/api
+      - run: npm test -w @opspilot/api
+      - run: npm run build -w @opspilot/api
+
+  web:
+    name: Web (lint, typecheck, unit tests, build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run lint -w @opspilot/web
+      - run: npm run typecheck -w @opspilot/web
+      - run: npm test -w @opspilot/web
+      - run: npm run build -w @opspilot/web
+
+  ai:
+    name: AI service (lint, tests, agent evaluations)
+    runs-on: ubuntu-latest
+    defaults:
+      run: { working-directory: services/ai }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with: { enable-cache: true }
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run pytest -q
+      # Regression gate for the investigation engine: every ground-truth scenario must pass.
+      - run: uv run python -m app.evals.run --heuristic
+
+  docker:
+    name: Container images build
+    runs-on: ubuntu-latest
+    needs: [api, web, ai]
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose --profile app build

@@ -2,7 +2,7 @@
   "name": "opspilot",
   "private": true,
   "version": "0.1.0",
-  "description": "OpsPilot — AI-powered engineering operations and incident investigation platform",
+  "description": "OpsPilot \u2014 AI-powered engineering operations and incident investigation platform",
   "workspaces": [
     "apps/*"
   ],
@@ -25,7 +25,10 @@
     "lint": "npm run lint --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "test:ai": "cd services/ai && uv run pytest -q",
-    "test:e2e": "npm run test:e2e -w @opspilot/web"
+    "test:e2e": "npm run test:e2e -w @opspilot/web",
+    "simulate": "npm run simulate -w @opspilot/api",
+    "evals": "cd services/ai && uv run python -m app.evals.run",
+    "mcp": "cd services/ai && uv run python -m app.mcp_server"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"
