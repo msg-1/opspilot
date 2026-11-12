@@ -51,6 +51,10 @@ export interface InvestigationSummary {
   status: string;
   provider: string | null;
   model: string | null;
+  /** Which engine wrote the report: a real model, the scripted mock, or the rule-based engine */
+  analysisMode?: 'llm' | 'mock' | 'heuristic' | null;
+  attemptedProvider?: string | null;
+  estimatedCostUsd?: number | null;
   summary: string | null;
   confidence: number | null;
   error?: string | null;
@@ -82,6 +86,8 @@ export interface Hypothesis {
   confidence: number;
   status: string;
   evidenceRefs: string[];
+  contradictingRefs: string[];
+  contradictions: string[];
   facts: string[];
   assumptions: string[];
   gaps: string[];
@@ -104,7 +110,7 @@ export interface Step {
 export interface Report {
   summary: string;
   confidence: number;
-  analysisMode: 'llm' | 'heuristic';
+  analysisMode: 'llm' | 'heuristic' | 'mock';
   timeline: { timestamp: string; description: string; evidenceRefs: string[] }[];
   facts: { statement: string; evidenceRefs: string[] }[];
   assumptions: string[];

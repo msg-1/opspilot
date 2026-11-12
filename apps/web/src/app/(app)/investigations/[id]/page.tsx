@@ -5,7 +5,7 @@ import { AlertTriangle, BookOpen, Bot, Boxes, ChevronDown, CircleHelp, FileCode2
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useMemo, useState } from 'react';
-import { ConfidenceMeter, InvestigationStatusBadge, RemediationStatusBadge, RiskBadge, SeverityBadge } from '@/components/badges';
+import { ConfidenceMeter, EngineBadge, InvestigationStatusBadge, RemediationStatusBadge, RiskBadge, SeverityBadge } from '@/components/badges';
 import { Button, Card, EmptyState, ErrorState, FormError, Mono, Notice, PageHeader, Spinner, Tabs } from '@/components/ui';
 import { api, useApi } from '@/lib/api';
 import { clock, dateTime, timeAgo, titleCase } from '@/lib/format';
@@ -23,6 +23,9 @@ interface Detail extends InvestigationSummary {
   createdBy: { id: string; name: string } | null;
   inputTokens: number;
   outputTokens: number;
+  cacheReadTokens: number;
+  llmCalls: number;
+  llmLatencyMs: number;
 }
 
 const KIND: Record<string, { icon: React.ElementType; label: string }> = {
@@ -99,9 +102,16 @@ function HypothesisCard({ h, evidence, onSelect, top }: { h: Hypothesis; evidenc
         <div className="space-y-3 border-t border-line/70 px-4 py-3">
           <p className="text-sm text-ink"><WithRefs text={h.description} evidence={evidence} onSelect={onSelect} /></p>
           <div className="text-[13px] text-ink-2">Supporting evidence: <Refs refs={h.evidenceRefs} evidence={evidence} onSelect={onSelect} /></div>
+          {(h.contradictions.length > 0 || h.contradictingRefs.length > 0) && (
+            <div>
+              <div className="text-[11px] font-semibold tracking-wide text-critical-ink uppercase">Evidence against</div>
+              {h.contradictions.length > 0 && <ul className="mt-1 list-disc space-y-1 pl-4 text-[13px] text-ink">{h.contradictions.map((c, i) => <li key={i}><WithRefs text={c} evidence={evidence} onSelect={onSelect} /></li>)}</ul>}
+              {h.contradictingRefs.length > 0 && <div className="mt-1 text-[13px] text-ink-2">Contradicting evidence: <Refs refs={h.contradictingRefs} evidence={evidence} onSelect={onSelect} /></div>}
+            </div>
+          )}
           <List title="Observed facts" items={h.facts} tone="text-good-ink" />
           <List title="Assumptions (not verified)" items={h.assumptions} tone="text-warn-ink" />
-          <List title="What would confirm or refute it" items={h.gaps} />
+          <List title="Missing evidence: what would confirm or refute it" items={h.gaps} />
         </div>
       )}
     </div>
@@ -221,14 +231,20 @@ export default function InvestigationPage() {
             <InvestigationStatusBadge status={data.status} />
             {data.incident && <Link href={`/incidents/${data.incident.id}`} className="inline-flex items-center gap-1.5 hover:underline"><SeverityBadge severity={data.incident.severity} short />INC-{data.incident.number} · {data.incident.title}</Link>}
             <span>{data.createdBy?.name ?? 'Unknown'} · {timeAgo(data.createdAt)}</span>
-            {data.provider && <span>{data.provider === 'heuristic' ? 'Rule-based engine' : <>{data.provider} · <Mono>{data.model}</Mono></>}</span>}
-            {data.inputTokens > 0 && <span className="tabular">{(data.inputTokens + data.outputTokens).toLocaleString()} tokens</span>}
+            <EngineBadge mode={data.analysisMode} provider={data.provider} model={data.model} attemptedProvider={data.attemptedProvider} />
+            {data.llmCalls > 0 && data.analysisMode === 'llm' && (
+              <span className="tabular" title="Estimated from published list prices. The provider's console shows what was actually billed.">
+                {data.llmCalls} model call{data.llmCalls === 1 ? '' : 's'} · {(data.inputTokens + data.cacheReadTokens).toLocaleString()} in / {data.outputTokens.toLocaleString()} out tokens · {(data.llmLatencyMs / 1000).toFixed(1)} s · {data.estimatedCostUsd == null ? 'cost unknown' : `est. $${data.estimatedCostUsd.toFixed(4)}`}
+              </span>
+            )}
           </span>
         }
         actions={running && session.can('investigation:run') && <Button loading={busy === 'cancel'} onClick={() => void run(() => api.post(`/investigations/${data.id}/cancel`), 'cancel')}>Cancel</Button>}
       />
       <FormError error={actionError} />
 
+      {data.analysisMode === 'mock' && <div className="mb-4"><Notice tone="warn"><strong>This is mock output, not an analysis.</strong> AI_PROVIDER is set to mock: a scripted stand-in ran the pipeline and no model was called. Do not act on anything below.</Notice></div>}
+      {data.analysisMode === 'heuristic' && data.attemptedProvider && data.attemptedProvider !== 'heuristic' && <div className="mb-4"><Notice tone="warn"><strong>The AI model could not be used for this investigation,</strong> so the rule-based engine analysed the evidence instead. The reason is listed under what is uncertain.</Notice></div>}
       {data.status === 'FAILED' && <div className="mb-4"><Notice tone="warn"><strong>This investigation failed.</strong> {data.error} Steps completed before the failure are kept below.</Notice></div>}
       {running && (
         <Card className="mb-4">
@@ -251,7 +267,7 @@ export default function InvestigationPage() {
           <p className="mt-2 max-w-4xl text-[15px] leading-relaxed text-ink"><WithRefs text={report.summary} evidence={evidence} onSelect={select} /></p>
           <p className="mt-3 flex items-start gap-1.5 text-[12px] text-ink-2">
             <ShieldAlert className="mt-px size-3.5 shrink-0" aria-hidden />
-            {report.analysisMode === 'heuristic' ? 'Produced by rule-based correlation, not a language model. ' : 'Produced by a language model from the evidence below. '}
+            {report.analysisMode === 'heuristic' ? 'Produced by rule-based correlation, not a language model. ' : report.analysisMode === 'mock' ? 'Produced by a scripted mock, not a language model. ' : `Written by ${data.model ?? 'a language model'} from the evidence below. `}
             These are hypotheses to verify, not a confirmed root cause.
           </p>
         </Card>

@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import { ConfidenceMeter, HealthBadge, RemediationStatusBadge, SeverityBadge } from '@/components/badges';
+import { ConfidenceMeter, EngineBadge, HealthBadge, RemediationStatusBadge, SeverityBadge } from '@/components/badges';
 import { EngineNotice } from '@/components/engine-notice';
 import { ErrorState, FormError, Pagination, Tabs } from '@/components/ui';
 import { ApiError, api, qs, useApi } from '@/lib/api';
@@ -65,13 +65,30 @@ describe('components', () => {
   });
 
   it('is explicit about which engine analyses an investigation', () => {
-    const { rerender } = render(<EngineNotice status={{ reachable: true, llm: { provider: 'heuristic', model: null, available: false, detail: 'Set ANTHROPIC_API_KEY.' } }} />);
-    expect(screen.getByText(/No language model is configured/)).toBeInTheDocument();
-    rerender(<EngineNotice status={{ reachable: true, llm: { provider: 'anthropic', model: 'claude-opus-5-5', available: true, detail: '' } }} />);
-    expect(screen.getByText('claude-opus-5-5')).toBeInTheDocument();
-    expect(screen.getByText(/sent to this provider/)).toBeInTheDocument();
+    const limits = { maxOutputTokensPerCall: 8000, requestTimeoutSeconds: 120, maxRetries: 2, maxCostUsdPerInvestigation: 0.5, maxTokensPerInvestigation: 400000 };
+    const { rerender } = render(<EngineNotice status={{ reachable: true, llm: { provider: 'heuristic', configuredProvider: 'none', model: null, available: false, detail: 'Set ANTHROPIC_API_KEY.' } }} />);
+    expect(screen.getByText(/No AI model is in use/)).toBeInTheDocument();
+    rerender(<EngineNotice status={{ reachable: true, llm: { provider: 'heuristic', configuredProvider: 'anthropic', model: null, available: false, detail: 'ANTHROPIC_API_KEY is not set.' } }} />);
+    expect(screen.getByText(/is configured but not usable/)).toBeInTheDocument();
+    rerender(<EngineNotice status={{ reachable: true, llm: { provider: 'anthropic', model: 'claude-haiku-5-5', available: true, detail: '', limits }, usageToday: { investigations: 2, running: 0, estimatedCostUsd: 0.0031, tokens: 9000 }, organizationLimits: { maxConcurrent: 3, dailyInvestigations: 50, dailyCostUsd: 5 } }} />);
+    expect(screen.getByText('claude-haiku-5-5')).toBeInTheDocument();
+    expect(screen.getByText(/uses paid API credit/)).toBeInTheDocument();
+    expect(screen.getByText(/\$0.50 per investigation, \$5.00 per day. Today: 2 investigations, estimated \$0.0031/)).toBeInTheDocument();
+    rerender(<EngineNotice status={{ reachable: true, llm: { provider: 'mock', model: 'mock-scripted', available: true, detail: '' } }} />);
+    expect(screen.getByText(/Mock AI is active/)).toBeInTheDocument();
     rerender(<EngineNotice status={{ reachable: false, detail: 'connection refused' }} />);
     expect(screen.getByText(/AI service is not reachable/)).toBeInTheDocument();
+  });
+
+  it('never presents mock or rule-based output as model output', () => {
+    const { rerender } = render(<EngineBadge mode="llm" provider="anthropic" model="claude-haiku-5-5" attemptedProvider="anthropic" />);
+    expect(screen.getByText(/Claude · claude-haiku-5-5/)).toBeInTheDocument();
+    rerender(<EngineBadge mode="mock" provider="mock" model="mock-scripted" />);
+    expect(screen.getByText(/Mock AI · no model was called/)).toBeInTheDocument();
+    rerender(<EngineBadge mode="heuristic" provider="heuristic" model={null} attemptedProvider={null} />);
+    expect(screen.getByText(/Rule-based engine · no AI model/)).toBeInTheDocument();
+    rerender(<EngineBadge mode="heuristic" provider="heuristic" model={null} attemptedProvider="anthropic" />);
+    expect(screen.getByText(/Rule-based engine · Claude was unavailable/)).toBeInTheDocument();
   });
 
   it('renders validation details in form errors', () => {

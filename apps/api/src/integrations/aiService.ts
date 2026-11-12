@@ -28,8 +28,18 @@ export type InvestigationEvent =
       type: 'evidence';
       evidence: { ref: string; kind: string; title: string; summary: string; sourceType?: string | null; sourceId?: string | null; occurredAt?: string | null; relevance?: number | null; data?: unknown };
     }
-  | { type: 'final'; report: unknown; usage?: { inputTokens?: number; outputTokens?: number } }
+  | { type: 'final'; report: unknown; usage?: InvestigationUsage; engine?: { mode: string; provider: string; model: string | null; attemptedProvider: string | null } }
   | { type: 'error'; message: string };
+
+export interface InvestigationUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  llmCalls?: number;
+  llmLatencyMs?: number;
+  estimatedCostUsd?: number | null;
+}
 
 export interface InvestigationRequest {
   investigationId: string;
@@ -63,7 +73,7 @@ async function call<T>(path: string, init: RequestInit & { timeoutMs?: number } 
 }
 
 export const aiService = {
-  status: () => call<AiStatus>('/v1/status', { timeoutMs: 5000 }),
+  status: (verify = false) => call<AiStatus>(`/v1/status${verify ? '?verify=true' : ''}`, { timeoutMs: verify ? 15_000 : 5000 }),
 
   embed: (texts: string[], kind: 'document' | 'query') =>
     call<EmbeddingResult>('/v1/embeddings', { method: 'POST', body: JSON.stringify({ texts, kind }), timeoutMs: 120_000 }),

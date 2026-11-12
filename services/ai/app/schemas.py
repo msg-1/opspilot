@@ -119,7 +119,9 @@ class HypothesisOut(CamelModel):
     description: str = Field(description="The causal mechanism proposed and how the evidence supports it")
     confidence: float = Field(ge=0, le=1)
     status: Literal["likely", "possible", "unlikely"]
-    evidence_refs: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list, description="Evidence that supports this hypothesis")
+    contradicting_evidence_refs: list[str] = Field(default_factory=list, description="Evidence that argues against this hypothesis")
+    contradictions: list[str] = Field(default_factory=list, description="What in the evidence does not fit this hypothesis")
     facts: list[str] = Field(default_factory=list, description="Observed facts supporting this hypothesis")
     assumptions: list[str] = Field(default_factory=list, description="What is assumed but not verified")
     gaps: list[str] = Field(default_factory=list, description="Evidence that would confirm or refute it")
@@ -154,7 +156,7 @@ class RecommendedAction(CamelModel):
 class InvestigationReport(CamelModel):
     summary: str = Field(description="3-6 sentences: what happened, the leading explanation, and how sure we are")
     confidence: float = Field(ge=0, le=1, description="Overall confidence in the leading hypothesis")
-    analysis_mode: Literal["llm", "heuristic"] = "llm"
+    analysis_mode: Literal["llm", "heuristic", "mock"] = "llm"
     root_cause_confirmed: Literal[False] = False
     timeline: list[TimelineEntry] = Field(default_factory=list)
     facts: list[Fact] = Field(default_factory=list)

@@ -30,7 +30,7 @@ export async function analyticsOverview(organizationId: string, from: Date, to: 
   const [incidents, deployments, investigations, remediations] = await Promise.all([
     prisma.incident.findMany({ where: { organizationId, startedAt: range }, include: { services: { select: { service: { select: { id: true, name: true } } } } } }),
     prisma.deployment.findMany({ where: { organizationId, startedAt: range }, select: { id: true, serviceId: true, status: true, startedAt: true, isRollback: true, service: { select: { name: true } } } }),
-    prisma.investigation.findMany({ where: { organizationId, createdAt: range }, select: { status: true, confidence: true, startedAt: true, completedAt: true, provider: true } }),
+    prisma.investigation.findMany({ where: { organizationId, createdAt: range }, select: { status: true, confidence: true, startedAt: true, completedAt: true, provider: true, analysisMode: true, estimatedCostUsd: true, inputTokens: true, outputTokens: true } }),
     prisma.remediationAction.findMany({ where: { organizationId, createdAt: range }, select: { status: true, proposedByType: true, requestedAt: true, risk: true, approvals: { select: { createdAt: true, decision: true } } } }),
   ]);
 
@@ -108,6 +108,8 @@ export async function analyticsOverview(organizationId: string, from: Date, to: 
       byStatus: count(investigations),
       averageConfidence: completed.length ? round1((completed.reduce((a, i) => a + (i.confidence ?? 0), 0) / completed.length) * 100) : null,
       durationSeconds: stats(completed.flatMap((i) => (i.startedAt && i.completedAt ? [(i.completedAt.getTime() - i.startedAt.getTime()) / 1000] : []))),
+      estimatedCostUsd: Math.round(investigations.reduce((a, i) => a + (i.estimatedCostUsd ?? 0), 0) * 10_000) / 10_000,
+      tokens: investigations.reduce((a, i) => a + i.inputTokens + i.outputTokens, 0),
       byProvider: completed.reduce<Record<string, number>>((acc, i) => ({ ...acc, [i.provider ?? 'unknown']: (acc[i.provider ?? 'unknown'] ?? 0) + 1 }), {}),
     },
     remediation: {

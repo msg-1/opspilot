@@ -30,6 +30,10 @@ const schema = z.object({
   LOG_LEVEL: z.string().default('info'),
   OTEL_ENABLED: bool,
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().default('http://localhost:4318'),
+  // Per-organisation investigation limits. They bound model spend; 0 disables a limit.
+  INVESTIGATION_MAX_CONCURRENT: z.coerce.number().int().min(0).default(3),
+  INVESTIGATION_DAILY_LIMIT: z.coerce.number().int().min(0).default(50),
+  AI_DAILY_COST_LIMIT_USD: z.coerce.number().min(0).default(5),
   // Run queue jobs in-process instead of through Redis (used by the test suite)
   QUEUE_INLINE: bool,
   BCRYPT_ROUNDS: z.coerce.number().int().min(4).max(15).default(12),

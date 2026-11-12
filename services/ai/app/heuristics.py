@@ -183,6 +183,8 @@ def analyse(question: str, store: EvidenceStore, *, scope: list[str], window: tu
         refs = [change.ref]
         facts = [f"{change.title} happened at {change.occurred_at}, {max(0, round(lead))} minutes before the first anomalous error ({change.ref})."]
         assumptions = ["Temporal proximity is treated as a signal of causation; it has not been verified."]
+        contradictions: list[str] = []
+        against: list[str] = []
         same_service = bool(dominant and change.service and change.service == dominant_service)
         if same_service:
             score += 0.1
@@ -190,6 +192,9 @@ def analyse(question: str, store: EvidenceStore, *, scope: list[str], window: tu
             refs.append(dominant.ref)  # type: ignore[union-attr]
         elif change.service and change.service not in affected:
             score -= 0.1
+            contradictions.append(f"The change was made to {change.service}, which is not where the errors are occurring.")
+        if lead > 120:
+            contradictions.append(f"It happened {round(lead)} minutes before the errors began; a regression would usually show sooner.")
         # Linked code: commits / PRs for the same service close to the change, or matching the deployed commit.
         sha = str((change.data or {}).get("commitSha") or "")[:10]
         linked = [c for c in store.by_kind("commit", "pull_request") if _linked(c, change, sha)]
@@ -203,7 +208,8 @@ def analyse(question: str, store: EvidenceStore, *, scope: list[str], window: tu
                 score += min(0.18, 0.07 * len(mechanism))
                 facts.append(f"The code shipped by this change mentions {', '.join(sorted(mechanism))}, which also appear in the error messages ({', '.join(c.ref for c in linked[:3])}).")
             else:
-                facts.append(f"Code changes linked to it were found ({', '.join(c.ref for c in linked[:3])}) but they do not obviously relate to the error text.")
+                contradictions.append(f"The code changes linked to it ({', '.join(c.ref for c in linked[:3])}) do not mention anything that appears in the error messages.")
+                against += [c.ref for c in linked[:3]]
         elif change.kind == "deployment":
             assumptions.append("No commits or pull requests could be linked to this deployment, so what it changed is unknown.")
         moved = [m for m in metrics if m.service == change.service and abs((m.data or {}).get("changePercent") or 0) >= 50]
@@ -223,7 +229,7 @@ def analyse(question: str, store: EvidenceStore, *, scope: list[str], window: tu
             description=f"The error signal began about {max(0, round(lead))} minutes after this {what}."
             + (f" The shipped change touches {', '.join(sorted(mechanism))}, matching the failure mode in the logs." if mechanism else " The link is based on timing" + (" and service match." if same_service else ".")),
             confidence=round(score, 2), status="likely" if score >= 0.55 else "possible" if score >= 0.25 else "unlikely",
-            evidence_refs=_unique(refs), facts=facts, assumptions=assumptions,
+            evidence_refs=_unique(refs), contradicting_evidence_refs=_unique(against), contradictions=contradictions, facts=facts, assumptions=assumptions,
             gaps=["Confirm by comparing error rate per version, or by rolling back in a controlled way.", "Review the diff of the linked change for the suspected mechanism."],
         ))
         if change.kind == "deployment" and score >= 0.45 and not (change.data or {}).get("isRollback"):

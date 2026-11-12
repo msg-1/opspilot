@@ -161,6 +161,60 @@ describe('investigations', () => {
     expect(audit).toEqual(expect.arrayContaining(['investigation.start:user', 'investigation.complete:ai_agent']));
   });
 
+  it('records which engine wrote the report, what it used and what it cost', async () => {
+    const org = await createOrg();
+    const withContradiction = report({ hypotheses: [{ title: 'Regression in v2', description: 'Pool size lowered.', confidence: 0.7, status: 'likely', evidenceRefs: ['E1'], contradictingEvidenceRefs: ['E2', 'E404'], contradictions: ['Errors also appear on one host that was not redeployed.'], facts: [], assumptions: [], gaps: ['Error rate per version'] }], facts: [], recommendedActions: [] });
+    ai.events = [
+      { type: 'meta', provider: 'anthropic', model: 'claude-haiku-5-5' },
+      evidence('E1', 'deployment', 'Deployment of checkout v2'),
+      evidence('E2', 'log_pattern', 'Errors on host 7'),
+      { type: 'final', report: withContradiction, usage: { inputTokens: 5200, outputTokens: 1030, cacheReadTokens: 2900, cacheWriteTokens: 1400, llmCalls: 4, llmLatencyMs: 8400, estimatedCostUsd: 0.001239 }, engine: { mode: 'llm', provider: 'anthropic', model: 'claude-haiku-5-5', attemptedProvider: 'anthropic' } },
+    ];
+    const live = (await org.owner.post('/api/v1/investigations').send({ question: 'Why is checkout failing today?' })).body;
+    const detail = (await org.owner.get(`/api/v1/investigations/${live.id}`)).body;
+    expect(detail).toMatchObject({ analysisMode: 'llm', provider: 'anthropic', model: 'claude-haiku-5-5', attemptedProvider: 'anthropic', inputTokens: 5200, outputTokens: 1030, cacheReadTokens: 2900, llmCalls: 4, llmLatencyMs: 8400, estimatedCostUsd: 0.001239 });
+    // Evidence against a hypothesis is stored, and invented references to it are removed too.
+    expect(detail.hypotheses[0]).toMatchObject({ contradictingRefs: ['E2'], contradictions: ['Errors also appear on one host that was not redeployed.'] });
+
+    // When the model fails and rules take over, the record says so instead of crediting the model.
+    ai.events = [
+      { type: 'meta', provider: 'anthropic', model: 'claude-haiku-5-5' },
+      { type: 'final', report: report({ analysisMode: 'heuristic', hypotheses: [], facts: [], timeline: [], recommendedActions: [], confidence: 0.1 }), usage: { inputTokens: 0, outputTokens: 0, llmCalls: 1, estimatedCostUsd: 0 }, engine: { mode: 'heuristic', provider: 'heuristic', model: null, attemptedProvider: 'anthropic' } },
+    ];
+    const fallback = (await org.owner.post('/api/v1/investigations').send({ question: 'Why is checkout failing today?' })).body;
+    expect((await org.owner.get(`/api/v1/investigations/${fallback.id}`)).body).toMatchObject({ analysisMode: 'heuristic', provider: 'heuristic', model: null, attemptedProvider: 'anthropic' });
+
+    ai.events = [{ type: 'final', report: report({ analysisMode: 'mock', hypotheses: [], facts: [], timeline: [], recommendedActions: [], confidence: 0.1 }), engine: { mode: 'mock', provider: 'mock', model: 'mock-scripted', attemptedProvider: 'mock' } }];
+    const mock = (await org.owner.post('/api/v1/investigations').send({ question: 'Why is checkout failing today?' })).body;
+    expect((await org.owner.get(`/api/v1/investigations/${mock.id}`)).body.analysisMode).toBe('mock');
+
+    const status = (await org.owner.get('/api/v1/investigations/ai-status')).body;
+    expect(status.usageToday).toMatchObject({ investigations: 3, running: 0, estimatedCostUsd: 0.0012, tokens: 6230 });
+    expect(status.organizationLimits).toEqual({ maxConcurrent: 3, dailyInvestigations: 50, dailyCostUsd: 5 });
+    const analytics = (await org.owner.get('/api/v1/analytics/overview?from=1d')).body.investigations;
+    expect(analytics).toMatchObject({ total: 3, estimatedCostUsd: 0.0012, tokens: 6230 });
+  });
+
+  it('refuses new investigations once the organisation reaches its limits', async () => {
+    const org = await createOrg();
+    const other = await createOrg();
+    ai.events = [{ type: 'final', report: report({ hypotheses: [], facts: [], timeline: [], recommendedActions: [], confidence: 0.1 }) }];
+    const start = (agent = org.owner) => agent.post('/api/v1/investigations').send({ question: 'Why is checkout failing today?' });
+    const running = await Promise.all([1, 2, 3].map(() => prisma.investigation.create({ data: { organizationId: org.organizationId, question: 'still running', status: 'RUNNING', startedAt: new Date() } })));
+    const concurrent = await start();
+    expect(concurrent.status).toBe(429);
+    expect(concurrent.body.error).toMatchObject({ code: 'limit_reached' });
+    expect(concurrent.body.error.message).toContain('already in progress');
+    await prisma.investigation.updateMany({ where: { id: { in: running.map((r) => r.id) } }, data: { status: 'COMPLETED', estimatedCostUsd: 2.5 } });
+    const overBudget = await start();
+    expect(overBudget.status).toBe(429);
+    expect(overBudget.body.error.message).toContain("Today's estimated model spend ($7.50) has reached the daily limit of $5.00");
+    // Limits are per organisation, and yesterday's spend does not count.
+    expect((await start(other.owner)).status).toBe(202);
+    await prisma.investigation.updateMany({ where: { organizationId: org.organizationId }, data: { createdAt: new Date(Date.now() - 26 * 3600_000) } });
+    expect((await start()).status).toBe(202);
+  });
+
   it('marks the investigation failed when the AI service errors or returns a malformed report', async () => {
     const org = await createOrg();
     ai.events = [{ type: 'meta', provider: 'openai', model: 'gpt' }, { type: 'error', message: 'model exploded' }];

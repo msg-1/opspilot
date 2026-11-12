@@ -3,7 +3,7 @@
 import { CheckCircle2, Copy, Download, KeyRound, Plus, XCircle } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Badge } from '@/components/badges';
-import { EngineNotice } from '@/components/engine-notice';
+import { type AiStatus, EngineNotice } from '@/components/engine-notice';
 import { Button, Card, DefinitionList, EmptyState, ErrorState, Field, FormError, Input, Modal, Mono, Notice, PageHeader, Pagination, Select, Spinner, Table, Tabs } from '@/components/ui';
 import { api, qs, useApi } from '@/lib/api';
 import { dateTime, timeAgo } from '@/lib/format';
@@ -212,7 +212,37 @@ function Audit() {
   );
 }
 
-interface SystemStatus { database: boolean; redis: boolean; queues: { name: string; waiting: number; active: number; completed: number; failed: number; delayed: number }[]; ai: { reachable: boolean; detail?: string; llm?: { provider: string; model: string | null; available: boolean; detail: string }; embeddings?: { provider: string; model: string; dimensions: number } } }
+interface SystemStatus { database: boolean; redis: boolean; queues: { name: string; waiting: number; active: number; completed: number; failed: number; delayed: number }[]; ai: AiStatus & { embeddings?: { provider: string; model: string; dimensions: number } } }
+
+function VerifyModel() {
+  const [result, setResult] = useState<{ ok: boolean; detail: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  return (
+    <div className="mt-4 border-t border-line pt-4">
+      <Button
+        loading={busy}
+        onClick={async () => {
+          setBusy(true);
+          setError(null);
+          try {
+            const r = await api.get<{ llm?: { verification?: { ok: boolean; detail: string } | null; available: boolean; detail: string } }>('/investigations/ai-status?verify=true');
+            setResult(r.llm?.verification ?? { ok: false, detail: r.llm?.detail ?? 'No model provider is configured.' });
+          } catch (e) {
+            setError(e);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        Check API key and model
+      </Button>
+      <p className="mt-2 text-[12px] text-ink-2">Looks the configured model up with the provider. It confirms the key works without running inference, so it uses no credit.</p>
+      <FormError error={error} />
+      {result && <div className="mt-2"><Notice tone={result.ok ? 'good' : 'warn'}>{result.detail}</Notice></div>}
+    </div>
+  );
+}
 
 function System() {
   const { data, error } = useApi<SystemStatus>('/system/status', { refetchInterval: 10_000 });
@@ -227,7 +257,8 @@ function System() {
       <Card title="AI configuration">
         <EngineNotice status={data.ai} />
         {data.ai.embeddings && <div className="mt-4"><DefinitionList items={[['Embeddings', <span key="e"><Mono>{data.ai.embeddings.provider}:{data.ai.embeddings.model}</Mono> · {data.ai.embeddings.dimensions} dimensions</span>]]} /></div>}
-        <p className="mt-3 text-[12px] text-ink-2">Providers are configured in the <Mono>.env</Mono> file (<Mono>ANTHROPIC_API_KEY</Mono>, <Mono>OPENAI_API_KEY</Mono>, <Mono>OLLAMA_BASE_URL</Mono>, <Mono>LLM_PROVIDER</Mono>, <Mono>EMBEDDING_PROVIDER</Mono>). Restart the AI service after changing them, and reindex the knowledge base if the embedding provider changed.</p>
+        <p className="mt-3 text-[12px] text-ink-2">The provider is configured in the <Mono>.env</Mono> file (<Mono>AI_PROVIDER</Mono>, <Mono>ANTHROPIC_API_KEY</Mono>, <Mono>ANTHROPIC_MODEL</Mono>, <Mono>AI_MAX_TOKENS</Mono> and the spending limits). Keys are never shown here. Restart the AI service after changing them, and reindex the knowledge base if the embedding provider changed.</p>
+        <VerifyModel />
       </Card>
       <Card title="Background queues" padded={false}>
         {data.queues.length === 0 ? <p className="px-4 py-4 text-[13px] text-ink-2">Queue statistics are unavailable.</p> : (
