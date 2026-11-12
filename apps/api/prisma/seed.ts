@@ -53,11 +53,11 @@ async function main() {
   const organizationId = org.id;
   const passwordHash = await bcrypt.hash(DEMO_PASSWORD, 10);
   const people = [
-    { key: 'priya', name: 'Priya Raman', email: 'demo@opspilot.dev', title: 'Head of Platform', role: 'OWNER' as const },
-    { key: 'marcus', name: 'Marcus Oyelaran', email: 'marcus@opspilot.dev', title: 'Engineering Manager, Payments', role: 'ADMIN' as const },
-    { key: 'lena', name: 'Lena Fischer', email: 'lena@opspilot.dev', title: 'Senior SRE', role: 'ENGINEER' as const },
-    { key: 'tomas', name: 'Tomás Herrera', email: 'tomas@opspilot.dev', title: 'Backend Engineer', role: 'ENGINEER' as const },
-    { key: 'aiko', name: 'Aiko Tanaka', email: 'aiko@opspilot.dev', title: 'Support Lead', role: 'VIEWER' as const },
+    { key: 'priya', name: 'Priya Raman', email: 'demo@example.com', title: 'Head of Platform', role: 'OWNER' as const },
+    { key: 'marcus', name: 'Marcus Oyelaran', email: 'marcus@example.com', title: 'Engineering Manager, Payments', role: 'ADMIN' as const },
+    { key: 'lena', name: 'Lena Fischer', email: 'lena@example.com', title: 'Senior SRE', role: 'ENGINEER' as const },
+    { key: 'tomas', name: 'Tomás Herrera', email: 'tomas@example.com', title: 'Backend Engineer', role: 'ENGINEER' as const },
+    { key: 'aiko', name: 'Aiko Tanaka', email: 'aiko@example.com', title: 'Support Lead', role: 'VIEWER' as const },
   ];
   const users: Record<string, string> = {};
   for (const p of people) {
