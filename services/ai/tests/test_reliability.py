@@ -521,6 +521,34 @@ async def test_traces_locate_where_requests_fail_at_the_deepest_span_with_a_mess
     assert report.outcome == "INCIDENT" and not [a for a in report.recommended_actions if a.effect == "state_changing"]
 
 
+async def test_a_failed_dependency_and_traces_failing_in_its_caller_corroborate_each_other():
+    """Found on real telemetry: with Redis down, the traces correctly placed the failure in
+    shop-payments, and that localisation was listed above the dependency that was actually down."""
+    errors = [
+        {"service": "shop-gateway", "operation": "POST /checkout", "message": "HTTP 502", "system": None, "peer": None},
+        {"service": "shop-payments", "operation": "request handler - /pay", "message": "idempotency store unavailable, refusing to charge", "system": None, "peer": None},
+    ]
+    scenario = Scenario(
+        name="corroborated", question="Why are checkouts failing on shop-gateway?", description="", expect=BY_NAME["upstream_dependency_down"].expect,
+        services=[svc("shop-gateway", ["shop-orders"], "DEGRADED"), svc("shop-orders", ["shop-payments"], "DEGRADED"), svc("shop-payments", ["shop-redis"], "DEGRADED"), svc("shop-redis", health="DOWN")],
+        metrics={"shop-gateway": [metric("error_rate", "Error rate", "%", 30.0, 0.0)]},
+        traces=[_trace(f"c{i}", "shop-gateway", 20, None, errors) for i in range(4)],
+        service_details={
+            "shop-gateway": {"health": "DEGRADED", "dependsOn": [_dep("shop-orders", "DEGRADED")]},
+            "shop-orders": {"health": "DEGRADED", "dependsOn": [_dep("shop-payments", "DEGRADED")]},
+            "shop-payments": {"health": "DEGRADED", "dependsOn": [_dep("shop-redis", "DOWN")]},
+            "shop-redis": {"health": "DOWN", "dependsOn": []},
+        },
+    )
+    report, store, _ = await investigate(scenario)
+    top, second = report.hypotheses[0], report.hypotheses[1]
+    assert top.title == "Failure of upstream dependency shop-redis" and top.confidence == 0.57 and top.status == "likely"
+    assert "Sampled traces agree: requests fail in shop-payments, which calls shop-redis directly." in top.description
+    assert {e.kind for e in store.items if e.ref in top.evidence_refs} == {"dependency", "trace"}
+    # The localisation is kept as its own, lower-ranked finding.
+    assert second.title == "Requests are failing in shop-payments" and second.confidence < top.confidence
+
+
 async def test_a_rollback_deployment_after_which_errors_fell_is_not_blamed_for_what_happens_next():
     """Found on real telemetry. A bad release had been rolled back minutes earlier. When the
     database then slowed down, timing alone made the rollback deployment the leading suspect, and

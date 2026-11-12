@@ -239,7 +239,7 @@ if (wanted('redis-outage')) {
       const top = inv.hypotheses[0];
       c.ok('the leading hypothesis names Redis', !!top && /redis/i.test(top.title), titles(inv).join(' | '));
       c.ok('the dependency chain was followed down to shop-redis, recorded as DOWN', inv.evidence.some((e) => e.kind === 'dependency' && e.sourceId === 'dep:shop-redis' && /DOWN/.test(e.title)), inv.evidence.filter((e) => e.kind === 'dependency').map((e) => e.title).join(' | '));
-      c.ok('traces place the failure in shop-payments calls to Redis', titles(inv).some((t) => /Requests are failing in shop-payments's calls to .*redis/i.test(t)), titles(inv).join(' | '));
+      c.ok('traces place the failure in shop-payments, the service that calls Redis', titles(inv).some((t) => /^Requests are failing in shop-payments/.test(t)) && /Sampled traces agree/.test(inv.hypotheses[0]?.description ?? ''), titles(inv).join(' | '));
       c.ok('the unrelated database is not blamed', !titles(inv).some((t) => /postgres/i.test(t)), titles(inv).join(' | '));
       c.ok('no rollback is proposed: no deployment is involved', !inv.remediations.some((r) => r.type === 'rollback_deployment'), JSON.stringify(inv.remediations));
     },

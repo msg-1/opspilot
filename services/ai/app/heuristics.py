@@ -271,6 +271,7 @@ def analyse(question: str, store: EvidenceStore, *, scope: list[str], window: tu
     # When dependencies fail in a chain (gateway → orders → payments → redis), the one with no
     # unhealthy dependency of its own is where the chain starts; those above it are consequences.
     unhealthy = {d.service: d for d in store.by_kind("dependency") if d.service}
+    dependency_hypotheses: dict[str, int] = {}
     for slug, dep in unhealthy.items():
         if slug in scope:
             continue  # it is the service being asked about, not an independent cause
@@ -284,6 +285,7 @@ def analyse(question: str, store: EvidenceStore, *, scope: list[str], window: tu
             score, role = 0.2, f"It depends in turn on {', '.join(below)}, which is also unhealthy, so its trouble may be a consequence rather than the cause."
         else:
             score, role = (0.45 if down else 0.3), "Nothing it depends on is recorded as unhealthy, so the chain of failures appears to start here."
+        dependency_hypotheses[slug] = len(hypotheses)
         hypotheses.append(HypothesisOut(
             title=f"{'Failure' if down else 'Degradation'} of upstream dependency {slug}",
             description=f"{dep.summary} Failures there could surface as errors in the services that call it. {role}{via}",
@@ -332,6 +334,19 @@ def analyse(question: str, store: EvidenceStore, *, scope: list[str], window: tu
             continue
         callee, message = key.split("|", 1)
         score = 0.35 + (0.1 if errors_up else 0) + (0.05 if len(group) >= 4 else 0)
+        # Two independent sources agreeing: the traces fail in a service whose own dependency is
+        # recorded as unhealthy. That dependency is then the better-supported explanation, and
+        # the traces are evidence for it rather than a rival to it.
+        for dep in store.depends_on.get(service, []):
+            index = dependency_hypotheses.get(dep)
+            if index is None or store.depends_on.get(dep) and any(x in unhealthy for x in store.depends_on[dep]):
+                continue
+            h = hypotheses[index]
+            h.confidence = round(min(MAX_HEURISTIC_CONFIDENCE, h.confidence + 0.12), 2)
+            h.status = "likely" if h.confidence >= 0.55 else "possible"
+            h.evidence_refs = _unique(h.evidence_refs + [g.ref for g in group[:3]])
+            h.facts.append(f"In {len(group)} sampled traces the failure starts in {service}, which depends directly on {dep} ({', '.join(g.ref for g in group[:3])}).")
+            h.description += f" Sampled traces agree: requests fail in {service}, which calls {dep} directly."
         where = f"{service}'s calls to {callee}" if callee else service
         hypotheses.append(HypothesisOut(
             title=f"Requests are failing in {where}",
