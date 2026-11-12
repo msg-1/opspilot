@@ -231,7 +231,7 @@ async def test_deployment_context_fake_mirrors_the_real_api():
         assert body["previousSuccessful"]["version"] == "v2.7.4"
         assert body["rollbackTarget"] == {"deploymentId": "d11", "fromVersion": "v2.8.0", "toVersion": "v2.7.4", "previousDeployedAt": t(60 * 24 * 9)}
         assert body["errorLogs"] == {"windowMinutes": 24, "before": 3, "after": 590, "beforePerMinute": 0.1, "afterPerMinute": 24.58}
-        assert [c["sha"] for c in body["changes"]["commits"]] == ["1a2b3c4d5e6f"] and body["changes"]["pullRequests"][0]["number"] == 412
+        assert [c["sha"] for c in body["changes"]["commits"]] == ["abababababab"] and body["changes"]["pullRequests"][0]["number"] == 412
         assert [d["version"] for d in body["recentDeployments"]] == ["v2.8.0", "v2.7.5", "v2.7.4"]
         first = (await client.get("/deployment-context", params={"service": "checkout-api", "deploymentId": "d9"})).json()
         assert first["rollbackTarget"] is None and first["isLatest"] is False
