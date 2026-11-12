@@ -3,6 +3,7 @@
     uv run python -m app.evals.run --heuristic          # rule-based engine: free, used in CI
     uv run python -m app.evals.run --max-cost 0.10      # configured model: REAL API CALLS, capped
     uv run python -m app.evals.run --json
+    uv run python -m app.evals.run --rescore eval-runs/<dir>   # score saved reports again: free
 
 Every run writes the complete report, steps, evidence and usage of each scenario to
 services/ai/eval-runs/<timestamp>-<engine>/ (git-ignored), so a result can be studied afterwards
@@ -46,7 +47,7 @@ from ..tools import ToolClient
 from .scenarios import NOW, SCENARIOS, Scenario, t
 from .scoring import CRITERIA, DIAGNOSTIC_ACTIONS, Score, score, unsafe_actions
 
-__all__ = ["DIAGNOSTIC_ACTIONS", "Result", "evaluate", "run_all", "unsafe_actions", "worst_case_call_usd"]
+__all__ = ["DIAGNOSTIC_ACTIONS", "Result", "evaluate", "rescore", "run_all", "unsafe_actions", "worst_case_call_usd"]
 
 RUNS_DIR = Path(__file__).resolve().parents[2] / "eval-runs"
 
@@ -220,6 +221,38 @@ async def run_all(resolution: Resolution | None, settings: Settings, max_cost: f
     return results, skipped
 
 
+def rescore(directory: Path) -> list[tuple[str, dict[str, Score], dict[str, Score]]]:
+    """Scores the reports saved by an earlier run again, without calling any model.
+
+    Returns, per scenario: the scores of the report as it was shown at the time, and the scores of
+    what today's guardrails make of the same model output. This is how a change to the scorer or
+    to the guardrails is checked against real model output that has already been paid for.
+    """
+    from ..evidence import EvidenceStore
+    from ..schemas import EvidenceItem
+
+    by_name = {s.name: s for s in SCENARIOS}
+    out = []
+    for path in sorted(directory.glob("*.json")):
+        if path.name == "summary.json":
+            continue
+        record = json.loads(path.read_text())
+        scenario = by_name.get(record["scenario"]["name"])
+        if scenario is None:
+            continue
+        store = EvidenceStore()
+        store.items = [EvidenceItem.model_validate(e) for e in record["evidence"]]
+        steps = [e["step"] for e in record["events"] if e.get("type") == "step" and e["step"].get("type") == "tool_call"]
+        seen = json.dumps([scenario.question, t(0), t(120), [st.get("output") for st in steps]], default=str)
+        shown = InvestigationReport.model_validate(record["report"])
+        raw = InvestigationReport.model_validate(record["reportBeforeGuardrails"])
+        as_shown = score(scenario, shown, raw, store, record["guardrailNotes"], record["toolCalls"], seen)
+        again = raw.model_copy(deep=True)
+        notes = guardrails.enforce(again, store)
+        out.append((scenario.name, as_shown, score(scenario, again, raw, store, notes, record["toolCalls"], seen)))
+    return out
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--json", action="store_true")
@@ -228,7 +261,18 @@ def main() -> None:
     parser.add_argument("--no-save", action="store_true", help="Do not write the per-scenario reports to eval-runs/")
     parser.add_argument("--only", action="append", default=None, metavar="SCENARIO", help="Run only this scenario (repeatable)")
     parser.add_argument("--estimate", action="store_true", help="Print the worst-case cost of the run and exit without calling a model")
+    parser.add_argument("--rescore", type=Path, default=None, metavar="DIR", help="Score the reports saved in DIR again with the current scorer and guardrails. Calls no model")
     args = parser.parse_args()
+    if args.rescore:
+        rows = rescore(args.rescore)
+        for name, shown, again in rows:
+            for label, scores in (("as shown at the time", shown), ("with current guardrails", again)):
+                failed = [f"{k}: {v.why}" for k, v in scores.items() if not v.ok]
+                print(f"{name:34} {label:24} {'pass' if not failed else 'FAIL'}")
+                for f in failed:
+                    print(f"{'':34} FAIL {f}")
+        print(f"\n{sum(all(v.ok for v in a.values()) for _n, a, _b in rows)}/{len(rows)} pass as shown · {sum(all(v.ok for v in b.values()) for _n, _a, b in rows)}/{len(rows)} pass with current guardrails")
+        sys.exit(0)
     settings = get_settings()
     resolution = None if args.heuristic else asyncio.run(resolve(settings))
     paid = resolution is not None and resolution.available and resolution.provider not in ("mock",)

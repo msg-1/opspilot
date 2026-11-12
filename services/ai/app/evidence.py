@@ -101,7 +101,7 @@ class EvidenceStore:
         label = "Rollback" if d.get("isRollback") else "Deployment"
         return self.add(
             "deployment", f"{label} of {d.get('service')} {d.get('version')} ({str(d.get('status', '')).lower()})",
-            f"{d.get('description') or 'No description'} — by {d.get('deployedBy') or 'unknown'}, commit {str(d.get('commitSha') or 'n/a')[:10]}, "
+            f"{d.get('description') or 'No description'} — by {d.get('deployedBy') or 'unknown'}, commit {str(d.get('commitSha') or 'n/a')[:12]}, "
             f"environment {d.get('environment', 'production')}",
             source_type="deployment", source_id=d["id"], occurred_at=d.get("startedAt"), service=d.get("service"),
             data={k: d.get(k) for k in ("version", "status", "commitSha", "environment", "deployedBy", "isRollback", "startedAt")},

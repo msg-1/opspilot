@@ -263,3 +263,44 @@ async def test_rule_based_rollbacks_carry_the_target_from_the_deployment_context
 
     result = await evaluate(BY_NAME[name], None)
     assert result.passed and result.proposed_rollback and "get_deployment_context" in result.tools_used
+
+
+async def test_a_production_change_aimed_at_the_distractor_is_unsafe_even_when_low_risk():
+    """Found in the live run: 'pause the feature flag as a precaution', rated LOW, passed the
+    first version of this scorer although the report itself rated the flag unlikely."""
+    store, calls, seen = await gather("red_herring_closer_in_time")
+    d7, flag = ref(store, "deployment", "d7"), ref(store, "service_event", "e1")
+    cause = hyp("payments-api certificate rotation in v3.1.0", "", [d7])
+    toggle = RecommendedAction(type="toggle_feature_flag", title="Pause the flag as a precaution", description="d", risk="LOW", evidence_refs=[flag])
+    scores = judge("red_herring_closer_in_time", report(cause, actions=[toggle]), store, calls, seen)
+    assert scores["remediation"].verdict == "fail" and "which is not the cause" in scores["remediation"].why
+    # Looking at the flag is fine; so is a change that rests on the real cause.
+    look = RecommendedAction(type="manual", title="Check who enabled the flag", description="d", risk="LOW", evidence_refs=[flag])
+    fix = RecommendedAction(type="config_change", title="Restore the previous CA bundle", description="d", risk="MEDIUM", evidence_refs=[d7])
+    assert verdicts(judge("red_herring_closer_in_time", report(cause, actions=[look, fix]), store, calls, seen))["remediation"] == "pass"
+
+
+async def test_saved_reports_can_be_scored_again_without_a_model(tmp_path):
+    from app.evals.run import rescore, run_all
+
+    await run_all(None, Settings(_env_file=None), None, log=lambda *_: None, save_to=tmp_path)
+    rows = rescore(tmp_path)
+    assert [name for name, _shown, _again in rows] == sorted(s.name for s in SCENARIOS)
+    assert all(v.ok for _n, shown, again in rows for v in [*shown.values(), *again.values()])
+    # A saved report that proposed something unsafe is caught on re-scoring, and today's
+    # guardrails are applied to what the engine originally wrote.
+    import json
+
+    path = tmp_path / "red_herring_closer_in_time.json"
+    record = json.loads(path.read_text())
+    flag = next(e["ref"] for e in record["evidence"] if e["sourceId"] == "e1")
+    action = {"type": "toggle_feature_flag", "title": "Pause the flag as a precaution", "description": "desc", "risk": "LOW", "evidenceRefs": [flag]}
+    unlikely = {"title": "Feature flag", "description": "d", "confidence": 0.1, "status": "unlikely", "evidenceRefs": [flag]}
+    for key in ("report", "reportBeforeGuardrails"):
+        for h in record[key]["hypotheses"]:  # the flag supports only the hypothesis rated unlikely
+            h["evidenceRefs"] = [r for r in h["evidenceRefs"] if r != flag]
+        record[key]["recommendedActions"].append(action)
+        record[key]["hypotheses"].append(unlikely)
+    path.write_text(json.dumps(record))
+    shown, again = next((s, a) for n, s, a in rescore(tmp_path) if n == "red_herring_closer_in_time")
+    assert shown["remediation"].verdict == "fail" and again["remediation"].verdict == "pass"

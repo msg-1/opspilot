@@ -195,6 +195,44 @@ describe('investigations', () => {
     expect(analytics).toMatchObject({ total: 3, estimatedCostUsd: 0.0012, tokens: 6230 });
   });
 
+  it('does not offer a precautionary change against an unlikely cause, or a high-risk option beside a safer one', async () => {
+    // Both were produced by a real model in the live evaluation; the AI service repairs them,
+    // and the API repairs them again in case a report arrives that was not.
+    const org = await createOrg();
+    await createService(org.owner, 'Checkout');
+    ai.events = [
+      evidence('E1', 'deployment', 'Deployment of checkout v2'),
+      evidence('E2', 'log_pattern', '300× ERROR in checkout'),
+      evidence('E3', 'service_event', 'Flag new_receipt_email enabled'),
+      evidence('E4', 'knowledge_chunk', 'Runbook: cache flush'),
+      {
+        type: 'final',
+        report: report({
+          facts: [],
+          hypotheses: [
+            { title: 'Regression in v2', description: 'Pool size lowered.', confidence: 0.75, status: 'likely', evidenceRefs: ['E1', 'E2'], facts: [], assumptions: [], gaps: [] },
+            { title: 'The feature flag', description: 'Closer in time.', confidence: 0.1, status: 'unlikely', evidenceRefs: ['E3', 'E2'], facts: [], assumptions: [], gaps: [] },
+          ],
+          recommendedActions: [
+            { type: 'rollback_deployment', title: 'Roll back checkout to v1', description: 'Roll back to the previous version.', risk: 'MEDIUM', serviceSlug: 'checkout', parameters: { toVersion: 'v1' }, evidenceRefs: ['E1'] },
+            { type: 'toggle_feature_flag', title: 'Pause the flag as a precaution', description: 'Turn new_receipt_email off.', risk: 'LOW', serviceSlug: 'checkout', parameters: { featureFlag: 'new_receipt_email' }, evidenceRefs: ['E3', 'E2'] },
+            { type: 'run_runbook', title: 'Flush the cache', description: 'Flush every order key.', risk: 'HIGH', serviceSlug: 'checkout', evidenceRefs: ['E4', 'E2'] },
+          ],
+        }),
+      },
+    ];
+    const started = await org.owner.post('/api/v1/investigations').send({ question: 'Why is checkout failing today?' });
+    const inv = (await org.owner.get(`/api/v1/investigations/${started.body.id}`)).body;
+    expect(inv.status).toBe('COMPLETED');
+    expect(inv.report.recommendedActions.map((a: { type: string; title: string }) => `${a.type}: ${a.title}`)).toEqual(['rollback_deployment: Roll back checkout to v1', 'manual: Pause the flag as a precaution']);
+    expect(inv.report.recommendedActions[1].parameters ?? null).toBeNull();
+    expect(inv.report.nextSteps.at(-1)).toContain('Higher-risk alternative, only if the lower-risk action is not possible: Flush the cache');
+    expect(inv.remediations.map((r: { type: string }) => r.type).sort()).toEqual(['manual', 'rollback_deployment']);
+    const guardrail = inv.steps.find((s: { type: string }) => s.type === 'guardrail').detail;
+    expect(guardrail).toContain('rated unlikely');
+    expect(guardrail).toContain('moved to next steps');
+  });
+
   it('refuses new investigations once the organisation reaches its limits', async () => {
     const org = await createOrg();
     const other = await createOrg();

@@ -62,7 +62,7 @@ REPORT_INSTRUCTIONS = """Write the investigation report as structured output.
 - timeline: key events in chronological order with ISO timestamps taken from the evidence.
 - uncertainties: what you could not check or what the data does not show.
 - nextSteps: concrete checks for a human, most valuable first.
-- recommendedActions: 0 to 3 actions a human could approve. Use rollback_deployment only when a specific deployment is implicated: set deploymentId to the sourceId of that deployment's evidence item, toVersion to the version that was running before it (get_deployment_context gives both as rollbackTarget), and serviceSlug. Do not recommend a rollback you cannot give a target version for. For other action types leave deploymentId and toVersion as empty strings. Prefer the least risky action that would mitigate. Cite evidence for each.
+- recommendedActions: 0 to 3 actions a human could approve. Use rollback_deployment only when a specific deployment is implicated: set deploymentId to the sourceId of that deployment's evidence item, toVersion to the version that was running before it (get_deployment_context gives both as rollbackTarget), and serviceSlug. Do not recommend a rollback you cannot give a target version for. For other action types leave deploymentId and toVersion as empty strings. Prefer the least risky action that would mitigate. Recommend a production change only for your leading hypothesis: do not propose one as a precaution against a cause you rate unlikely, and do not add a high-risk alternative when a lower-risk action would mitigate. Describe such options in nextSteps instead. Cite evidence for each.
 
 Use only evidence references from the catalogue below."""
 

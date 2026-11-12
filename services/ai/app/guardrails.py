@@ -37,6 +37,10 @@ def wrap_untrusted(label: str, content: str) -> str:
     return f"<{label}>\n{content.replace(f'</{label}>', '')}\n</{label}>"
 
 
+# Action types that do not themselves change production.
+READ_ONLY_ACTIONS = {"manual", "run_runbook"}
+
+
 def enforce(report: InvestigationReport, store: EvidenceStore) -> list[str]:
     """Mutates the report so that it only claims what the evidence supports. Returns notes on what changed."""
     known = store.refs()
@@ -86,6 +90,26 @@ def enforce(report: InvestigationReport, store: EvidenceStore) -> list[str]:
             notes.append(f'Action "{a.title[:60]}" proposed a rollback without citing a deployment: downgraded to a manual action.')
             a.type = "manual"
             a.parameters = None
+    # A production change must serve an explanation the report believes in. An action whose
+    # cited evidence supports only hypotheses rated unlikely ("turn the flag off as a precaution")
+    # is kept as something for a human to consider, not offered for approval as a change.
+    held: set[str] = set()
+    doubted: set[str] = set()
+    for i, h in enumerate(report.hypotheses):
+        (doubted if h.status == "unlikely" and i > 0 else held).update(h.evidence_refs)
+    doubted -= held
+    for a in report.recommended_actions:
+        if a.type not in READ_ONLY_ACTIONS and set(a.evidence_refs) & doubted:
+            notes.append(f'Action "{a.title[:60]}" would change production on the strength of a hypothesis rated unlikely: downgraded to a manual action.')
+            a.type = "manual"
+            a.parameters = None
+    # A high-risk option is not put forward next to a safer one that addresses the problem: it
+    # moves to the next steps, where a human can still weigh it.
+    if any(a.risk != "HIGH" for a in report.recommended_actions):
+        for a in [a for a in report.recommended_actions if a.risk == "HIGH"]:
+            notes.append(f'High-risk action "{a.title[:60]}" moved to next steps: a lower-risk action is proposed.')
+            report.next_steps.append(f"Higher-risk alternative, only if the lower-risk action is not possible: {a.title}. {a.description}"[:600])
+            report.recommended_actions.remove(a)
     report.recommended_actions = report.recommended_actions[:4]
 
     ceiling = max((h.confidence for h in report.hypotheses), default=0.2)

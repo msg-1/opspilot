@@ -208,11 +208,16 @@ export async function runInvestigation(investigationId: string) {
   }
 }
 
+/** Action types that do not themselves change production. */
+const READ_ONLY_ACTIONS = new Set<string>(['manual', 'run_runbook']);
+
 /**
  * Server-side guardrails, applied regardless of what the model produced:
  *  - every evidence reference must point at evidence that was actually collected;
  *  - a hypothesis with no supporting evidence cannot be rated "likely" and its confidence is capped;
- *  - overall confidence cannot exceed the best-supported hypothesis.
+ *  - overall confidence cannot exceed the best-supported hypothesis;
+ *  - a production change resting on a hypothesis rated unlikely becomes a manual action;
+ *  - a high-risk action offered next to a safer one moves to the next steps.
  */
 async function applyGuardrails(
   report: InvestigationReport,
@@ -255,6 +260,27 @@ async function applyGuardrails(
     recommendedActions: report.recommendedActions.map((a) => ({ ...a, evidenceRefs: clean(a.evidenceRefs, `action "${a.title}"`) })),
   };
   result.assumptions = report.assumptions;
+
+  // The same two rules as services/ai/app/guardrails.py, applied again here.
+  // 1. A production change must not rest on a hypothesis the report itself rates unlikely.
+  const held = new Set<string>();
+  const doubted = new Set<string>();
+  result.hypotheses.forEach((h, i) => h.evidenceRefs.forEach((r) => (h.status === 'unlikely' && i > 0 ? doubted : held).add(r)));
+  held.forEach((r) => doubted.delete(r));
+  result.recommendedActions = result.recommendedActions.map((a) => {
+    if (READ_ONLY_ACTIONS.has(a.type) || !a.evidenceRefs.some((r) => doubted.has(r))) return a;
+    notes.push(`Action "${a.title.slice(0, 60)}" would change production on the strength of a hypothesis rated unlikely: downgraded to a manual action.`);
+    return { ...a, type: 'manual' as const, parameters: null };
+  });
+  // 2. A high-risk option is not offered next to a safer one: it moves to the next steps.
+  if (result.recommendedActions.some((a) => a.risk !== 'HIGH')) {
+    const risky = result.recommendedActions.filter((a) => a.risk === 'HIGH');
+    for (const a of risky) {
+      notes.push(`High-risk action "${a.title.slice(0, 60)}" moved to next steps: a lower-risk action is proposed.`);
+      result.nextSteps = [...result.nextSteps, `Higher-risk alternative, only if the lower-risk action is not possible: ${a.title}. ${a.description}`.slice(0, 600)];
+    }
+    result.recommendedActions = result.recommendedActions.filter((a) => a.risk !== 'HIGH');
+  }
   if (notes.length) await addStep({ type: 'guardrail', title: 'Output guardrails adjusted the report', detail: [...new Set(notes)].join('\n') });
   return result;
 }

@@ -246,7 +246,7 @@ SCENARIOS: list[Scenario] = [
         expect=Expectation(healthy=True, max_confidence=0.25),
         services=[svc("billing-service")],
         anomalies=[pattern("f3", "billing-service", "invoice email retry scheduled attempt=<n>", 6, 90, level="WARN")],
-        deployments=[deployment("d5", "billing-service", "v2.0.0", 100, "dddddddddddd4444", "Routine release")],
+        deployments=[deployment("d5", "billing-service", "v2.0.0", 60 * 24 * 7, "dddddddddddd4444", "Routine release")],
     ),
     Scenario(
         name="red_herring_closer_in_time",
@@ -276,6 +276,7 @@ SCENARIOS: list[Scenario] = [
         expect=Expectation(max_confidence=0.5, must_acknowledge=[["deployment"], ["code change"], ["commit"], ["pull request"]]),
         services=[svc("orders-api", [], "DEGRADED")],
         anomalies=[pattern("f1", "orders-api", "failed to deserialize cache entry for key order:<n>: unexpected schema version", 420, 30)],
+        logs=[_log("l1", "orders-api", "failed to deserialize cache entry for key order:8812: unexpected schema version 3", 20)],
         metrics={"orders-api": [metric("error_rate", "Error rate", "%", 12.0, 0.4)]},
         fail_paths=["/deployments", "/code-changes"],
     ),
