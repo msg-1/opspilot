@@ -18,6 +18,13 @@ const schema = z.object({
   INTERNAL_SERVICE_TOKEN: z.string().min(32, 'INTERNAL_SERVICE_TOKEN must be at least 32 characters'),
   ENCRYPTION_KEY: z.string().regex(/^[0-9a-fA-F]{64}$/, 'ENCRYPTION_KEY must be 64 hex characters'),
   COOKIE_SECURE: bool,
+  // Express "trust proxy" setting: false | true | hop count | loopback | uniquelocal | CIDR list.
+  // Only set it when a reverse proxy you control sits in front of the API.
+  TRUST_PROXY: z.string().default('false'),
+  // Port for the worker's /health and /metrics endpoint
+  WORKER_PORT: z.coerce.number().int().default(9464),
+  // Allow remediation webhooks to target private or loopback addresses (local development only)
+  REMEDIATION_WEBHOOK_ALLOW_PRIVATE: bool,
   GITHUB_TOKEN: z.string().optional().default(''),
   GITHUB_WEBHOOK_SECRET: z.string().optional().default(''),
   LOG_LEVEL: z.string().default('info'),
@@ -36,5 +43,18 @@ if (!parsed.success) {
 }
 
 export const env = parsed.data;
+
+// The placeholders shipped in .env.example are public knowledge. They are tolerated for
+// local development only; anything else must use real secrets.
+if (env.NODE_ENV === 'production') {
+  const placeholders = [
+    ['JWT_SECRET', env.JWT_SECRET.startsWith('dev-only-change-me')],
+    ['INTERNAL_SERVICE_TOKEN', env.INTERNAL_SERVICE_TOKEN.startsWith('dev-only-change-me')],
+    ['ENCRYPTION_KEY', /^0+$/.test(env.ENCRYPTION_KEY)],
+  ].filter(([, bad]) => bad);
+  if (placeholders.length) {
+    throw new Error(`Refusing to start in production with placeholder secrets: ${placeholders.map(([name]) => name).join(', ')}. Generate real values (openssl rand -hex 32).`);
+  }
+}
 export const isProd = env.NODE_ENV === 'production';
 export const isTest = env.NODE_ENV === 'test';

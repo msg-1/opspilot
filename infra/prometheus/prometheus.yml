@@ -18,3 +18,10 @@ scrape_configs:
         labels: { run: host }
       - targets: ["ai:8000"]
         labels: { run: compose }
+  - job_name: opspilot-worker
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["host.docker.internal:9464"]
+        labels: { run: host }
+      - targets: ["worker:9464"]
+        labels: { run: compose }
