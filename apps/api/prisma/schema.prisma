@@ -667,6 +667,8 @@ model Investigation {
   report         Json?
   summary        String?
   confidence     Float?
+  // HEALTHY | DEGRADED | INCIDENT | UNDETERMINED: whether the evidence shows a fault at all
+  outcome        String?
   error          String?
   timeWindowStart DateTime?
   timeWindowEnd   DateTime?
@@ -802,6 +804,12 @@ model RemediationAction {
   requestedById   String?
   requestedAt     DateTime?
   requiredApprovals Int             @default(1)
+  // read_only | state_changing, decided from the type and the text (src/lib/actionEffect.ts)
+  effect          String            @default("state_changing")
+  effectReasons   Json?
+  // Hash of what was submitted for approval. Approvals carry the hash they were given for.
+  contentHash     String?
+  attempts        Int               @default(0)
   executedById    String?
   executedAt      DateTime?
   executionResult Json?
@@ -823,9 +831,14 @@ model Approval {
   approverId String
   decision   String // approved | rejected
   comment    String?
+  // Hash of the action content this decision was made on. A decision counts only while the
+  // action still has this content.
+  contentHash String?
+  // Set when the action was edited afterwards: the decision is kept for the record and no longer counts.
+  supersededAt DateTime?
   createdAt  DateTime @default(now())
 
   action RemediationAction @relation(fields: [actionId], references: [id], onDelete: Cascade)
 
-  @@unique([actionId, approverId])
+  @@index([actionId])
 }

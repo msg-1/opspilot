@@ -25,6 +25,10 @@ const schema = z.object({
   WORKER_PORT: z.coerce.number().int().default(9464),
   // Allow remediation webhooks to target private or loopback addresses (local development only)
   REMEDIATION_WEBHOOK_ALLOW_PRIVATE: bool,
+  // How long to wait for the remediation webhook before the outcome is recorded as unknown
+  REMEDIATION_WEBHOOK_TIMEOUT_MS: z.coerce.number().int().min(100).max(300_000).default(30_000),
+  // Base URL of a Jaeger-compatible trace query API (e.g. http://localhost:16686). Empty: no trace store
+  TRACES_URL: z.string().optional().default(''),
   GITHUB_TOKEN: z.string().optional().default(''),
   GITHUB_WEBHOOK_SECRET: z.string().optional().default(''),
   LOG_LEVEL: z.string().default('info'),

@@ -1,3 +1,4 @@
+import { runbookPlan } from '../lib/actionEffect';
 import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { Router } from 'express';
@@ -221,6 +222,28 @@ knowledgeRouter.get('/documents/:id', requirePermission('read'), async (req, res
   });
   if (!doc) throw notFound('Document');
   res.json(doc);
+});
+
+/**
+ * The runbook as an execution plan: its steps, each labelled read-only or state-changing by
+ * what it would do. Reading and explaining a runbook is always allowed; this shows which of its
+ * steps would need approval if someone proposed to carry them out.
+ */
+knowledgeRouter.get('/documents/:id/plan', requirePermission('read'), async (req, res) => {
+  const { organizationId } = authOf(req);
+  const doc = await prisma.knowledgeDocument.findFirst({ where: { id: param(req.params.id), organizationId }, select: { id: true, title: true, type: true, content: true } });
+  if (!doc) throw notFound('Document');
+  const plan = runbookPlan(doc.content);
+  res.json({
+    documentId: doc.id,
+    title: doc.title,
+    type: doc.type,
+    ...plan,
+    readOnly: plan.steps.length - plan.stateChanging,
+    note: plan.steps.length
+      ? 'Steps are classified from their text. Anything that is not clearly a check is treated as state-changing. Nothing is executed by OpsPilot.'
+      : 'No list items or numbered steps were found, so the document cannot be shown to be harmless and is treated as state-changing.',
+  });
 });
 
 knowledgeRouter.patch('/documents/:id', requirePermission('knowledge:write'), async (req, res) => {

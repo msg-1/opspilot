@@ -41,7 +41,7 @@ export async function reapStranded(now = new Date()) {
   const unknown = 'Execution was interrupted and its outcome is unknown. Check the target system before retrying: the change may or may not have been applied.';
   const actions = await prisma.remediationAction.findMany({ where: { status: 'EXECUTING', updatedAt: { lt: before(STALE.executingRemediation) } }, select: { id: true, organizationId: true, incidentId: true, title: true } });
   for (const action of actions) {
-    const claimed = await prisma.remediationAction.updateMany({ where: { id: action.id, status: 'EXECUTING' }, data: { status: 'FAILED', executedAt: now, executionResult: { mode: 'unknown', success: false, summary: unknown } } });
+    const claimed = await prisma.remediationAction.updateMany({ where: { id: action.id, status: 'EXECUTING' }, data: { status: 'FAILED', executedAt: now, executionResult: { mode: 'unknown', success: false, outcome: 'unknown', summary: unknown } } });
     if (!claimed.count) continue;
     await writeAudit({ organizationId: action.organizationId, actorType: 'system', actorLabel: 'OpsPilot worker', action: 'remediation.execute_interrupted', resourceType: 'remediation_action', resourceId: action.id });
     if (action.incidentId) await addIncidentEvent(action.incidentId, 'remediation', `Remediation outcome unknown: ${action.title} — ${unknown}`, { kind: 'system', label: 'OpsPilot worker' }, { actionId: action.id });
