@@ -56,11 +56,11 @@ Step-by-step setup, costs, spending limits and troubleshooting: [docs/claude-int
 - **Real:** everything in the product path — auth, RBAC, multi-tenancy, ingestion, log analysis, alerting, RAG with pgvector, the LangGraph agent, guardrails, the approval workflow, audit trail, GitHub REST sync and signed webhooks, the MCP server.
 - **Demo data:** the seeded organisation, including its "sample" repositories, is fictional and labelled as sample data in the UI.
 - **Not connected to your infrastructure:** OpsPilot never changes production itself. An approved action is either sent to a webhook you configure, or carried out by an operator who confirms it in OpsPilot.
-- **Not yet run live:** the Claude provider is tested against a mocked Anthropic API (requests, tool loop, errors, limits) but has not made a real API call, because no key has been configured. `docs/claude-integration.md` has the live-check steps.
+- **Verified live:** Claude (`claude-haiku-5-5`) has run a real investigation on the demo incident end to end; results are in [docs/claude-live-verification.md](docs/claude-live-verification.md). Sonnet and Opus are configured the same way but have not been exercised.
 
 ## Documentation
 
-- [Claude integration](docs/claude-integration.md) · [Setup guide](docs/setup-guide.md) · [Architecture](docs/architecture.md) · [API](docs/api-documentation.md) · [Database](docs/database-design.md)
+- [Claude integration](docs/claude-integration.md) · [Live verification](docs/claude-live-verification.md) · [Setup guide](docs/setup-guide.md) · [Architecture](docs/architecture.md) · [API](docs/api-documentation.md) · [Database](docs/database-design.md)
 - [Engineering audit](docs/engineering-audit.md) · [Changelog](CHANGELOG.md)
 - [Decisions](docs/decisions.md) · [Roadmap](docs/roadmap.md) · [Backlog](docs/feature-backlog.md) · [Learning log](docs/learning-log.md)
 

@@ -2,7 +2,7 @@
 
 **Date:** 12 November 2026 · **Scope:** `develop` as of the first audit pass (commit hashes changed afterwards when attribution trailers were removed from history; content is identical) · **Standard:** readiness for a first serious beta
 
-> **Current status:** every Critical and High finding is closed except the live-model verification in H7, which needs an API key. See [Final status of every finding](#final-status-of-every-finding).
+> **Current status:** every Critical and High finding is closed. H7 was verified against the live Anthropic API on 12 November 2026; see [claude-live-verification.md](claude-live-verification.md). See [Final status of every finding](#final-status-of-every-finding).
 
 This audit was done by probing the running system and reading the code for faults, not by re-running the test suite. Each finding lists the evidence that was actually observed. Secrets are not reproduced here.
 
@@ -235,7 +235,7 @@ Second pass, same day. "Verified" names how the fix was checked; nothing is mark
 | H4 | Hang when Redis is down | Fixed | Live: 503 in 3 s |
 | H5 | Stranded work | Fixed | 1 test |
 | H6 | No restart after crash | Fixed | Live: processes ended inside containers restarted |
-| H7 | Model path unverified | **Open: needs an API key.** Defect fixed; provider rebuilt and tested against a mocked Anthropic API (13 tests) | Request and response handling, tool loop, caching, errors, limits: mocked. Live inference: not yet run |
+| H7 | Model path unverified | Fixed and verified live with `claude-haiku-5-5` | Live key check, live inference, and a real investigation written by Claude with every citation resolving to stored records. The live run exposed a second defect (report schema rejected as too large), which was fixed and re-verified. Sonnet, Opus and the evaluation set have not been run live |
 | H8 | Vulnerable dependencies | Fixed | `npm audit`: 0 critical, 0 high (11 moderate remain, all in development tooling and OpenTelemetry). `pip-audit`: clean. CI gate raised to high |
 | M1 | Tokens valid after sign-out | Fixed | Live: bearer token 200 before sign-out, 401 after; 1 test |
 | M2 | 500 on bad filters | Fixed | Live; 1 test |
@@ -286,7 +286,7 @@ Second pass, same day. "Verified" names how the fix was checked; nothing is mark
 
 ### Open items, in order
 
-1. **H7:** run the live check and a real investigation once an API key is configured, then run the evaluations against the model.
+1. Run the evaluation scenarios against the live model and compare effort levels (an extension of H7, which is closed).
 2. **M11:** a test through real BullMQ; team and settings routes; page-level web tests.
 3. **M13, M20:** scaling work, when data volume or a second API instance calls for it.
 4. **M14:** split the larger modules as they are next touched.

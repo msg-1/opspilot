@@ -123,7 +123,9 @@ Lets Claude Desktop, Claude Code or another MCP client query OpsPilot read-only.
 npm test                 # API: 48 integration tests on database opspilot_test · web: 11 tests
 npm run test:ai          # 39 tests, all against mocked model APIs
 npm run evals -- --heuristic
-npm run db:seed && npm run test:e2e   # 9 browser tests; needs the stack running
+npm run db:seed && npm run test:e2e   # 9 browser tests; needs the stack running on the deterministic engine:
+                                      #   AI_PROVIDER=deterministic docker compose --profile app up -d ai
+                                      # (they skip themselves if a paid model is active)
 ```
 
 `opspilot_test` is created by `infra/postgres/init.sql` the first time the Postgres volume is created. If your volume predates that: `docker exec opspilot-postgres-1 psql -U opspilot -d opspilot -c 'CREATE DATABASE opspilot_test'`.
