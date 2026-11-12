@@ -36,7 +36,7 @@ docker compose --profile app up -d --build
 | http://localhost:4000 | API (`/health`, `/ready`, `/metrics`) |
 | http://localhost:8000 | AI service (`/health`, `/metrics`) |
 
-The `migrate` container applies migrations and seeds demo data if the database is empty. Stop with `docker compose --profile app down` (add `-v` to also delete the database volume).
+The `migrate` container applies migrations and seeds demo data if the database is empty (set `SEED_DEMO_DATA=false` to skip the demo data). Stop with `docker compose --profile app down` (add `-v` to also delete the database volume).
 
 ## 2b. Run on the host (development)
 
@@ -68,7 +68,7 @@ All use the password `OpsPilot-demo-1`. These exist only in seeded demo data.
 
 ## 4. AI providers
 
-`LLM_PROVIDER=auto` (default) picks, in order: Anthropic if `ANTHROPIC_API_KEY` is set, OpenAI if `OPENAI_API_KEY` is set, a local Ollama if it is running and has `OLLAMA_MODEL`, otherwise the rule-based engine. Settings → System shows which one is active. Set `LLM_PROVIDER=none` to force the rule-based engine.
+`AI_PROVIDER=auto` (default) picks, in order: Claude if `ANTHROPIC_API_KEY` is set, OpenAI if `OPENAI_API_KEY` is set, a local Ollama if it is running and has `OLLAMA_MODEL`, otherwise the rule-based engine. Settings → System shows which one is active and can check the key without spending credit. Set `AI_PROVIDER=deterministic` to force the rule-based engine, or `mock` to exercise the model code path with canned output. Full instructions for Claude, including cost controls: [claude-integration.md](claude-integration.md).
 
 Embeddings follow `EMBEDDING_PROVIDER` the same way (OpenAI, then Ollama `nomic-embed-text`, then built-in local embeddings). All produce 768-dimension vectors. After changing the embedding provider, use Knowledge base → **Reindex all**: documents embedded with a different model are only matched by keyword until then.
 
@@ -120,8 +120,8 @@ Lets Claude Desktop, Claude Code or another MCP client query OpsPilot read-only.
 ## 9. Tests
 
 ```bash
-npm test                 # API: 39 integration tests on database opspilot_test · web: 10 tests
-npm run test:ai          # 25 tests
+npm test                 # API: 48 integration tests on database opspilot_test · web: 11 tests
+npm run test:ai          # 39 tests, all against mocked model APIs
 npm run evals -- --heuristic
 npm run db:seed && npm run test:e2e   # 9 browser tests; needs the stack running
 ```
@@ -138,3 +138,5 @@ npm run db:seed && npm run test:e2e   # 9 browser tests; needs the stack running
 | Knowledge documents show "Keyword search only" | They were added while the AI service was down; Reindex all |
 | All services show "No data" | No metrics in the last 15 minutes; run the simulator or send metrics |
 | `prisma migrate dev` wants to drop an index | Expected; see the migration rule in CLAUDE.md |
+| Signed out unexpectedly after changing a password elsewhere | Intended: a password change ends every other session |
+| "Cross-origin request refused" | A browser sent a write from an origin other than `WEB_ORIGIN`; set `WEB_ORIGIN` to the address you open the app at |

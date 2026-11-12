@@ -14,7 +14,7 @@ Status as of 12 November 2026. "Verified" means exercised by automated tests or 
 | M6 | Redis, BullMQ, background jobs | Done | Ran with a real worker and Redis; tests run jobs inline |
 | M7 | Auth, RBAC, multi-tenancy | Done | API integration tests (isolation, scopes, token rotation) |
 | M8 | Python FastAPI AI service | Done | 23 tests; ran on host and in Docker |
-| M9 | LLM integration, structured output, tool calling | Built, **not run against a live model** | Unit tests with scripted model responses and a fake Anthropic client |
+| M9 | LLM integration, structured output, tool calling | Built, **not yet run against a live model** | 13 provider tests against a mocked Anthropic API covering requests, tool loop, caching, usage, errors and limits. Live check waits for an API key |
 | M10 | RAG, embeddings, pgvector | Done | Tests against real pgvector; ran with local embeddings |
 | M11 | LangGraph investigation agent | Done | Evals 5/5 (rule-based engine); end-to-end through queue and worker |
 | M12 | MCP server | Done | Tool listing and a tool call tested in-process. **Not connected to a real MCP client** |
@@ -27,15 +27,15 @@ Status as of 12 November 2026. "Verified" means exercised by automated tests or 
 
 | Suite | Count | Scope |
 |---|---|---|
-| API integration (Vitest + Supertest) | 28 | HTTP → PostgreSQL, all modules |
-| AI service (pytest) | 23 | Agent graph, guardrails, providers, embeddings, HTTP API, MCP |
-| Web (Vitest + Testing Library) | 10 | API client, formatting, accessible components |
+| API integration (Vitest + Supertest) | 48 | HTTP → PostgreSQL, all modules |
+| AI service (pytest, mocked model APIs) | 39 | Agent graph, guardrails, providers, embeddings, HTTP API, MCP |
+| Web (Vitest + Testing Library) | 11 | API client, formatting, accessible components |
 | End-to-end (Playwright) | 9 | Sign-in, incident, investigation, approval, RBAC, logs, knowledge, audit, mobile layout |
 | Agent evaluations | 5 scenarios | Correct cause, calibration, grounding, safe action, no false blame |
 
 ## Needs the owner's input
 
-1. **An LLM credential** (Anthropic, OpenAI) or a local Ollama model, to run and tune model-driven investigations and to run the evals against a model.
+1. **An Anthropic API key in the local `.env`** (steps in claude-integration.md), to run the live check, a real investigation, and the evaluations against the model.
 2. **A GitHub token**, to verify the integration against real repositories.
 3. **A decision on a remote repository** (GitHub, private?) so branches can be pushed and CI can run.
 4. **Promotion of `develop` to `main`** once you have reviewed the result.

@@ -33,7 +33,8 @@ cd services/ai && uv run ruff check .
 - **Next.js page files** may only export the page component. Shared components go in `src/components`.
 - **Audit:** mutating routes call `audit(req, action, resourceType, id, metadata)`. Never put secrets in metadata.
 - **Pinned majors:** TypeScript 5.9, Prisma 6, Next 15, Zod 3, Vitest 3 (see docs/decisions.md). Do not bump majors casually.
-- **Claude API:** the Anthropic provider (`services/ai/app/llm.py`) uses the official SDK with adaptive thinking (no `thinking`/`temperature`/`budget_tokens`, no forced `tool_choice`), `output_config.effort`, and `messages.parse` for structured output.
+- **Claude API:** the Anthropic provider (`services/ai/app/llm.py`) uses the official SDK with adaptive thinking (no `thinking`/`temperature`/`budget_tokens`, no forced `tool_choice`), `output_config.effort`, prompt caching on the tool loop, and `messages.parse` for structured output. Model, limits and prices come from configuration (`config.py`), never from literals in the code. Provider tests use a mocked API (`tests/test_claude_provider.py`); never add a test that calls the real API. Never print, log or return an API key.
+- **Engine labelling:** `analysisMode` (`llm` | `mock` | `heuristic`) must be carried through to the UI. Mock or rule-based output is never presented as model output.
 
 ## Git workflow
 

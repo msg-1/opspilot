@@ -4,6 +4,29 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Added
+- Claude provider: configurable model (default `claude-haiku-5-5`), prompt caching, bounded retries, timeouts, clear handling of rejected keys, exhausted credit, unknown models and rate limits.
+- Spending controls: per-investigation cost and token limits, per-organisation concurrency, daily count and daily cost limits.
+- Usage recorded per investigation: model, calls, tokens, cache use, latency, estimated cost; shown in the interface and in analytics.
+- Engine label on every investigation: real model, mock or rule-based.
+- Evidence against each hypothesis in reports.
+- Mock provider (`AI_PROVIDER=mock`), free key-and-model check, live-check command.
+- Web error boundary and not-found page; `SEED_DEMO_DATA` switch.
+
+### Security
+- Zod 4.6.7; patched `deepmerge-ts` and `postcss`: no high or critical advisories remain.
+- Access tokens are revoked with their session; cookie-authenticated writes require the web origin; the agent's token works only while its investigation runs.
+- Remediation risk has a floor by action type and service tier.
+- Failed sign-ins are audited; retrieved records are marked as untrusted data for the model.
+
+### Fixed
+- Database outages return 503 with Retry-After instead of 500.
+- AI service logs are valid JSON.
+
+### Changed
+- `AI_PROVIDER` replaces `LLM_PROVIDER` (still read).
+- Commit history rewritten once to remove attribution trailers; content unchanged.
+
 ## [0.1.0] - not yet released
 
 First release candidate. Prepared on `release/0.1.0`; awaiting approval to merge into `main`.

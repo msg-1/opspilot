@@ -1,6 +1,8 @@
 # Engineering audit
 
-**Date:** 12 November 2026 · **Scope:** `develop` at `eb8c840` · **Standard:** readiness for a first serious beta
+**Date:** 12 November 2026 · **Scope:** `develop` as of the first audit pass (commit hashes changed afterwards when attribution trailers were removed from history; content is identical) · **Standard:** readiness for a first serious beta
+
+> **Current status:** every Critical and High finding is closed except the live-model verification in H7, which needs an API key. See [Final status of every finding](#final-status-of-every-finding).
 
 This audit was done by probing the running system and reading the code for faults, not by re-running the test suite. Each finding lists the evidence that was actually observed. Secrets are not reproduced here.
 
@@ -220,6 +222,72 @@ These should be scheduled as their own `feature/` branches, one major at a time,
 | Browser end-to-end | 9 | 9 |
 | Agent evaluations | 5/5 | 5/5 |
 
-### Still open
+## Final status of every finding
 
-All remaining Medium and Low findings, in the order given in the remediation plan. The most valuable next items are M1 (token revocation), M8 (marking tool output as untrusted for the model), M12 (503 during database outages), M15 (error boundary) and the test gaps in M11.
+Second pass, same day. "Verified" names how the fix was checked; nothing is marked fixed on the strength of a code change alone.
+
+| # | Finding | Status | Verified by |
+|---|---|---|---|
+| C1 | Data stores exposed on the network | Fixed | Live: 0 ports on all interfaces |
+| H1 | Fallback secrets | Fixed | Live: Compose refuses to start; 3 tests |
+| H2 | Rate-limit bypass | Fixed | Live probe; 3 tests |
+| H3 | Webhook request forgery | Fixed | 2 tests |
+| H4 | Hang when Redis is down | Fixed | Live: 503 in 3 s |
+| H5 | Stranded work | Fixed | 1 test |
+| H6 | No restart after crash | Fixed | Live: processes ended inside containers restarted |
+| H7 | Model path unverified | **Open: needs an API key.** Defect fixed; provider rebuilt and tested against a mocked Anthropic API (13 tests) | Request and response handling, tool loop, caching, errors, limits: mocked. Live inference: not yet run |
+| H8 | Vulnerable dependencies | Fixed | `npm audit`: 0 critical, 0 high (11 moderate remain, all in development tooling and OpenTelemetry). `pip-audit`: clean. CI gate raised to high |
+| M1 | Tokens valid after sign-out | Fixed | Live: bearer token 200 before sign-out, 401 after; 1 test |
+| M2 | 500 on bad filters | Fixed | Live; 1 test |
+| M3 | Unsafe link schemes | Fixed | Live; 1 test |
+| M4 | CSV formula injection | Fixed | 1 test |
+| M5 | Worker metrics not scraped | Fixed | Live: series present in Prometheus |
+| M6 | AI logs not valid JSON | Fixed | Formatter test with quotes and a key-like string; HTTP client loggers lowered to WARNING |
+| M7 | Proposer chooses the risk | Fixed (floor by action type and service tier) | 1 test. Approvers still cannot raise risk themselves |
+| M8 | Tool output unmarked for the model | Fixed | Every tool result carries a data-only notice; instruction-like text is flagged in the steps; asserted in the provider test |
+| M9 | No spending limits or cost | Fixed | Per-investigation cost and token limits; per-organisation concurrency, daily count and daily cost limits; cost estimated and stored. 3 tests |
+| M10 | Contract duplicated without a test | Fixed | A fixture written by the AI service tests is parsed by the API tests. Web types are still hand-written |
+| M11 | Test gaps | Partly | Added: contract test, provider tests, browser tests in CI workflow. Still missing: a test through real BullMQ, team and settings route tests, page-level web tests |
+| M12 | Database outage returns 500 | Fixed | 1 test (503 with Retry-After) |
+| M13 | Queries that will not scale | Open | Not needed at current data sizes; listed in the backlog |
+| M14 | Module structure | Open | Deliberately not refactored during hardening |
+| M15 | No error boundary | Fixed | `error.tsx` and `not-found.tsx`; build passes |
+| M16 | Open operational endpoints | Accepted for local use | Everything is loopback-only (C1). Must be restricted before any shared deployment |
+| M17 | Demo data seeded automatically | Fixed | `SEED_DEMO_DATA=false` skips it |
+| M18 | Failed sign-ins not audited | Fixed (audit writes remain best-effort) | 1 test |
+| M19 | CSRF relies on SameSite only | Fixed | Live: write from another origin 403, from the web origin 201; 1 test |
+| M20 | Rate limits per process | Open | Only matters with more than one API instance |
+| L1 | Login timing | Fixed | Dummy hash generated at the configured cost |
+| L2 | JWT algorithm not pinned | Fixed | HS256 pinned on every verification |
+| L3 | Card redaction over-matches | Open | |
+| L4 | Account enumeration on register and invite | Open | Needs email verification to fix properly |
+| L5 | Tool token outlives its investigation | Fixed | Test: 200 while running, 401 after completion |
+| L6 | No encryption key rotation | Open | |
+| L7 | Clients created per call | Open | |
+| L8 | No shared request id | Open | |
+| L9 | Vector search recall with many tenants | Open | |
+| L10 | Any engineer can cancel an approved action | Open | |
+| L11 | Insecure cookies in Compose | Accepted for http://localhost | Set `COOKIE_SECURE=true` behind TLS |
+
+### How the dependency advisories were closed
+
+- **Zod:** upgraded to 4.6.7. Three breaking changes were handled (explicit key schema for records, `prefault` for defaults on transformed values, readonly enum lists).
+- **Prisma and Next:** the vulnerable code is in two exactly-pinned transitive packages (`deepmerge-ts` in Prisma's CLI configuration loader, `postcss` in Next). Neither framework has a patched release on its current major. Instead of moving two frameworks a major version for a transitive fix, npm `overrides` pin `deepmerge-ts` 8.0.2 and `postcss` 8.5.32. Verified with the patched packages installed: `prisma generate`, `migrate deploy` on an empty database, both test suites, the production build, the Docker build and the browser suite. Moving to Prisma 7 and Next 16 remains worthwhile, but it is now a planned upgrade, not a security fix.
+
+### Test totals
+
+| Suite | First audit | After first fixes | Now |
+|---|---|---|---|
+| API integration | 28 | 39 | 48 |
+| AI service (all against mocked APIs) | 23 | 25 | 39 |
+| Web unit | 10 | 10 | 11 |
+| Browser end-to-end | 9 | 9 | 9 |
+| Agent evaluations | 5/5 | 5/5 | 5/5 |
+
+### Open items, in order
+
+1. **H7:** run the live check and a real investigation once an API key is configured, then run the evaluations against the model.
+2. **M11:** a test through real BullMQ; team and settings routes; page-level web tests.
+3. **M13, M20:** scaling work, when data volume or a second API instance calls for it.
+4. **M14:** split the larger modules as they are next touched.
+5. The Low items.
