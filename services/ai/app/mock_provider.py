@@ -63,7 +63,7 @@ class MockProvider(LLMProvider):
         refs = list(dict.fromkeys(re.findall(r'"ref":\s?"(E\d+)"', text)))[:3]
         return LLMReport(  # type: ignore[return-value]
             summary="Mock AI output. No language model was called: this text is canned and exists only to exercise the investigation pipeline in development. Do not act on it.",
-            confidence=0.1, timeline=[], assumptions=["This report was produced by a scripted stand-in, not by analysis."],
+            outcome="UNDETERMINED", observations=[], confidence=0.1, timeline=[], assumptions=["This report was produced by a scripted stand-in, not by analysis."],
             uncertainties=["Nothing was analysed. Configure a real provider (AI_PROVIDER=anthropic) or the deterministic engine for real results."],
             facts=[FactRequired(statement="The scripted run retrieved this evidence item.", evidence_refs=[r]) for r in refs[:1]],
             hypotheses=[LLMHypothesis(title="[mock] Placeholder hypothesis", description="Canned text from the mock provider.", confidence=0.1, status="unlikely", evidence_refs=refs, contradicting_evidence_refs=[], contradictions=[], assumptions=[], gaps=[])] if refs else [],

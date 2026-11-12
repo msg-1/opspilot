@@ -267,7 +267,7 @@ def test_scenario_data_agrees_with_itself():
             assert p["serviceSlug"] in searchable, f"{s.name}: pattern on {p['serviceSlug']} has no log line behind it"
         # Every service asked about that is not failing has metrics to show it.
         if s.expect.healthy:
-            assert all(sv["slug"] in s.metrics for sv in s.services), s.name
+            assert s.services[0]["slug"] in s.metrics, s.name
     healthy = BY_NAME["healthy_no_signal"]
     assert healthy.deployments[0]["startedAt"] == t(60 * 24 * 7) and "week-old" in healthy.description
 

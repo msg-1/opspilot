@@ -123,11 +123,13 @@ async def evaluate(scenario: Scenario, provider: LLMProvider | None, settings: S
     # accuracy and invention are properties of the engine, not of the safety net behind it.
     notes: list[str] = []
     raw: list[InvestigationReport] = []
+    enforce_args: dict[str, Any] = {}
     original = guardrails.enforce
 
-    def spy(report: InvestigationReport, store: Any) -> list[str]:
+    def spy(report: InvestigationReport, store: Any, **kwargs: Any) -> list[str]:
         raw.append(report.model_copy(deep=True))
-        result = original(report, store)
+        enforce_args.update(kwargs)
+        result = original(report, store, **kwargs)
         notes.extend(result)
         return result
 
@@ -177,6 +179,10 @@ async def evaluate(scenario: Scenario, provider: LLMProvider | None, settings: S
             "reportBeforeGuardrails": (raw[0] if raw else report).wire(),
             "guardrailNotes": notes,
             "toolCalls": calls,
+            "knownTimes": enforce_args.get("known_times") or [],
+            "scope": enforce_args.get("scope") or [],
+            "toolFailures": enforce_args.get("tool_failures") or [],
+            "metricServices": sorted(ctx.store.metric_services),
             "evidence": [e.model_dump(by_alias=True) for e in ctx.store.items],
             "events": events,
         }
@@ -242,13 +248,18 @@ def rescore(directory: Path) -> list[tuple[str, dict[str, Score], dict[str, Scor
             continue
         store = EvidenceStore()
         store.items = [EvidenceItem.model_validate(e) for e in record["evidence"]]
+        # What was examined matters to the health verdict, so it is restored along with the evidence.
+        for call in record["toolCalls"]:
+            if call.get("ok"):
+                store.coverage.setdefault(str(call["tool"]), {"calls": 0, "records": 0})["calls"] += 1
+        store.metric_services = set(record.get("metricServices") or [e.service for e in store.items if e.kind in ("metric", "metric_baseline") and e.service])
         steps = [e["step"] for e in record["events"] if e.get("type") == "step" and e["step"].get("type") == "tool_call"]
         seen = json.dumps([scenario.question, t(0), t(120), [st.get("output") for st in steps]], default=str)
         shown = InvestigationReport.model_validate(record["report"])
         raw = InvestigationReport.model_validate(record["reportBeforeGuardrails"])
         as_shown = score(scenario, shown, raw, store, record["guardrailNotes"], record["toolCalls"], seen)
         again = raw.model_copy(deep=True)
-        notes = guardrails.enforce(again, store)
+        notes = guardrails.enforce(again, store, scope=record.get("scope") or [], tool_failures=record.get("toolFailures") or [], known_times=record.get("knownTimes") or [t(0), t(120)])
         out.append((scenario.name, as_shown, score(scenario, again, raw, store, notes, record["toolCalls"], seen)))
     return out
 
@@ -309,7 +320,7 @@ def main() -> None:
     if args.json:
         print(json.dumps(summary, indent=2))
     else:
-        short = {"root_cause": "cause", "service": "svc", "citations": "cite", "no_invention": "real", "contradictions": "contra", "missing": "gaps", "calibration": "calib", "diagnostics": "diag", "remediation": "safe", "deployment": "deploy"}
+        short = {"outcome": "state", "root_cause": "cause", "service": "svc", "citations": "cite", "no_invention": "real", "contradictions": "contra", "missing": "gaps", "calibration": "calib", "diagnostics": "diag", "remediation": "safe", "deployment": "deploy"}
         mark = {"pass": "pass", "fail": "FAIL", "n/a": "-"}
         print(f"\nEngine: {engine}\n")
         print(f"{'scenario':34} " + " ".join(f"{short[c]:6}" for c in CRITERIA) + " conf  tools  top hypothesis")

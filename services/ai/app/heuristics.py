@@ -12,6 +12,7 @@ import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from .assessment import find_signals
 from .evidence import EvidenceStore
 from .schemas import (
     EvidenceItem,
@@ -274,15 +275,16 @@ def analyse(question: str, store: EvidenceStore, *, scope: list[str], window: tu
 
     # ── Is there a real problem signal at all? ──
     # A handful of warnings on a healthy service must not be turned into a confident story.
-    strong_signal = (
-        any((p.data or {}).get("level") in ("ERROR", "FATAL") and (p.data or {}).get("count", 0) >= 10 for p in store.by_kind("log_pattern"))
-        or any(abs((m.data or {}).get("changePercent") or 0) >= 50 for m in metrics)
-        or bool(store.by_kind("alert", "dependency"))
-    )
+    signals = find_signals(store, scope)
+    strong_signal = any(s.level == "strong" for s in signals)
+    moderate_signal = any(s.level == "moderate" for s in signals)
     if not strong_signal:
+        # Without a clear failure a change is at most a candidate: anomalies allow "possible",
+        # nothing at all allows only "unlikely". Either way no production change is proposed.
+        cap = 0.4 if moderate_signal else 0.2
         for h in hypotheses:
-            h.confidence = round(min(0.2, h.confidence * 0.4), 2)
-            h.status = "unlikely"
+            h.confidence = round(min(cap, h.confidence * (0.7 if moderate_signal else 0.4)), 2)
+            h.status = "possible" if moderate_signal and h.confidence >= 0.25 else "unlikely"
             h.assumptions.append("There is no strong error signal in the window, so this change may be entirely unrelated.")
         actions = []
 
@@ -320,11 +322,18 @@ def analyse(question: str, store: EvidenceStore, *, scope: list[str], window: tu
     uncertainties += [f"A data source could not be queried: {f}" for f in tool_failures[:4]]
 
     top = hypotheses[0] if hypotheses else None
-    confidence = top.confidence if top else 0.1
+    confidence = top.confidence if top else 0.0
     others = len(hypotheses) - 1
     alternatives = "No alternative hypotheses met the evidence bar." if others <= 0 else f"{others} alternative hypothes{'is was' if others == 1 else 'es were'} considered."
     observed = facts[0].statement if facts else "No dominant error pattern was found."
-    if not strong_signal:
+    if not strong_signal and moderate_signal:
+        noted = "; ".join(s.text for s in signals if s.level == "moderate")[:400]
+        summary = (
+            f"Rule-based analysis (no language model wrote these conclusions). There are measurable anomalies but no clear failure: {noted}. "
+            + (f"The nearest candidate explanation is unconfirmed: {top.title} ({_pct(top.confidence)} confidence)." if top else "Nothing in the evidence explains them.")
+        )
+        uncertainties.append("The anomalies are below the level of a clear failure, and no cause is established for them.")
+    elif not strong_signal:
         summary = (
             f"Rule-based analysis (no language model wrote these conclusions). No significant problem signal was found in the window examined: no high-volume error pattern, "
             f"no sharp metric shift and no firing alert. {observed if dominant else ''} "
