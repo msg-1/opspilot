@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { env } from '../config/env';
 import { type InvestigationEvent, type InvestigationUsage, aiService } from '../integrations/aiService';
+import { actionEffect } from '../lib/actionEffect';
 import { audit, writeAudit } from '../lib/audit';
 import { AppError, conflict, notFound } from '../lib/errors';
 import { csvEnum, paged, paginate, paginationQuery, param } from '../lib/http';
@@ -32,14 +33,48 @@ const hypothesisSchema = z.object({
   gaps: z.array(z.string()).default([]),
 });
 
+const claimStatus = z.enum(['exact', 'rounded', 'calculated', 'estimate', 'uncited', 'unsupported']);
+// Set by the AI service's claim checker (services/ai/app/claims.py); carried through unchanged.
+const verificationSchema = z
+  .object({
+    status: z.enum(['verified', 'partly', 'unsupported', 'no_claims']),
+    checks: z.array(z.object({ text: z.string(), kind: z.string(), status: claimStatus, detail: z.string(), evidenceRef: z.string().nullable().optional() })).default([]),
+  })
+  .nullable()
+  .optional();
+const statementSchema = z.object({ statement: z.string(), evidenceRefs: refs, verification: verificationSchema });
+const OUTCOMES = ['HEALTHY', 'DEGRADED', 'INCIDENT', 'UNDETERMINED'] as const;
+
 export const reportSchema = z.object({
   summary: z.string().min(1).max(6000),
   confidence: z.number().min(0).max(1),
   analysisMode: z.enum(['llm', 'heuristic', 'mock']),
+  // Whether the evidence shows a fault at all. Computed by the AI service from the evidence.
+  outcome: z.enum(OUTCOMES).nullable().optional(),
+  assessment: z
+    .object({
+      outcome: z.enum(OUTCOMES),
+      confidence: z.number().min(0).max(1),
+      rationale: z.string().max(4000),
+      supportingRefs: refs,
+      signals: z.array(z.object({ level: z.enum(['strong', 'moderate', 'weak']), kind: z.string(), text: z.string(), evidenceRefs: refs })).default([]),
+      missingTelemetry: z.array(z.string()).default([]),
+    })
+    .nullable()
+    .optional(),
+  observations: z.array(statementSchema).default([]),
+  integrity: z
+    .object({
+      checked: z.number().int().min(0),
+      supported: z.number().int().min(0),
+      flagged: z.array(z.object({ where: z.string(), text: z.string(), status: claimStatus, detail: z.string() })).default([]),
+    })
+    .nullable()
+    .optional(),
   // The agent never confirms a root cause; a human does that on the incident.
   rootCauseConfirmed: z.literal(false).default(false),
   timeline: z.array(z.object({ timestamp: z.string(), description: z.string(), evidenceRefs: refs })).default([]),
-  facts: z.array(z.object({ statement: z.string(), evidenceRefs: refs })).default([]),
+  facts: z.array(statementSchema).default([]),
   assumptions: z.array(z.string()).default([]),
   uncertainties: z.array(z.string()).default([]),
   hypotheses: z.array(hypothesisSchema).max(8).default([]),
@@ -52,6 +87,9 @@ export const reportSchema = z.object({
         description: z.string().min(4).max(5000),
         rationale: z.string().max(5000).optional().nullable(),
         risk: z.enum(['LOW', 'MEDIUM', 'HIGH']).default('MEDIUM'),
+        // Recomputed here from the type and text; what the sender says is not relied on.
+        effect: z.enum(['read_only', 'state_changing']).optional(),
+        effectReasons: z.array(z.string()).optional(),
         serviceSlug: z.string().optional().nullable(),
         parameters: z.record(z.string(), z.unknown()).optional().nullable(),
         evidenceRefs: refs,
@@ -90,6 +128,8 @@ export async function runInvestigation(investigationId: string) {
   let provider = 'unknown';
   let finished = false;
   const evidenceRefs = new Set<string>();
+  // Reference of each deployment evidence item by the deployment's id, to tell what a rollback acts on.
+  const deploymentRefs = new Map<string, string>();
 
   const assertNotCancelled = async () => {
     const current = await prisma.investigation.findUnique({ where: { id: investigationId }, select: { status: true } });
@@ -132,6 +172,7 @@ export async function runInvestigation(investigationId: string) {
         const e = event.evidence;
         if (evidenceRefs.has(e.ref)) break;
         evidenceRefs.add(e.ref);
+        if (e.kind === 'deployment' && e.sourceId) deploymentRefs.set(e.sourceId, e.ref);
         const occurredAt = e.occurredAt ? new Date(e.occurredAt) : null;
         await prisma.evidence.create({
           data: {
@@ -152,7 +193,7 @@ export async function runInvestigation(investigationId: string) {
       case 'final': {
         const parsed = reportSchema.safeParse(event.report);
         if (!parsed.success) throw new Error(`AI service returned a malformed report: ${parsed.error.issues[0]?.message ?? 'invalid'}`);
-        const report = await applyGuardrails(parsed.data, evidenceRefs, addStep);
+        const report = await applyGuardrails(parsed.data, evidenceRefs, addStep, deploymentRefs);
         await persistFinal(investigationId, report, event.usage, event.engine);
         finished = true;
         break;
@@ -208,8 +249,6 @@ export async function runInvestigation(investigationId: string) {
   }
 }
 
-/** Action types that do not themselves change production. */
-const READ_ONLY_ACTIONS = new Set<string>(['manual', 'run_runbook']);
 
 /**
  * Server-side guardrails, applied regardless of what the model produced:
@@ -223,6 +262,7 @@ async function applyGuardrails(
   report: InvestigationReport,
   known: Set<string>,
   addStep: (step: Extract<InvestigationEvent, { type: 'step' }>['step']) => Promise<unknown>,
+  deploymentRefs: Map<string, string> = new Map(),
 ): Promise<InvestigationReport> {
   const notes: string[] = [];
   const clean = (list: string[], where: string) => {
@@ -261,17 +301,42 @@ async function applyGuardrails(
   };
   result.assumptions = report.assumptions;
 
-  // The same two rules as services/ai/app/guardrails.py, applied again here.
+  // The same rules as services/ai/app/guardrails.py, applied again here.
+  // What each action does is decided from its type and text, never taken from the sender.
+  result.recommendedActions = result.recommendedActions.map((a) => {
+    const { effect, reasons } = actionEffect(a.type, a.title, a.description);
+    return { ...a, effect, effectReasons: reasons };
+  });
+  const withdraw = (a: (typeof result.recommendedActions)[number], reason: string) => {
+    notes.push(`Action "${a.title.slice(0, 60)}" is not offered for approval: ${reason}. It is listed under next steps.`);
+    result.nextSteps = [...result.nextSteps, `Considered and not recommended (${reason}): ${a.title}`.slice(0, 500)];
+  };
   // 1. A production change must not rest on a hypothesis the report itself rates unlikely.
+  //    It is withdrawn, not relabelled: as a "manual" action the same change would still be on offer.
   const held = new Set<string>();
   const doubted = new Set<string>();
   result.hypotheses.forEach((h, i) => h.evidenceRefs.forEach((r) => (h.status === 'unlikely' && i > 0 ? doubted : held).add(r)));
   held.forEach((r) => doubted.delete(r));
-  result.recommendedActions = result.recommendedActions.map((a) => {
-    if (READ_ONLY_ACTIONS.has(a.type) || !a.evidenceRefs.some((r) => doubted.has(r))) return a;
-    notes.push(`Action "${a.title.slice(0, 60)}" would change production on the strength of a hypothesis rated unlikely: downgraded to a manual action.`);
-    return { ...a, type: 'manual' as const, parameters: null };
+  result.recommendedActions = result.recommendedActions.filter((a) => {
+    if (a.effect !== 'state_changing') return true;
+    // A rollback rests on the deployment it rolls back, not on every record it cites (the
+    // previous version's deployment is cited as the target, whatever else that record supports).
+    const id = a.type === 'rollback_deployment' ? (a.parameters as { deploymentId?: unknown } | null | undefined)?.deploymentId : undefined;
+    const subject = typeof id === 'string' ? deploymentRefs.get(id) : undefined;
+    const restsOn = subject ? [subject] : a.evidenceRefs;
+    if (!restsOn.some((r) => doubted.has(r))) return true;
+    withdraw(a, 'it would change production on the strength of a hypothesis rated unlikely');
+    return false;
   });
+  // 1b. Without an incident and an established cause, nothing justifies changing production.
+  const outcome = result.assessment?.outcome ?? result.outcome;
+  if (outcome && outcome !== 'INCIDENT') {
+    result.recommendedActions = result.recommendedActions.filter((a) => {
+      if (a.effect !== 'state_changing') return true;
+      withdraw(a, `it would change production, and the evidence supports ${outcome}, not an incident with an established cause`);
+      return false;
+    });
+  }
   // 2. A high-risk option is not offered next to a safer one: it moves to the next steps.
   if (result.recommendedActions.some((a) => a.risk !== 'HIGH')) {
     const risky = result.recommendedActions.filter((a) => a.risk === 'HIGH');
@@ -304,6 +369,7 @@ async function persistFinal(
         report: report as unknown as Prisma.InputJsonValue,
         summary: report.summary,
         confidence: report.confidence,
+        outcome: report.assessment?.outcome ?? report.outcome ?? null,
         completedAt: new Date(),
         // The report itself says which engine wrote it; that is what the UI labels it with.
         analysisMode: report.analysisMode,
@@ -337,16 +403,16 @@ async function persistFinal(
           serviceId: service?.id ?? null,
           parameters: action.parameters ?? undefined,
         },
-        { type: 'ai_agent', label: 'OpsPilot AI' },
+        { type: 'ai_agent', label: 'OPSILUME AI' },
       );
     } catch (err) {
       logger.warn({ err, investigationId }, 'could not create proposed remediation from report');
     }
   }
   if (incidentId) {
-    await addIncidentEvent(incidentId, 'investigation', `AI investigation completed (${Math.round(report.confidence * 100)}% confidence): ${report.summary.slice(0, 280)}`, { kind: 'ai_agent', label: 'OpsPilot AI' }, { investigationId });
+    await addIncidentEvent(incidentId, 'investigation', `AI investigation completed (${Math.round(report.confidence * 100)}% confidence): ${report.summary.slice(0, 280)}`, { kind: 'ai_agent', label: 'OPSILUME AI' }, { investigationId });
   }
-  await writeAudit({ organizationId, actorType: 'ai_agent', actorLabel: 'OpsPilot AI', action: 'investigation.complete', resourceType: 'investigation', resourceId: investigationId, metadata: { confidence: report.confidence, hypotheses: report.hypotheses.length, proposedActions: report.recommendedActions.length, mode: report.analysisMode } });
+  await writeAudit({ organizationId, actorType: 'ai_agent', actorLabel: 'OPSILUME AI', action: 'investigation.complete', resourceType: 'investigation', resourceId: investigationId, metadata: { confidence: report.confidence, hypotheses: report.hypotheses.length, proposedActions: report.recommendedActions.length, mode: report.analysisMode } });
   await notifyUsers([investigation.createdById], { organizationId, type: 'investigation.completed', title: 'Investigation completed', body: report.summary.slice(0, 200), link: `/investigations/${investigationId}` });
 }
 
@@ -372,6 +438,7 @@ const listSelect = {
   estimatedCostUsd: true,
   summary: true,
   confidence: true,
+  outcome: true,
   error: true,
   createdAt: true,
   startedAt: true,
@@ -469,7 +536,7 @@ investigationsRouter.get('/:id', requirePermission('read'), async (req, res) => 
       steps: { orderBy: { index: 'asc' } },
       evidence: { orderBy: { createdAt: 'asc' } },
       hypotheses: { orderBy: { rank: 'asc' } },
-      remediations: { orderBy: { createdAt: 'asc' }, select: { id: true, title: true, type: true, risk: true, status: true } },
+      remediations: { orderBy: { createdAt: 'asc' }, select: { id: true, title: true, type: true, risk: true, status: true, effect: true } },
     },
   });
   if (!investigation) throw notFound('Investigation');

@@ -12,6 +12,7 @@ import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from .assessment import find_signals
 from .evidence import EvidenceStore
 from .schemas import (
     EvidenceItem,
@@ -181,8 +182,9 @@ def analyse(question: str, store: EvidenceStore, *, scope: list[str], window: tu
         if lead < -10 or lead > 6 * 60:
             continue  # after the errors began, or too long before
         score = 0.42 if lead <= 30 else 0.34 if lead <= 120 else 0.22
-        refs = [change.ref]
-        facts = [f"{change.title} happened at {change.occurred_at}, {max(0, round(lead))} minutes before the first anomalous error ({change.ref})."]
+        # The interval quoted below runs from this change to the onset: cite both ends of it.
+        refs = [change.ref] + ([onset_ev.ref] if onset_ev else [])
+        facts = [f"{change.title} happened at {change.occurred_at}, {max(0, round(lead))} minutes before the first anomalous error ({change.ref})." if onset_ev else f"{change.title} happened at {change.occurred_at} ({change.ref})."]
         assumptions = ["Temporal proximity is treated as a signal of causation; it has not been verified."]
         contradictions: list[str] = []
         against: list[str] = []
@@ -196,6 +198,26 @@ def analyse(question: str, store: EvidenceStore, *, scope: list[str], window: tu
             contradictions.append(f"The change was made to {change.service}, which is not where the errors are occurring.")
         if lead > 120:
             contradictions.append(f"It happened {round(lead)} minutes before the errors began; a regression would usually show sooner.")
+        cdata = change.data or {}
+        if change.kind == "deployment" and cdata.get("status") == "ROLLED_BACK":
+            # No longer running: it cannot be causing what is happening now.
+            score -= 0.3
+            contradictions.append("This deployment has already been rolled back, so its code is no longer running.")
+        if change.kind == "deployment" and cdata.get("isRollback"):
+            score -= 0.15
+            contradictions.append("This deployment returned the service to a version that ran before, which makes a new regression unlikely.")
+        later = [d for d in store.by_kind("deployment") if change.kind == "deployment" and d.service == change.service and d.ref != change.ref and (change.occurred_at or "") < (d.occurred_at or "") and (parse_time(d.occurred_at) or onset) <= onset]
+        if later:
+            # Only the last deployment before the onset is the code that was running when it began.
+            score -= 0.2
+            contradictions.append(f"A later deployment of {change.service} ({later[0].title}, {later[0].ref}) replaced it before the problem began.")
+        impact = next((i for i in store.by_kind("deployment_impact") if i.source_id == change.source_id), None)
+        errors = ((impact.data or {}).get("errorLogs") or {}) if impact else {}
+        if impact and errors.get("beforePerMinute") is not None and errors.get("afterPerMinute") is not None and errors["afterPerMinute"] <= errors["beforePerMinute"] and (errors.get("before") or 0) >= 5:
+            # Errors fell after it. Whatever is wrong now, this deployment made things better.
+            score -= 0.25
+            contradictions.append(f"Error logs fell after this deployment, from {errors['beforePerMinute']}/min to {errors['afterPerMinute']}/min ({impact.ref}).")
+            against.append(impact.ref)
         # Linked code: commits / PRs for the same service close to the change, or matching the deployed commit.
         sha = str((change.data or {}).get("commitSha") or "")[:10]
         linked = [c for c in store.by_kind("commit", "pull_request") if _linked(c, change, sha)]
@@ -213,7 +235,7 @@ def analyse(question: str, store: EvidenceStore, *, scope: list[str], window: tu
                 against += [c.ref for c in linked[:3]]
         elif change.kind == "deployment":
             assumptions.append("No commits or pull requests could be linked to this deployment, so what it changed is unknown.")
-        moved = [m for m in metrics if m.service == change.service and abs((m.data or {}).get("changePercent") or 0) >= 50]
+        moved = [m for m in metrics if m.service == change.service and (abs((m.data or {}).get("changePercent") or 0) >= 50 or (m.data or {}).get("fromZero"))]
         if moved:
             score += 0.05
             refs += [m.ref for m in moved[:3]]
@@ -227,13 +249,13 @@ def analyse(question: str, store: EvidenceStore, *, scope: list[str], window: tu
         what = "deployment" if change.kind == "deployment" else "change"
         hypotheses.append(HypothesisOut(
             title=f"Regression introduced by {change.title[:110]}",
-            description=f"The error signal began about {max(0, round(lead))} minutes after this {what}."
+            description=(f"The error signal began about {max(0, round(lead))} minutes after this {what}." if onset_ev else f"This {what} was made shortly before the window examined. No error onset could be determined, so there is no timing to compare with.")
             + (f" The shipped change touches {', '.join(sorted(mechanism))}, matching the failure mode in the logs." if mechanism else " The link is based on timing" + (" and service match." if same_service else ".")),
             confidence=round(score, 2), status="likely" if score >= 0.55 else "possible" if score >= 0.25 else "unlikely",
             evidence_refs=_unique(refs), contradicting_evidence_refs=_unique(against), contradictions=contradictions, facts=facts, assumptions=assumptions,
             gaps=["Confirm by comparing error rate per version, or by rolling back in a controlled way.", "Review the diff of the linked change for the suspected mechanism."],
         ))
-        if change.kind == "deployment" and score >= 0.45 and not (change.data or {}).get("isRollback"):
+        if change.kind == "deployment" and score >= 0.45 and not cdata.get("isRollback") and cdata.get("status") != "ROLLED_BACK":
             previous = next((d for d in deployments if d.service == change.service and (d.occurred_at or "") < (change.occurred_at or "") and (d.data or {}).get("status") == "SUCCEEDED"), None)
             if previous and not any(a.type == "rollback_deployment" for a in actions):
                 prev_version = (previous.data or {}).get("version")
@@ -246,15 +268,94 @@ def analyse(question: str, store: EvidenceStore, *, scope: list[str], window: tu
                 ))
 
     # ── Rule 2: an unhealthy upstream dependency ──
-    for dep in store.by_kind("dependency"):
-        if dep.service in affected:
-            continue  # it is one of the services under investigation, not an independent cause
+    # When dependencies fail in a chain (gateway → orders → payments → redis), the one with no
+    # unhealthy dependency of its own is where the chain starts; those above it are consequences.
+    unhealthy = {d.service: d for d in store.by_kind("dependency") if d.service}
+    dependency_hypotheses: dict[str, int] = {}
+    for slug, dep in unhealthy.items():
+        if slug in scope:
+            continue  # it is the service being asked about, not an independent cause
+        below = [x for x in store.depends_on.get(slug, []) if x in unhealthy]
+        down = (dep.data or {}).get("health") == "DOWN" or "DOWN" in dep.title
+        path = _path_to(slug, scope, store.depends_on)
+        via = f" The path from the service in question is {' → '.join(path)}." if len(path) > 2 else ""
+        if below:
+            if slug in affected:
+                continue  # already showing the symptoms: a link in the chain, not its start
+            score, role = 0.2, f"It depends in turn on {', '.join(below)}, which is also unhealthy, so its trouble may be a consequence rather than the cause."
+        else:
+            score, role = (0.45 if down else 0.3), "Nothing it depends on is recorded as unhealthy, so the chain of failures appears to start here."
+        dependency_hypotheses[slug] = len(hypotheses)
         hypotheses.append(HypothesisOut(
-            title=f"Degradation of upstream dependency {dep.service}",
-            description=f"{dep.summary} Failures there could surface as errors in the services that call it.",
-            confidence=0.3, status="possible", evidence_refs=[dep.ref], facts=[f"{dep.title} ({dep.ref})."],
+            title=f"{'Failure' if down else 'Degradation'} of upstream dependency {slug}",
+            description=f"{dep.summary} Failures there could surface as errors in the services that call it. {role}{via}",
+            confidence=score, status="possible" if score >= 0.25 else "unlikely", evidence_refs=[dep.ref], facts=[f"{dep.title} ({dep.ref})."],
             assumptions=["The dependency's degradation is assumed to be a cause rather than a consequence of the same incident."],
-            gaps=[f"Check whether {dep.service} errors started before or after the errors in its callers."],
+            gaps=[f"Check whether {slug} errors started before or after the errors in its callers.", f"Check {slug} itself: is it running, reachable and within its limits?"],
+        ))
+
+    # ── Rule 4: traces show where time is lost or where requests fail ──
+    traces = store.by_kind("trace")
+    slow: dict[tuple[str, str], list[EvidenceItem]] = {}
+    broken: dict[tuple[str, str], list[EvidenceItem]] = {}
+    for tr in traces:
+        d = tr.data or {}
+        span = d.get("slowestSpan") or {}
+        # A span that takes two fifths of a slow request is where to look, even when the request
+        # makes the same slow call twice.
+        if span and (d.get("durationMs") or 0) >= 200 and (span.get("selfMs") or 0) >= 0.4 * (d.get("durationMs") or 0):
+            slow.setdefault((str(span.get("service")), _callee(span)), []).append(tr)
+        errors = d.get("errorSpans") or []
+        if errors:
+            # Failed spans arrive ordered from the entry point down, so the last is the deepest:
+            # that is where the failure starts, and the spans above it only pass it on.
+            origin = errors[-1]
+            broken.setdefault((str(origin.get("service")), _callee(origin) + "|" + re.sub(r"\d+", "<n>", str(origin.get("message") or ""))[:120]), []).append(tr)
+    latency_up = [m for m in metrics if any(k in str((m.data or {}).get("metric")) for k in ("latency", "duration")) and _rose(m)]
+    errors_up = [m for m in metrics if "error" in str((m.data or {}).get("metric")) and _rose(m)]
+    for (service, callee), group in slow.items():
+        if len(group) < 2:
+            continue
+        spans = [(g.data or {})["slowestSpan"] for g in group]
+        score = 0.35 + (0.1 if latency_up else 0) + (0.05 if len(group) >= 4 else 0)
+        where = f"{service}'s calls to {callee}" if callee else f"{service} itself ({spans[0].get('operation')})"
+        hypotheses.append(HypothesisOut(
+            title=f"Time is being lost in {where}",
+            description=f"In {len(group)} sampled traces, a single span in {service} ({spans[0].get('operation')}) accounts for most of the request time: "
+            f"{min(sp.get('selfMs') or 0 for sp in spans):.0f} to {max(sp.get('selfMs') or 0 for sp in spans):.0f} ms of requests lasting "
+            f"{min((g.data or {}).get('durationMs') or 0 for g in group):.0f} to {max((g.data or {}).get('durationMs') or 0 for g in group):.0f} ms. This locates the delay; it does not say why {callee or service} is slow.",
+            confidence=round(score, 2), status="likely" if score >= 0.55 else "possible", evidence_refs=_unique([g.ref for g in group[:4]] + [m.ref for m in latency_up[:2]]),
+            facts=[f"{g.title}: {g.summary} ({g.ref})" for g in group[:2]],
+            assumptions=["The sampled traces are assumed to be representative of the slow requests."],
+            gaps=[f"Check the load, locks and health of {callee or service} at the same time.", "Compare with a trace from before the slowdown."],
+        ))
+    for (service, key), group in broken.items():
+        if len(group) < 2:
+            continue
+        callee, message = key.split("|", 1)
+        score = 0.35 + (0.1 if errors_up else 0) + (0.05 if len(group) >= 4 else 0)
+        # Two independent sources agreeing: the traces fail in a service whose own dependency is
+        # recorded as unhealthy. That dependency is then the better-supported explanation, and
+        # the traces are evidence for it rather than a rival to it.
+        for dep in store.depends_on.get(service, []):
+            index = dependency_hypotheses.get(dep)
+            if index is None or store.depends_on.get(dep) and any(x in unhealthy for x in store.depends_on[dep]):
+                continue
+            h = hypotheses[index]
+            h.confidence = round(min(MAX_HEURISTIC_CONFIDENCE, h.confidence + 0.12), 2)
+            h.status = "likely" if h.confidence >= 0.55 else "possible"
+            h.evidence_refs = _unique(h.evidence_refs + [g.ref for g in group[:3]])
+            h.facts.append(f"In {len(group)} sampled traces the failure starts in {service}, which depends directly on {dep} ({', '.join(g.ref for g in group[:3])}).")
+            h.description += f" Sampled traces agree: requests fail in {service}, which calls {dep} directly."
+        where = f"{service}'s calls to {callee}" if callee else service
+        hypotheses.append(HypothesisOut(
+            title=f"Requests are failing in {where}",
+            description=f"In {len(group)} sampled traces the failure starts in {service}" + (f" when it calls {callee}" if callee else "") + (f": \"{message}\"." if message else ".")
+            + " The services above it in the trace only pass the error on. This locates the failure; the reason for it is not in the traces.",
+            confidence=round(score, 2), status="likely" if score >= 0.55 else "possible", evidence_refs=_unique([g.ref for g in group[:4]] + [m.ref for m in errors_up[:2]]),
+            facts=[f"{g.title}: {g.summary} ({g.ref})" for g in group[:2]],
+            assumptions=["The sampled traces are assumed to be representative of the failing requests."],
+            gaps=[f"Check {callee or service} directly: is it reachable and healthy?", "Read the error logs of the same trace ids."],
         ))
 
     # ── Rule 3: recurrence of a known failure ──
@@ -274,15 +375,16 @@ def analyse(question: str, store: EvidenceStore, *, scope: list[str], window: tu
 
     # ── Is there a real problem signal at all? ──
     # A handful of warnings on a healthy service must not be turned into a confident story.
-    strong_signal = (
-        any((p.data or {}).get("level") in ("ERROR", "FATAL") and (p.data or {}).get("count", 0) >= 10 for p in store.by_kind("log_pattern"))
-        or any(abs((m.data or {}).get("changePercent") or 0) >= 50 for m in metrics)
-        or bool(store.by_kind("alert", "dependency"))
-    )
+    signals = find_signals(store, scope)
+    strong_signal = any(s.level == "strong" for s in signals)
+    moderate_signal = any(s.level == "moderate" for s in signals)
     if not strong_signal:
+        # Without a clear failure a change is at most a candidate: anomalies allow "possible",
+        # nothing at all allows only "unlikely". Either way no production change is proposed.
+        cap = 0.4 if moderate_signal else 0.2
         for h in hypotheses:
-            h.confidence = round(min(0.2, h.confidence * 0.4), 2)
-            h.status = "unlikely"
+            h.confidence = round(min(cap, h.confidence * (0.7 if moderate_signal else 0.4)), 2)
+            h.status = "possible" if moderate_signal and h.confidence >= 0.25 else "unlikely"
             h.assumptions.append("There is no strong error signal in the window, so this change may be entirely unrelated.")
         actions = []
 
@@ -320,11 +422,18 @@ def analyse(question: str, store: EvidenceStore, *, scope: list[str], window: tu
     uncertainties += [f"A data source could not be queried: {f}" for f in tool_failures[:4]]
 
     top = hypotheses[0] if hypotheses else None
-    confidence = top.confidence if top else 0.1
+    confidence = top.confidence if top else 0.0
     others = len(hypotheses) - 1
     alternatives = "No alternative hypotheses met the evidence bar." if others <= 0 else f"{others} alternative hypothes{'is was' if others == 1 else 'es were'} considered."
     observed = facts[0].statement if facts else "No dominant error pattern was found."
-    if not strong_signal:
+    if not strong_signal and moderate_signal:
+        noted = "; ".join(s.text for s in signals if s.level == "moderate")[:400]
+        summary = (
+            f"Rule-based analysis (no language model wrote these conclusions). There are measurable anomalies but no clear failure: {noted}. "
+            + (f"The nearest candidate explanation is unconfirmed: {top.title} ({_pct(top.confidence)} confidence)." if top else "Nothing in the evidence explains them.")
+        )
+        uncertainties.append("The anomalies are below the level of a clear failure, and no cause is established for them.")
+    elif not strong_signal:
         summary = (
             f"Rule-based analysis (no language model wrote these conclusions). No significant problem signal was found in the window examined: no high-volume error pattern, "
             f"no sharp metric shift and no firing alert. {observed if dominant else ''} "
@@ -360,6 +469,32 @@ def analyse(question: str, store: EvidenceStore, *, scope: list[str], window: tu
         assumptions=_unique([a for h in hypotheses[:2] for a in h.assumptions]), uncertainties=uncertainties,
         hypotheses=hypotheses, next_steps=_unique(next_steps)[:8], recommended_actions=actions[:3],
     )
+
+
+def _rose(metric: EvidenceItem, percent: float = 50) -> bool:
+    data = metric.data or {}
+    return bool(data.get("fromZero")) or (data.get("changePercent") or 0) >= percent
+
+
+def _callee(span: dict) -> str:
+    """What a span was calling, as far as it says: a named peer, else the kind of system."""
+    return str(span.get("peer") or span.get("system") or "")
+
+
+def _path_to(target: str, scope: list[str], depends_on: dict[str, list[str]]) -> list[str]:
+    """Shortest chain of dependencies from a service in scope to the target, if one is known."""
+    for start in scope:
+        queue: list[list[str]] = [[start]]
+        seen = {start}
+        while queue:
+            path = queue.pop(0)
+            if path[-1] == target:
+                return path
+            for nxt in depends_on.get(path[-1], []):
+                if nxt not in seen and len(path) < 5:
+                    seen.add(nxt)
+                    queue.append([*path, nxt])
+    return [target]
 
 
 def _linked(code: EvidenceItem, change: EvidenceItem, sha: str) -> bool:

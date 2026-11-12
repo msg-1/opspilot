@@ -28,3 +28,7 @@ test-results/
 
 # evaluation run output (model reports; local only)
 services/ai/eval-runs/
+
+# demo environment (local state and results)
+demo/.state.json
+demo/results/

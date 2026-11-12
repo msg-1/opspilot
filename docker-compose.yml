@@ -5,6 +5,7 @@
 #   Infra only (develop on host):   docker compose up -d postgres redis
 #   Full application:               docker compose --profile app up -d --build
 #   Observability add-on:           docker compose --profile observability up -d
+#   Demo microservices (real telemetry and failures to investigate): npm run demo:up, see demo/README.md
 name: opspilot
 
 x-app-env: &app-env
@@ -27,6 +28,8 @@ x-app-env: &app-env
   SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
   INVESTIGATION_DAILY_LIMIT: ${INVESTIGATION_DAILY_LIMIT:-50}
   INVESTIGATION_MAX_CONCURRENT: ${INVESTIGATION_MAX_CONCURRENT:-3}
+  # Jaeger-compatible trace query API. Empty: no trace store (the demo sets it to http://demo-jaeger:16686).
+  TRACES_URL: ${TRACES_URL:-}
 
 services:
   postgres:
@@ -165,7 +168,7 @@ services:
 
   prometheus:
     restart: unless-stopped
-    profiles: ["observability"]
+    profiles: ["observability", "demo"]
     image: prom/prometheus:v2.55.1
     volumes:
       - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
@@ -188,6 +191,135 @@ services:
       - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
     ports:
       - "127.0.0.1:3001:3000"
+    depends_on:
+      - prometheus
+
+  # ── Demo: three small instrumented services with their own data stores ──────────────────
+  # They exist to produce real logs, metrics and traces, and real failures, for OPSILUME to
+  # investigate. Local only: nothing here is published beyond 127.0.0.1, nothing is persisted
+  # (the database lives in memory), and each container is capped at a few hundred megabytes.
+  demo-postgres:
+    profiles: ["demo"]
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: shop
+      POSTGRES_PASSWORD: shop
+      POSTGRES_DB: shop
+    tmpfs: ["/var/lib/postgresql/data"]
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shop -d shop"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  demo-redis:
+    profiles: ["demo"]
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    mem_limit: 64m
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  demo-jaeger:
+    profiles: ["demo"]
+    image: jaegertracing/all-in-one:1.62.0
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+      # In-memory storage: about ten minutes of traces at the demo's request rate. More than
+      # that does not fit in the memory limit below (found the hard way: the container was killed).
+      MEMORY_MAX_TRACES: "4000"
+    mem_limit: 512m
+    ports:
+      - "127.0.0.1:16686:16686" # Jaeger UI and query API
+
+  demo-orders: &demo-service
+    profiles: ["demo"]
+    build: ./demo/services
+    env_file:
+      - path: demo/.env.demo # written by `npm run demo:setup`: the ingestion key for the demo organisation
+        required: false
+    environment: &demo-env
+      SERVICE_ROLE: orders
+      SERVICE_NAME: shop-orders
+      SERVICE_VERSION: v1.4.0
+      DATABASE_URL: postgresql://shop:shop@demo-postgres:5432/shop
+      REDIS_URL: redis://demo-redis:6379
+      PAYMENTS_URL: http://demo-payments:8080
+      ORDERS_URL: http://demo-orders:8080
+      OPSPILOT_API_URL: http://api:4000
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://demo-jaeger:4318
+      DEMO_ADMIN_TOKEN: ${DEMO_ADMIN_TOKEN:-local-demo}
+    mem_limit: 256m
+    ports:
+      - "127.0.0.1:8089:8080"
+    depends_on:
+      demo-postgres:
+        condition: service_healthy
+      demo-redis:
+        condition: service_healthy
+    healthcheck: &demo-health
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  demo-payments:
+    <<: *demo-service
+    environment:
+      <<: *demo-env
+      SERVICE_ROLE: payments
+      SERVICE_NAME: shop-payments
+      SERVICE_VERSION: v3.0.2
+    ports:
+      - "127.0.0.1:8090:8080"
+    depends_on:
+      demo-redis:
+        condition: service_healthy
+
+  demo-gateway:
+    <<: *demo-service
+    environment:
+      <<: *demo-env
+      SERVICE_ROLE: gateway
+      SERVICE_NAME: shop-gateway
+      SERVICE_VERSION: v2.1.0
+    ports:
+      - "127.0.0.1:8088:8080"
+    depends_on:
+      demo-orders:
+        condition: service_healthy
+
+  # Steady traffic, so there is a baseline to compare a failure with.
+  demo-load:
+    profiles: ["demo"]
+    build: ./demo/services
+    command: ["node", "src/load.cjs"]
+    environment:
+      GATEWAY_URL: http://demo-gateway:8080
+      LOAD_RPS: ${DEMO_LOAD_RPS:-6}
+    mem_limit: 128m
+    depends_on:
+      demo-gateway:
+        condition: service_healthy
+
+  # Reads the services' metrics from Prometheus and writes them into OPSILUME.
+  demo-bridge:
+    profiles: ["demo"]
+    build: ./demo/services
+    command: ["node", "src/bridge.cjs"]
+    restart: unless-stopped
+    env_file:
+      - path: demo/.env.demo
+        required: false
+    environment:
+      PROMETHEUS_URL: http://prometheus:9090
+      OPSPILOT_API_URL: http://api:4000
+    mem_limit: 128m
     depends_on:
       - prometheus
 

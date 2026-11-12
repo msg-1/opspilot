@@ -1,6 +1,7 @@
 import type { LogLevel } from '@prisma/client';
 import { Router } from 'express';
 import { z } from 'zod';
+import { queryTraces } from '../integrations/traces';
 import { audit } from '../lib/audit';
 import { assertRange, csv, csvEnum, param, timeParam } from '../lib/http';
 import { parseLevel } from '../lib/logParsing';
@@ -269,6 +270,16 @@ toolsRouter.get('/metrics', async (req, res) => {
     note: 'changePercent compares the window average with the equally long window immediately before it.',
     metrics: summaries.map((s) => ({ ...s, label: KNOWN_METRICS[s.metric]?.label ?? s.metric })),
   });
+});
+
+toolsRouter.get('/traces', async (req, res) => {
+  const { organizationId } = authOf(req);
+  const q = windowQuery.extend({ service: z.string().min(1), limit: z.coerce.number().int().min(1).max(20).default(6), errorsOnly: z.enum(['true', 'false']).optional() }).parse(req.query);
+  const window = windowOf(q);
+  // The trace store is not tenant-aware: only a service of this organisation may be asked about.
+  const service = await requireService(organizationId, q.service);
+  const result = await queryTraces(service.slug, window.from, window.to, { limit: q.limit, errorsOnly: q.errorsOnly === 'true' });
+  res.json({ service: service.slug, window, ...result });
 });
 
 toolsRouter.post('/knowledge/search', async (req, res) => {

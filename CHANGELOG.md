@@ -5,6 +5,16 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- Product name: OPSILUME (working name, not yet cleared) in the interface, the labels the API shows to people, the README and new documentation. Identifiers are unchanged. See docs/branding/opsilume-branding.md.
+- Outcome assessment on every investigation: `HEALTHY`, `DEGRADED`, `INCIDENT` or `UNDETERMINED`, computed from the evidence for every engine, with its signals, the evidence it rests on, what was not examined, and its own confidence. Steady metrics and a healthy status are evidence items. Observations that are not evidence of a fault are reported separately.
+- Action effects: every recommended action and remediation is `read_only` or `state_changing`, decided from its type and text and from the steps of the runbook it points at. `GET /knowledge/documents/:id/plan` returns a runbook as a labelled plan.
+- Approval binding: approvals are given for a hash of the action's content; `PATCH /remediations/:id` supersedes them; execution counts only approvals given for the current content.
+- Execution outcomes `applied`, `not_applied` and `unknown`; a retry after an unknown outcome needs a person's confirmation; every attempt carries the same idempotency key.
+- Checked figures: every number, timestamp, version, commit, pull request number and incident key in a report is compared with the evidence its statement cites. Facts carry their verification; the report carries a tally; the interface marks unsupported figures.
+- Trace retrieval: `GET /tools/traces` and the agent tool `get_traces`, reading a Jaeger-compatible trace store (`TRACES_URL`).
+- Rule-based engine: follows a chain of unhealthy dependencies to where it starts; locates lost time and failures from traces.
+- Demo environment (`demo/`, Compose profile `demo`): three instrumented services with PostgreSQL, Redis, Prometheus and Jaeger, seven reversible failure scenarios, and an end-to-end runner that checks outcomes and evidence provenance. `npm run demo:up`, `demo:scenario`, `demo:e2e`, `demo:down`.
+- Five evaluation scenarios (three healthy, one misleading, one degraded) and the outcome criterion; `--rescore` covers the new checks.
 - MIT licence.
 - Evaluation: structured expected causes instead of keyword matching; ten separately scored criteria with explanations; a deployment rollback-target scenario; `--estimate`, `--only` and `--rescore`; a spending ceiling that reserves one worst-case call.
 - Guardrails (AI service and API): a production change resting on a hypothesis rated unlikely becomes a manual action; a high-risk action moves to the next steps when a lower-risk one is proposed.
@@ -18,6 +28,13 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 - Mock provider (`AI_PROVIDER=mock`), free key-and-model check, live-check command.
 - Web error boundary and not-found page; `SEED_DEMO_DATA` switch.
 
+### Changed
+- An action the evidence does not stand behind is withdrawn from the proposals and listed under next steps with the reason, instead of being relabelled as a manual action. This applies to production changes without an incident, changes resting on a hypothesis rated unlikely, and rollbacks whose target is not an earlier successful deployment in the evidence.
+- `run_runbook` and `manual` are no longer treated as read-only: they are judged by what they say. A state-changing action is at least medium risk and needs at least one approval whatever the organisation's settings.
+- An incident needs a strong signal and a leading hypothesis that cites something which can be a cause, not only the symptoms.
+- Metric signals have absolute floors as well as relative ones; a metric rising from zero counts as a change; a service that sent no telemetry is `UNDETERMINED`, not healthy.
+- With no fault in evidence, the report's hypothesis confidence is 0 when there is no hypothesis (previously 0.1).
+
 ### Security
 - Zod 4.6.7; patched `deepmerge-ts` and `postcss`: no high or critical advisories remain.
 - Access tokens are revoked with their session; cookie-authenticated writes require the web origin; the agent's token works only while its investigation runs.
@@ -25,6 +42,10 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 - Failed sign-ins are audited; retrieved records are marked as untrusted data for the model.
 
 ### Fixed
+- After a bad release was rolled back, the rule-based engine could blame the rollback deployment for an unrelated problem and propose returning to the bad release. Deployments can now be recorded as rollbacks (`rollbackOf`), a rolled-back version is never a rollback target, and a deployment after which errors fell loses standing as a suspect.
+- Trace retrieval sampled only the end of the window.
+- A webhook timeout or server error was recorded as a plain failure and could be retried at once, which could apply a change twice.
+- A healthy service was reported as degraded when a near-zero gauge fell by a large percentage, and an uninstrumented service was reported as healthy because its empty log contained no errors. Both were found by running against real telemetry.
 - Deployment and commit evidence show the same 12-character commit prefix (a model reported the two lengths as a discrepancy).
 - Evaluation harness: scenarios run as of their own clock, actions are scored for safety rather than exact type, and every run saves complete reports for review.
 - The report schema sent to Claude is flat, so the provider accepts it (found in live testing); a schema a provider refuses to compile is retried as plain JSON.

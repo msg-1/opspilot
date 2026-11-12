@@ -37,7 +37,7 @@ async function request<T>(method: string, path: string, body?: unknown, retried 
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
   } catch {
-    throw new ApiError(0, 'network_error', 'Cannot reach the OpsPilot API. Check that it is running.');
+    throw new ApiError(0, 'network_error', 'Cannot reach the OPSILUME API. Check that it is running.');
   }
   if (res.status === 401 && !retried && !path.startsWith('/auth/')) {
     if (await refreshSession()) return request<T>(method, path, body, true);

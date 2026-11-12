@@ -117,12 +117,23 @@ Lets Claude Desktop, Claude Code or another MCP client query OpsPilot read-only.
 
 `npm run obs:up` starts Prometheus (http://localhost:9090) and Grafana (http://localhost:3001, admin/admin, dashboard "OpsPilot platform"). Set `OTEL_ENABLED=true` and `OTEL_EXPORTER_OTLP_ENDPOINT` to export traces from the API, worker and AI service to any OTLP/HTTP collector (none is bundled).
 
-## 9. Tests
+## 9. Demo environment: real telemetry and failures
 
 ```bash
-npm test                 # API: 55 integration tests on database opspilot_test (5 of them use Redis and skip without it) · web: 11 tests
-npm run test:ai          # 64 tests, all against mocked model APIs
-npm run evals -- --heuristic
+npm run demo:up                              # OPSILUME on the rule-based engine, plus three instrumented services
+npm run demo:scenario -- list                # seven failure scenarios with their activation and recovery commands
+npm run demo:e2e                             # runs them all and checks the investigations (about 25 minutes)
+npm run demo:down
+```
+
+Sign in as `shop-demo@example.com` / `OpsPilot-demo-1`. No model is called and nothing is billed. Full instructions, architecture and limitations: [demo/README.md](../demo/README.md).
+
+## 10. Tests
+
+```bash
+npm test                 # API: 69 integration tests on database opspilot_test (5 of them use Redis and skip without it) · web: 14 tests
+npm run test:ai          # 115 tests, all against mocked model APIs or hand-written evidence
+npm run evals -- --heuristic          # 11 scenarios on the rule-based engine
 npm run db:seed && npm run test:e2e   # 9 browser tests; needs the stack running on the deterministic engine:
                                       #   AI_PROVIDER=deterministic docker compose --profile app up -d ai
                                       # (they skip themselves if a paid model is active)

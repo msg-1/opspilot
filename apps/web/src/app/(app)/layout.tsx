@@ -16,7 +16,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     if (unauthenticated) router.replace(`/login?next=${encodeURIComponent(window.location.pathname)}`);
   }, [unauthenticated, router]);
 
-  if (isLoading || unauthenticated) return <div className="flex min-h-dvh items-center justify-center"><Spinner label="Loading OpsPilot" /></div>;
+  if (isLoading || unauthenticated) return <div className="flex min-h-dvh items-center justify-center"><Spinner label="Loading OPSILUME" /></div>;
   if (error || !data) return <div className="mx-auto max-w-md p-8"><ErrorState error={error} retry={() => void refetch()} /></div>;
   return (
     <SessionProvider session={data}>

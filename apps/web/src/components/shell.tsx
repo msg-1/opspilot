@@ -3,6 +3,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { Activity, BarChart3, Bell, BookOpen, Boxes, ChevronsUpDown, GitBranch, LayoutDashboard, LogOut, Menu, Rocket, ScrollText, Settings, ShieldCheck, Siren, Sparkles, Users, X } from 'lucide-react';
+import { BRAND } from '@/lib/brand';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
@@ -174,7 +175,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             <path d="M3 13h4l2.5-7 4 13 2.5-6H21" />
           </svg>
         </span>
-        <span className="text-[15px] font-semibold tracking-tight text-white">OpsPilot</span>
+        <span className="text-[15px] font-semibold tracking-[0.08em] text-white" title={`${BRAND.name} · ${BRAND.category}`}>{BRAND.name}</span>
       </Link>
       <nav aria-label="Main" className="flex-1 overflow-y-auto px-3 pb-4">
         {NAV.map((group) => (

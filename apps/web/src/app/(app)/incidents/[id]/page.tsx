@@ -86,7 +86,7 @@ function ContextView({ id }: { id: string }) {
   if (error) return <ErrorState error={error} />;
   if (isLoading || !data) return <Spinner label="Gathering related changes" />;
   const nothing = !data.deployments.length && !data.serviceEvents.length && !data.errorPatterns.length && !data.similarIncidents.length;
-  if (nothing) return <EmptyState title="Nothing related was recorded" description="No deployments, service events or error logs exist for the affected services in the 24 hours before this incident. Link the affected services, or send deployments and logs to OpsPilot." />;
+  if (nothing) return <EmptyState title="Nothing related was recorded" description="No deployments, service events or error logs exist for the affected services in the 24 hours before this incident. Link the affected services, or send deployments and logs to OPSILUME." />;
   const H = ({ children }: { children: React.ReactNode }) => <h3 className="mt-5 mb-2 text-[12px] font-semibold tracking-wide text-ink-2 uppercase first:mt-0">{children}</h3>;
   return (
     <div>

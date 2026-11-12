@@ -291,3 +291,24 @@ Second pass, same day. "Verified" names how the fix was checked; nothing is mark
 3. **M13, M20:** scaling work, when data volume or a second API instance calls for it.
 4. **M14:** split the larger modules as they are next touched.
 5. The Low items.
+
+## Milestone 4 addendum: findings from real telemetry and from re-scoring saved model output
+
+Found and fixed in this milestone. None was in the original audit; each was found by running the system against something real.
+
+| Finding | Severity | How it was found | Status |
+|---|---|---|---|
+| A webhook timeout or 5xx was recorded as a failure and could be retried at once, applying a change twice | High | Reading the retry path while auditing runbook safety | Fixed: outcome `unknown`, retry needs a person's confirmation, stable idempotency key |
+| Approvals were not bound to content: nothing in the API edited an approved action, but nothing verified at execution that it was unchanged | High | Same audit; shown with a direct database write in a test | Fixed: content hash on approvals, checked at execution |
+| `run_runbook` and `manual` were treated as read-only by the guardrails, the scorer and the risk floor | High | Known issue from Milestone 3 | Fixed: effect decided from text in the AI service and the API |
+| A production change the guardrails rejected was relabelled `manual` and still offered for approval | High | Re-scoring saved model output with the effect-aware scorer | Fixed: withdrawn, listed under next steps |
+| A healthy service was reported as degraded (near-zero gauge "down 100%") | Medium | First run against the demo environment | Fixed: absolute floors on metric signals |
+| An uninstrumented service was reported as healthy | Medium | First run against the demo environment | Fixed: `UNDETERMINED` unless metric samples or log lines exist |
+| A metric rising from zero was filed as steady | Medium | Reasoning about the demo's error-rate baseline of zero | Fixed |
+| A hypothesis citing only symptoms made the outcome an incident with an "established cause" | Medium | Re-scoring saved model output | Fixed: the leading hypothesis must cite something that can be a cause |
+| After a bad release was rolled back, an unrelated slowdown was blamed on the rollback deployment by timing, and a rollback to the bad release was proposed | High | Full end-to-end run on the demo, with an earlier scenario's deployments in the history | Fixed: deployments can be recorded as rollbacks; a rolled-back version is never a target; a deployment after which errors fell, or that is itself a rollback, loses standing |
+| Trace sampling saw only the last ten seconds of the window, which are also excluded as unsettled, so an investigation right after a failure found no traces | Medium | Same run | Fixed: the window is sampled in slices |
+| The in-memory trace store was killed by its memory limit after twenty minutes | Low (demo only) | Same run | Fixed: bounded retention |
+| Free-text figures were not checked against evidence | Medium | Known issue from Milestone 3 | Fixed for numbers, timestamps, versions, commits, pull requests and incident keys; words such as "doubled" are not checked |
+
+Still open: everything under "Open items" above, plus the limits listed in [reliability.md](reliability.md) and [demo/README.md](../demo/README.md). The changes to the model-facing instructions and schema in this milestone have not been run against a model.

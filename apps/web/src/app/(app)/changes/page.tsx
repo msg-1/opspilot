@@ -128,7 +128,7 @@ export default function ChangesPage() {
                   <td className="tabular text-right">{r.commitCount}</td>
                   <td className="tabular text-right">{r.pullRequestCount}</td>
                   <td className="text-ink-2">{r.lastSyncedAt ? timeAgo(r.lastSyncedAt) : 'Never'}</td>
-                  <td className="text-right">{canManage && <Button size="sm" variant="ghost" aria-label={`Disconnect ${r.fullName}`} onClick={() => { if (window.confirm(`Disconnect ${r.fullName}? Its synced commits and pull requests are removed from OpsPilot.`)) void run(() => api.delete(`/github/repositories/${r.id}`)); }}><Trash2 className="size-3.5" aria-hidden /></Button>}</td>
+                  <td className="text-right">{canManage && <Button size="sm" variant="ghost" aria-label={`Disconnect ${r.fullName}`} onClick={() => { if (window.confirm(`Disconnect ${r.fullName}? Its synced commits and pull requests are removed from OPSILUME.`)) void run(() => api.delete(`/github/repositories/${r.id}`)); }}><Trash2 className="size-3.5" aria-hidden /></Button>}</td>
                 </tr>
               ))}
             </Table>

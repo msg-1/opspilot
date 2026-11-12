@@ -49,7 +49,7 @@ def tool_use(id_: str, name: str, args: dict) -> dict:
 
 PLAN = {"objective": "Find why orders-api returns 500s", "services": ["orders-api"], "windowFrom": t(120), "windowTo": t(0), "steps": [{"description": "Find new error patterns", "tool": "find_log_anomalies"}, {"description": "List deployments", "tool": "list_deployments"}]}
 REPORT = {
-    "summary": "orders-api began failing shortly after v4.2.0 changed the cache schema.", "confidence": 0.8,
+    "summary": "orders-api began failing shortly after v4.2.0 changed the cache schema.", "outcome": "INCIDENT", "observations": [], "confidence": 0.8,
     "timeline": [{"timestamp": t(38), "description": "v4.2.0 deployed", "evidenceRefs": ["E2"]}],
     "facts": [{"statement": "Errors are cache deserialisation failures.", "evidenceRefs": ["E1"]}],
     "assumptions": ["Old cache entries were not flushed."], "uncertainties": ["The diff was not read."],

@@ -71,6 +71,14 @@ class DeploymentContextArgs(BaseModel):
     deployment_id: str | None = Field(default=None, description="Id of a specific deployment (the sourceId of its evidence item). Defaults to the service's latest deployment")
 
 
+class TraceArgs(BaseModel):
+    service: str = Field(description="Service slug whose requests to look at")
+    from_time: str = Field(description=f"Start of window. {WINDOW_HELP}")
+    to_time: str | None = Field(default=None, description="End of window (ISO-8601). Defaults to now")
+    errors_only: bool = Field(default=False, description="Return only traces that contain a failed span")
+    limit: int = Field(default=6, ge=1, le=20)
+
+
 class KnowledgeArgs(BaseModel):
     query: str = Field(description="Natural-language description of the symptom or topic")
     service: str | None = Field(default=None, description="Prefer documents for this service slug")
@@ -181,6 +189,14 @@ TOOLS: list[ToolSpec] = [
         MetricArgs, "GET", "/metrics",
     ),
     ToolSpec(
+        "get_traces",
+        "Distributed traces of requests through a service, slowest and failed first. Each trace gives its total duration, the "
+        "services it crossed, the single span that took the most time and any spans that failed. Use it to see WHERE in the call "
+        "chain time is lost or errors start: a slow database span points at the database, a failed span in a dependency points "
+        "there. Returns available=false when no trace store is connected.",
+        TraceArgs, "GET", "/traces",
+    ),
+    ToolSpec(
         "search_knowledge_base",
         "Semantic + keyword search over runbooks, architecture notes, policies and past postmortems. "
         "Query with the symptom (e.g. the error message) to find documented causes and mitigations.",
@@ -224,6 +240,12 @@ def _request_for(spec: ToolSpec, args: BaseModel) -> tuple[str, dict[str, Any] |
         params = {**_window(args), "service": args.service}
         if args.metrics:
             params["metric"] = ",".join(args.metrics)
+    elif isinstance(args, TraceArgs):
+        params = {"service": args.service, "from": args.from_time, "limit": args.limit}
+        if args.to_time:
+            params["to"] = args.to_time
+        if args.errors_only:
+            params["errorsOnly"] = "true"
     elif isinstance(args, DeploymentContextArgs):
         params = {"service": args.service}
         if args.deployment_id:

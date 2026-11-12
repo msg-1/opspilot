@@ -3,6 +3,77 @@
   "confidence": 0.64,
   "analysisMode": "heuristic",
   "rootCauseConfirmed": false,
+  "outcome": "INCIDENT",
+  "assessment": {
+    "outcome": "INCIDENT",
+    "confidence": 0.89,
+    "rationale": "A failure is evident (420\u00d7 ERROR in orders-api (new pattern); Error rate for orders-api up 2900%) and at least one explanation is supported by evidence.",
+    "supportingRefs": [
+      "E1",
+      "E8"
+    ],
+    "signals": [
+      {
+        "level": "strong",
+        "kind": "logs",
+        "text": "420\u00d7 ERROR in orders-api (new pattern)",
+        "evidenceRefs": [
+          "E1"
+        ]
+      },
+      {
+        "level": "strong",
+        "kind": "metric",
+        "text": "Error rate for orders-api up 2900%",
+        "evidenceRefs": [
+          "E8"
+        ]
+      },
+      {
+        "level": "moderate",
+        "kind": "health",
+        "text": "orders-api is recorded as DEGRADED",
+        "evidenceRefs": [
+          "E10"
+        ]
+      }
+    ],
+    "missingTelemetry": [
+      "The trace store returned no traces for the window (none recorded, or no trace store is connected)."
+    ]
+  },
+  "observations": [
+    {
+      "statement": "Most recent deployment on record: Deployment of orders-api v4.2.0 (succeeded), at 2026-06-01T11:22:00Z.",
+      "evidenceRefs": [
+        "E3"
+      ],
+      "verification": {
+        "status": "verified",
+        "checks": [
+          {
+            "text": "2026-06-01T11:22:00Z",
+            "kind": "timestamp",
+            "status": "exact",
+            "detail": "2026-06-01T11:22Z appears in E3",
+            "evidenceRef": "E3"
+          },
+          {
+            "text": "v4.2.0",
+            "kind": "version",
+            "status": "exact",
+            "detail": "appears in E3",
+            "evidenceRef": "E3"
+          }
+        ]
+      }
+    }
+  ],
+  "integrity": {
+    "checked": 26,
+    "supported": 26,
+    "flagged": []
+  },
   "timeline": [
     {
       "timestamp": "2026-06-01T11:00:00Z",
@@ -31,19 +102,97 @@
       "statement": "The most frequent error pattern is \"failed to deserialize cache entry for key order:<n>: unexpected schema version\" in orders-api, seen 420 times since 2026-06-01T11:30:00Z.",
       "evidenceRefs": [
         "E1"
-      ]
+      ],
+      "verification": {
+        "status": "verified",
+        "checks": [
+          {
+            "text": "2026-06-01T11:30:00Z",
+            "kind": "timestamp",
+            "status": "exact",
+            "detail": "2026-06-01T11:30Z appears in E1",
+            "evidenceRef": "E1"
+          },
+          {
+            "text": "420 times",
+            "kind": "number",
+            "status": "exact",
+            "detail": "E1 holds 420 \u00d7",
+            "evidenceRef": "E1"
+          }
+        ]
+      }
     },
     {
       "statement": "The earliest anomalous error pattern first appeared at 2026-06-01T11:30:00Z.",
       "evidenceRefs": [
         "E1"
-      ]
+      ],
+      "verification": {
+        "status": "verified",
+        "checks": [
+          {
+            "text": "2026-06-01T11:30:00Z",
+            "kind": "timestamp",
+            "status": "exact",
+            "detail": "2026-06-01T11:30Z appears in E1",
+            "evidenceRef": "E1"
+          }
+        ]
+      }
     },
     {
       "statement": "Error rate for orders-api up 2900%: error_rate averaged 12% (max 15.6%) between 2026-06-01T10:00:00Z and 2026-06-01T12:00:00Z, versus 0.4% in the preceding window",
       "evidenceRefs": [
         "E8"
-      ]
+      ],
+      "verification": {
+        "status": "verified",
+        "checks": [
+          {
+            "text": "2026-06-01T10:00:00Z",
+            "kind": "timestamp",
+            "status": "exact",
+            "detail": "2026-06-01T10:00Z appears in E8",
+            "evidenceRef": "E8"
+          },
+          {
+            "text": "2026-06-01T12:00:00Z",
+            "kind": "timestamp",
+            "status": "exact",
+            "detail": "2026-06-01T12:00Z appears in E8",
+            "evidenceRef": "E8"
+          },
+          {
+            "text": "2900%",
+            "kind": "number",
+            "status": "exact",
+            "detail": "E8 holds 2900%",
+            "evidenceRef": "E8"
+          },
+          {
+            "text": "12%",
+            "kind": "number",
+            "status": "exact",
+            "detail": "E8 holds 12%",
+            "evidenceRef": "E8"
+          },
+          {
+            "text": "15.6%",
+            "kind": "number",
+            "status": "exact",
+            "detail": "E8 holds 15.6%",
+            "evidenceRef": "E8"
+          },
+          {
+            "text": "0.4%",
+            "kind": "number",
+            "status": "exact",
+            "detail": "E8 holds 0.4%",
+            "evidenceRef": "E8"
+          }
+        ]
+      }
     }
   ],
   "assumptions": [
@@ -86,7 +235,7 @@
     "Confirm by comparing error rate per version, or by rolling back in a controlled way.",
     "Review the diff of the linked change for the suspected mechanism.",
     "Open the log explorer filtered to pattern f1 and follow a trace id across services.",
-    "Follow the documented procedure in \"Runbook: Cache schema migrations \u203a Symptoms\" (E9)."
+    "Follow the documented procedure in \"Runbook: Cache schema migrations \u203a Symptoms\" (E11)."
   ],
   "recommendedActions": [
     {
@@ -95,6 +244,10 @@
       "description": "Roll back orders-api from v4.2.0 to the previous successful version v4.1.9, then watch error rate and latency for 15 minutes.",
       "rationale": "Errors began shortly after v4.2.0 was deployed; v4.1.9 was running before the errors started. This is a hypothesis based on timing and content overlap, not a confirmed cause.",
       "risk": "MEDIUM",
+      "effect": "state_changing",
+      "effectReasons": [
+        "rollback_deployment changes production by definition"
+      ],
       "serviceSlug": "orders-api",
       "parameters": {
         "deploymentId": "d1",

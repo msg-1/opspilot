@@ -133,7 +133,7 @@ test('remediation needs an independent human approval before it can be executed'
   await requester.page.getByRole('button', { name: 'Mark as executed' }).click();
   await requester.page.getByLabel('Notes (optional)').fill('deployctl rollback checkout-service --to v2.13.2');
   await requester.page.getByRole('button', { name: 'I have carried this out' }).click();
-  await expect(requester.page.getByText(/OpsPilot did not change any external system/)).toBeVisible();
+  await expect(requester.page.getByText(/OPSILUME did not change any external system/)).toBeVisible();
   await expect(requester.page.getByText('Executed', { exact: true }).first()).toBeVisible();
 
   // The rollback is now part of the service's deployment history.

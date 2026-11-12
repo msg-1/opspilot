@@ -23,6 +23,16 @@ class EvidenceStore:
         self.items: list[EvidenceItem] = []
         self._seen: dict[tuple[str, str], EvidenceItem] = {}
         self._limit = limit
+        #: What was looked at, whether or not it produced evidence: {tool: {"calls", "records"}}.
+        #: "Nothing found" and "never checked" are different things for a health conclusion.
+        self.coverage: dict[str, dict[str, int]] = {}
+        #: Services for which metric samples were returned
+        self.metric_services: set[str] = set()
+        #: Log lines of any level received in the window, when that was counted (None: not counted).
+        #: Zero lines means the service is silent, which is not the same as healthy.
+        self.log_lines: int | None = None
+        #: service → the services it depends on, as far as get_service was asked
+        self.depends_on: dict[str, list[str]] = {}
 
     def add(self, kind: str, title: str, summary: str, *, source_type: str, source_id: str, occurred_at: str | None = None,
             service: str | None = None, relevance: float | None = None, data: dict[str, Any] | None = None) -> EvidenceItem | None:
@@ -54,6 +64,11 @@ class EvidenceStore:
         handler = getattr(self, f"_from_{tool}", None)
         if handler:
             touched = handler(result)
+        if tool == "get_log_histogram":
+            self.log_lines = (self.log_lines or 0) + sum(int(b.get("total") or 0) for b in result.get("buckets", []))
+        seen_before = self.coverage.setdefault(tool, {"calls": 0, "records": 0})
+        seen_before["calls"] += 1
+        seen_before["records"] += sum(len(v) for v in result.values() if isinstance(v, list))
         seen: set[str] = set()
         out: list[EvidenceItem] = []
         for item in touched:
@@ -171,20 +186,55 @@ class EvidenceStore:
     def _from_get_metrics(self, r: dict[str, Any]) -> list[EvidenceItem | None]:
         out = []
         service = r.get("service")
+        steady: list[dict[str, Any]] = []
+        window_from = None
         for m in r.get("metrics", []):
             change = m.get("changePercent")
             window = m.get("window") or {}
-            if change is None or abs(change) < NOTABLE_METRIC_CHANGE or not window.get("samples"):
+            if not window.get("samples"):
                 continue
+            self.metric_services.add(str(service))
+            window_from = window_from or window.get("from")
             base = m.get("baseline") or {}
             unit = m.get("unit") or ""
-            direction = "up" if change > 0 else "down"
+            # A metric that was zero and no longer is has no percentage change, and is the
+            # clearest change there is (an error rate going from 0 to 28%).
+            from_zero = change is None and not base.get("avg") and (window.get("avg") or 0) > 0
+            if not from_zero and (change is None or abs(change) < NOTABLE_METRIC_CHANGE):
+                steady.append({"metric": m.get("metric"), "label": m.get("label"), "unit": unit, "avg": window.get("avg"), "max": window.get("max"), "baselineAvg": base.get("avg"), "changePercent": change})
+                continue
+            direction = "up" if from_zero or change > 0 else "down"
             out.append(self.add(
-                "metric", f"{m.get('label')} for {service} {direction} {abs(change):.0f}%",
+                "metric", f"{m.get('label')} for {service} up from zero" if from_zero else f"{m.get('label')} for {service} {direction} {abs(change):.0f}%",
                 f"{m.get('metric')} averaged {_num(window.get('avg'))}{unit} (max {_num(window.get('max'))}{unit}) between {window.get('from')} and {window.get('to')}, "
                 f"versus {_num(base.get('avg'))}{unit} in the preceding window",
                 source_type="metric", source_id=f"{service}:{m.get('metric')}:{window.get('from')}", occurred_at=window.get("from"), service=service,
-                data={"metric": m.get("metric"), "changePercent": change, "avg": window.get("avg"), "max": window.get("max"), "min": window.get("min"), "baselineAvg": base.get("avg")},
+                data={"metric": m.get("metric"), "unit": unit, "changePercent": change, "fromZero": from_zero, "avg": window.get("avg"), "max": window.get("max"), "min": window.get("min"), "baselineAvg": base.get("avg")},
+            ))
+        if steady:
+            # Metrics that did NOT move are evidence too: they are what a healthy conclusion rests on.
+            out.append(self.add(
+                "metric_baseline", f"{len(steady)} metric(s) for {service} show no notable change",
+                "; ".join(f"{m['metric']} averaged {_num(m['avg'])}{m['unit']}" + (f" ({_num(m['baselineAvg'])}{m['unit']} before)" if m["baselineAvg"] is not None else "") for m in steady[:8]),
+                source_type="metric_baseline", source_id=f"{service}:{window_from}", occurred_at=window_from, service=service, data={"metrics": steady[:12]},
+            ))
+        return out
+
+    def _from_get_traces(self, r: dict[str, Any]) -> list[EvidenceItem | None]:
+        """Slow and failed traces, each with the span that accounts for most of the time."""
+        out = []
+        for t in r.get("traces", [])[:6]:
+            slowest = t.get("slowestSpan") or {}
+            failed = t.get("errorSpans") or []
+            title = f"{'Failed' if failed else 'Slow'} trace through {t.get('rootService')}: {_num(t.get('durationMs'))}ms"
+            parts = [f"{t.get('rootOperation')} took {_num(t.get('durationMs'))}ms across {t.get('spanCount')} spans in {', '.join(t.get('services') or [])}."]
+            if slowest:
+                parts.append(f"Most of the time was spent in {slowest.get('service')} {slowest.get('operation')} ({_num(slowest.get('durationMs'))}ms).")
+            if failed:
+                parts.append("Spans with errors: " + "; ".join(f"{e.get('service')} {e.get('operation')}" + (f" ({_clip(e.get('message'), 80)})" if e.get("message") else "") for e in failed[:3]) + ".")
+            out.append(self.add(
+                "trace", title, " ".join(parts), source_type="trace", source_id=str(t.get("traceId")), occurred_at=t.get("startedAt"), service=t.get("rootService"),
+                data={k: t.get(k) for k in ("traceId", "durationMs", "spanCount", "services", "rootOperation", "slowestSpan", "errorSpans")},
             ))
         return out
 
@@ -232,9 +282,18 @@ class EvidenceStore:
 
     def _from_get_service(self, r: dict[str, Any]) -> list[EvidenceItem | None]:
         out = []
+        # Who calls whom, kept so that analysis can tell where a chain of failing dependencies starts.
+        self.depends_on[str(r.get("slug"))] = [str(d.get("slug")) for d in r.get("dependsOn", [])]
+        if r.get("health") and r.get("slug"):
+            firing = r.get("firingAlerts") or []
+            out.append(self.add(
+                "service_health", f"{r.get('slug')} is recorded as {r.get('health')}",
+                (r.get("healthNote") or f"Health status of {r.get('name') or r.get('slug')} in the service catalogue.") + (f" {len(firing)} alert(s) firing." if firing else " No alert is firing."),
+                source_type="service_health", source_id=str(r.get("id") or r.get("slug")), service=r.get("slug"), data={"health": r.get("health"), "firingAlerts": len(firing)},
+            ))
         for d in r.get("dependsOn", []):
             if d.get("health") in ("DEGRADED", "DOWN"):
-                out.append(self.add("dependency", f"Upstream dependency {d.get('slug')} is {d.get('health')}", f"{r.get('slug')} depends on {d.get('name')} ({d.get('kind')}), which is {d.get('health')}: {d.get('healthNote') or ''}", source_type="service", source_id=f"dep:{d.get('slug')}", service=d.get("slug")))
+                out.append(self.add("dependency", f"Upstream dependency {d.get('slug')} is {d.get('health')}", f"{r.get('slug')} depends on {d.get('name')} ({d.get('kind')}), which is {d.get('health')}: {d.get('healthNote') or ''}", source_type="service", source_id=f"dep:{d.get('slug')}", service=d.get("slug"), data={"health": d.get("health"), "dependant": r.get("slug"), "kind": d.get("kind")}))
         return out
 
 

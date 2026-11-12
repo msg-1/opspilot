@@ -57,6 +57,8 @@ export interface InvestigationSummary {
   estimatedCostUsd?: number | null;
   summary: string | null;
   confidence: number | null;
+  /** Whether the evidence shows a fault at all */
+  outcome?: Outcome | null;
   error?: string | null;
   createdAt: string;
   startedAt?: string | null;
@@ -107,12 +109,54 @@ export interface Step {
   createdAt: string;
 }
 
+export type Outcome = 'HEALTHY' | 'DEGRADED' | 'INCIDENT' | 'UNDETERMINED';
+
+export interface ClaimCheck {
+  text: string;
+  kind: string;
+  status: 'exact' | 'rounded' | 'calculated' | 'estimate' | 'uncited' | 'unsupported';
+  detail: string;
+  evidenceRef?: string | null;
+}
+
+/** Whether the figures in a statement were found in the evidence it cites. */
+export interface Verification {
+  status: 'verified' | 'partly' | 'unsupported' | 'no_claims';
+  checks: ClaimCheck[];
+}
+
+export interface Statement {
+  statement: string;
+  evidenceRefs: string[];
+  verification?: Verification | null;
+}
+
+/** Whether the evidence shows a fault at all, with what the verdict rests on. */
+export interface Assessment {
+  outcome: Outcome;
+  confidence: number;
+  rationale: string;
+  supportingRefs: string[];
+  signals: { level: 'strong' | 'moderate' | 'weak'; kind: string; text: string; evidenceRefs: string[] }[];
+  missingTelemetry: string[];
+}
+
+export interface Integrity {
+  checked: number;
+  supported: number;
+  flagged: { where: string; text: string; status: ClaimCheck['status']; detail: string }[];
+}
+
 export interface Report {
   summary: string;
   confidence: number;
   analysisMode: 'llm' | 'heuristic' | 'mock';
+  outcome?: Outcome | null;
+  assessment?: Assessment | null;
+  observations?: Statement[];
+  integrity?: Integrity | null;
   timeline: { timestamp: string; description: string; evidenceRefs: string[] }[];
-  facts: { statement: string; evidenceRefs: string[] }[];
+  facts: Statement[];
   assumptions: string[];
   uncertainties: string[];
   nextSteps: string[];
@@ -124,6 +168,8 @@ export interface RemediationSummary {
   type: string;
   risk: string;
   status: string;
+  /** What carrying it out would do: only look, or change something */
+  effect?: 'read_only' | 'state_changing';
   proposedByType?: string;
   createdAt?: string;
 }
@@ -140,11 +186,15 @@ export interface Remediation extends RemediationSummary {
   requestedAt: string | null;
   executedBy: Ref | null;
   executedAt: string | null;
-  executionResult: { mode: string; success: boolean; summary: string; detail?: Record<string, unknown> } | null;
+  executionResult: { mode: string; success: boolean; outcome?: 'applied' | 'not_applied' | 'unknown'; summary: string; detail?: Record<string, unknown>; contentHash?: string; attempt?: number } | null;
+  effectReasons?: string[] | null;
+  /** Hash of exactly what an approver is shown; sent back with the approval */
+  currentHash?: string;
+  attempts?: number;
   service: ServiceRef | null;
   incident: { id: string; number: number; title: string; severity: string; status: string } | null;
   investigation: { id: string; question: string; summary: string | null } | null;
-  approvals: { id: string; decision: string; comment: string | null; createdAt: string; approver: Ref | null }[];
+  approvals: { id: string; decision: string; comment: string | null; createdAt: string; approver: Ref | null; counts?: boolean; supersededAt?: string | null }[];
   createdAt: string;
   executionMode?: 'webhook' | 'manual';
   allowSelfApproval?: boolean;

@@ -80,6 +80,8 @@ class Expectation:
     cause: Cause | None = None
     #: True when the correct answer is that nothing is wrong
     healthy: bool = False
+    #: What the evidence supports: HEALTHY, DEGRADED or INCIDENT
+    outcome: str = "INCIDENT"
     min_confidence: float = 0.0
     max_confidence: float = 1.0
     # Id of the deployment the evidence implicates, if any. A rollback is acceptable only for
@@ -117,6 +119,9 @@ class Scenario:
     #: ERROR/FATAL log counts (30 minutes before, up to 30 minutes after) per deployment id, for
     #: the deployment-context tool. Derived from the anomalies when a deployment is not listed.
     deployment_errors: dict[str, tuple[int, int]] = field(default_factory=dict)
+    traces: list[dict[str, Any]] = field(default_factory=list)
+    #: Log lines of all levels the services sent in the window. Zero: the services are silent.
+    log_lines: int = 600
 
     def handler(self) -> Callable[[httpx.Request], httpx.Response]:
         def handle(request: httpx.Request) -> httpx.Response:
@@ -142,7 +147,7 @@ class Scenario:
             if path == "/logs/search":
                 return httpx.Response(200, json={"window": window, "totalMatching": len(self.logs), "returned": len(self.logs), "logs": pick(self.logs)})
             if path == "/logs/histogram":
-                return httpx.Response(200, json={"window": window, "bucketSeconds": 300, "buckets": []})
+                return httpx.Response(200, json={"window": window, "bucketSeconds": 300, "buckets": [{"timestamp": t(60), "errors": 0, "warnings": 0, "total": self.log_lines}] if self.log_lines else []})
             if path == "/deployment-context":
                 # Mirrors deploymentContext() in apps/api/src/modules/tools.ts.
                 slug = request.url.params.get("service", "")
@@ -174,6 +179,8 @@ class Scenario:
                     "errorLogs": {"windowMinutes": window_minutes, "before": before, "after": after, "beforePerMinute": round(before / 30, 2), "afterPerMinute": round(after / window_minutes, 2) if window_minutes else None},
                     "incidentsAfter": [], "recentDeployments": mine[:6],
                 })
+            if path == "/traces":
+                return httpx.Response(200, json={"available": bool(self.traces), "service": request.url.params.get("service"), "window": window, "traces": [x for x in self.traces if x["rootService"] == request.url.params.get("service")], "note": None if self.traces else "No trace store is connected."})
             if path == "/deployments":
                 return httpx.Response(200, json={"window": window, "deployments": pick(self.deployments)})
             if path == "/code-changes":
@@ -243,7 +250,7 @@ SCENARIOS: list[Scenario] = [
         name="healthy_no_signal",
         question="Is anything wrong with billing-service?",
         description="A healthy service with a few routine warnings and a week-old deployment. The right answer is 'no clear problem'.",
-        expect=Expectation(healthy=True, max_confidence=0.25),
+        expect=Expectation(healthy=True, outcome="HEALTHY", max_confidence=0.25),
         services=[svc("billing-service")],
         anomalies=[pattern("f3", "billing-service", "invoice email retry scheduled attempt=<n>", 6, 90, level="WARN")],
         # A healthy service still has logs behind its patterns and metrics that show it is healthy.
@@ -276,12 +283,76 @@ SCENARIOS: list[Scenario] = [
         name="tool_failures_degrade_gracefully",
         question="Why is orders-api failing?",
         description="Same as the first scenario but the deployments and code-changes endpoints are down. The agent must say what it could not check and must not claim high confidence.",
-        expect=Expectation(max_confidence=0.5, must_acknowledge=[["deployment"], ["code change"], ["commit"], ["pull request"]]),
+        expect=Expectation(outcome="DEGRADED", max_confidence=0.5, must_acknowledge=[["deployment"], ["code change"], ["commit"], ["pull request"]]),
         services=[svc("orders-api", [], "DEGRADED")],
         anomalies=[pattern("f1", "orders-api", "failed to deserialize cache entry for key order:<n>: unexpected schema version", 420, 30)],
         logs=[_log("l1", "orders-api", "failed to deserialize cache entry for key order:8812: unexpected schema version 3", 20)],
         metrics={"orders-api": [metric("error_rate", "Error rate", "%", 12.0, 0.4)]},
         fail_paths=["/deployments", "/code-changes"],
+    ),
+    # ── Healthy-state scenarios: the right answer is that nothing needs fixing ──
+    Scenario(
+        name="healthy_clean",
+        question="Is inventory-api healthy right now?",
+        description="Nothing is wrong: steady metrics, no warnings or errors, no recent change, healthy status. The report must say so and rest on the evidence that shows it.",
+        expect=Expectation(healthy=True, outcome="HEALTHY", max_confidence=0.25),
+        services=[svc("inventory-api", ["inventory-db"]), svc("inventory-db")],
+        metrics={"inventory-api": [metric("error_rate", "Error rate", "%", 0.2, 0.2), metric("latency_p95_ms", "p95 latency", "ms", 120, 118), metric("throughput_rps", "Throughput", "rps", 41, 40)]},
+        service_details={"inventory-api": {"health": "HEALTHY", "dependsOn": [{"slug": "inventory-db", "name": "Inventory Db", "health": "HEALTHY", "healthNote": None, "kind": "sync"}]}},
+    ),
+    Scenario(
+        name="healthy_old_deployment",
+        question="We deployed catalog-api a while ago. Is it causing any problems?",
+        description="A healthy service whose last deployment was twelve days ago. An old deployment is context, not a suspect: no rollback, no blame.",
+        expect=Expectation(healthy=True, outcome="HEALTHY", max_confidence=0.25),
+        services=[svc("catalog-api")],
+        metrics={"catalog-api": [metric("error_rate", "Error rate", "%", 0.1, 0.1), metric("latency_p95_ms", "p95 latency", "ms", 95, 97)]},
+        deployments=[deployment("d31", "catalog-api", "v8.4.0", 60 * 24 * 12, "abcabcabcabc3131", "Quarterly dependency update"), deployment("d30", "catalog-api", "v8.3.2", 60 * 24 * 40, "abcabcabcabc3030")],
+        service_details={"catalog-api": {"health": "HEALTHY"}},
+    ),
+    Scenario(
+        name="healthy_irrelevant_warnings",
+        question="notifications-api is logging warnings. Is something broken?",
+        description="A healthy service with routine warnings at their usual volume. Warnings that have always been there are not a fault.",
+        expect=Expectation(healthy=True, outcome="HEALTHY", max_confidence=0.25),
+        services=[svc("notifications-api")],
+        anomalies=[
+            pattern("f41", "notifications-api", "provider rate limit at <n>% of quota", 14, 110, level="WARN", kind="steady", baseline=13),
+            pattern("f42", "notifications-api", "deprecated config key smtp.legacy_tls is set", 3, 100, level="WARN", kind="steady", baseline=3),
+        ],
+        logs=[_log("l41", "notifications-api", "provider rate limit at 71% of quota", 30, level="WARN")],
+        metrics={"notifications-api": [metric("error_rate", "Error rate", "%", 0.3, 0.3), metric("latency_p95_ms", "p95 latency", "ms", 210, 205)]},
+        service_details={"notifications-api": {"health": "HEALTHY"}},
+    ),
+    Scenario(
+        name="healthy_misleading_signals",
+        question="We just deployed reports-api and I see new warnings. Did the deployment break something?",
+        description="Plausible but misleading: a deployment twelve minutes ago, a handful of new slow-query warnings after it and a flag change. Error rate is flat and latency "
+        "is within normal variation. The timing invites blame; the evidence does not support a fault, a cause or a rollback.",
+        expect=Expectation(
+            healthy=True, outcome="HEALTHY", max_confidence=0.25,
+            distractors=[Distractor("the deployment twelve minutes ago", terms=[["v6.3.0"]], evidence=[("deployment", "d51"), ("deployment_impact", "d51")])],
+        ),
+        services=[svc("reports-api", ["reports-db"]), svc("reports-db")],
+        anomalies=[pattern("f51", "reports-api", "slow query took <n>ms: monthly_summary", 8, 9, level="WARN")],
+        logs=[_log("l51", "reports-api", "slow query took 1840ms: monthly_summary", 6, level="WARN")],
+        deployments=[deployment("d51", "reports-api", "v6.3.0", 12, "abcabcabcabc5151", "Add CSV export"), deployment("d50", "reports-api", "v6.2.9", 60 * 24 * 3, "abcabcabcabc5050")],
+        events=[{"id": "e51", "service": "reports-api", "type": "feature_flag", "title": "Flag csv_export enabled", "details": "Enabled for internal users", "actor": "pm", "source": "api", "occurredAt": t(10)}],
+        metrics={"reports-api": [metric("error_rate", "Error rate", "%", 0.2, 0.2), metric("latency_p95_ms", "p95 latency", "ms", 330, 280), metric("throughput_rps", "Throughput", "rps", 12, 12)]},
+        service_details={"reports-api": {"health": "HEALTHY"}},
+        deployment_errors={"d51": (0, 0)},
+    ),
+    Scenario(
+        name="degraded_incomplete_evidence",
+        question="search-api feels slow. What is going on?",
+        description="Measurable but modest anomalies: p95 latency up by about a third and a few upstream timeouts. No change, no dependency status and no trace explains them. "
+        "The report must say the service is degraded, that the cause is not established, and what is missing.",
+        expect=Expectation(outcome="DEGRADED", max_confidence=0.45, must_acknowledge=[["cause"], ["not establish"], ["unknown"], ["cannot"], ["no deployment"]]),
+        services=[svc("search-api", ["index-node"]), svc("index-node")],
+        anomalies=[pattern("f61", "search-api", "upstream timeout after <n>ms calling index-node", 6, 35)],
+        logs=[_log("l61", "search-api", "upstream timeout after 2000ms calling index-node", 14)],
+        metrics={"search-api": [metric("latency_p95_ms", "p95 latency", "ms", 540, 395), metric("error_rate", "Error rate", "%", 0.4, 0.3)]},
+        service_details={"search-api": {"health": "HEALTHY", "dependsOn": [{"slug": "index-node", "name": "Index Node", "health": "HEALTHY", "healthNote": None, "kind": "sync"}]}},
     ),
     Scenario(
         name="deployment_rollback_target",

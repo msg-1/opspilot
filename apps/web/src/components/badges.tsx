@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import { AlertOctagon, AlertTriangle, CheckCircle2, CircleDashed, CircleDot, Cog, FlaskConical, HelpCircle, Info, Loader2, MinusCircle, Sparkles, XCircle } from 'lucide-react';
+import { AlertOctagon, AlertTriangle, CheckCircle2, CircleDashed, CircleDot, Cog, Eye, FlaskConical, HelpCircle, Info, Loader2, MinusCircle, Sparkles, Wrench, XCircle } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { titleCase } from '@/lib/format';
 
@@ -90,6 +90,27 @@ export function RemediationStatusBadge({ status }: { status: string }) {
       {label}
     </Badge>
   );
+}
+
+const OUTCOME: Record<string, { tone: Tone; icon: ReactNode; label: string }> = {
+  HEALTHY: { tone: 'good', icon: <CheckCircle2 className={I} aria-hidden />, label: 'Healthy · no fault found' },
+  DEGRADED: { tone: 'warn', icon: <AlertTriangle className={I} aria-hidden />, label: 'Degraded · cause not established' },
+  INCIDENT: { tone: 'critical', icon: <AlertOctagon className={I} aria-hidden />, label: 'Incident' },
+  UNDETERMINED: { tone: 'neutral', icon: <HelpCircle className={I} aria-hidden />, label: 'Undetermined · no telemetry' },
+};
+
+/** Whether the evidence shows a fault at all. Computed from the evidence, for every engine. */
+export function OutcomeBadge({ outcome }: { outcome: string }) {
+  const o = OUTCOME[outcome] ?? OUTCOME.UNDETERMINED!;
+  return <Badge tone={o.tone} icon={o.icon}>{o.label}</Badge>;
+}
+
+/** What carrying out an action would do. Read-only diagnostics need no approval; changes always do. */
+export function EffectBadge({ effect }: { effect?: string | null }) {
+  if (!effect) return null;
+  return effect === 'read_only'
+    ? <Badge tone="neutral" icon={<Eye className={I} aria-hidden />}>Read-only check</Badge>
+    : <Badge tone="warn" icon={<Wrench className={I} aria-hidden />}>Changes production</Badge>;
 }
 
 export function RiskBadge({ risk }: { risk: string }) {

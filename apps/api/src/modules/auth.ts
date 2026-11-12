@@ -303,7 +303,7 @@ authRouter.post('/accept-invitation', limiter, async (req, res) => {
   } else {
     // Existing accounts must prove ownership before being attached to a new organisation.
     if (!body.password || !(await bcrypt.compare(body.password, user.passwordHash))) {
-      throw unauthorized('Enter your existing OpsPilot password to accept this invitation');
+      throw unauthorized('Enter your existing OPSILUME password to accept this invitation');
     }
   }
   await prisma.$transaction([

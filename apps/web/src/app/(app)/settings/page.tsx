@@ -52,8 +52,8 @@ function Organisation() {
         </div>
         <label className="mt-4 flex items-start gap-2 text-sm"><input type="checkbox" className="mt-0.5" disabled={!can} checked={f.allowSelfApproval} onChange={(e) => setF({ ...f, allowSelfApproval: e.target.checked })} /><span>Allow people to approve actions they proposed or requested<span className="block text-[12px] text-ink-2">Off by default. Turning this on removes the separation of duties; the change is audited.</span></span></label>
       </Card>
-      <Card title="Remediation execution" description="OpsPilot never changes your infrastructure directly.">
-        <Field label="Remediation webhook URL" hint="When set, executing an approved action POSTs it here (for example to a CI/CD pipeline). When empty, operators carry out actions themselves and confirm in OpsPilot.">
+      <Card title="Remediation execution" description="OPSILUME never changes your infrastructure directly.">
+        <Field label="Remediation webhook URL" hint="When set, executing an approved action POSTs it here (for example to a CI/CD pipeline). When empty, operators carry out actions themselves and confirm in OPSILUME.">
           {(id) => <Input id={id} type="url" disabled={!can} placeholder="https://ci.example.com/hooks/opspilot" value={f.remediationWebhookUrl ?? ''} onChange={(e) => setF({ ...f, remediationWebhookUrl: e.target.value })} />}
         </Field>
         <Field className="mt-4" label="Signing secret" hint={`Requests carry an X-OpsPilot-Signature header (HMAC-SHA256 of the body). ${f.remediationWebhookSecretSet ? 'A secret is stored; enter a new one to replace it.' : 'No secret is stored yet.'}`}>
@@ -104,7 +104,7 @@ function GitHub() {
             </form>
           </Card>
           <Card title="Webhook" description="Optional. Receives pushes and pull request events as they happen instead of waiting for a sync.">
-            <DefinitionList items={[['Payload URL', <Mono key="u">{`<public URL of your OpsPilot API>${data.webhookPath}`}</Mono>], ['Content type', <Mono key="c">application/json</Mono>], ['Events', 'Pushes, Pull requests'], ['Secret', data.webhookSecretSet ? 'Configured' : 'Not configured: webhooks are rejected until one is set']]} />
+            <DefinitionList items={[['Payload URL', <Mono key="u">{`<public URL of your OPSILUME API>${data.webhookPath}`}</Mono>], ['Content type', <Mono key="c">application/json</Mono>], ['Events', 'Pushes, Pull requests'], ['Secret', data.webhookSecretSet ? 'Configured' : 'Not configured: webhooks are rejected until one is set']]} />
             <form className="mt-4 flex flex-wrap items-end gap-2" onSubmit={async (e) => { e.preventDefault(); if (await run(() => api.put('/github/integration', { webhookSecret: secret }), 'secret')) setSecret(''); }}>
               <Field label="Webhook secret" className="min-w-64 flex-1">{(id) => <Input id={id} type="password" autoComplete="off" required minLength={16} placeholder="Same value you enter in GitHub" value={secret} onChange={(e) => setSecret(e.target.value)} />}</Field>
               <Button type="submit" loading={busy === 'secret'}>Save secret</Button>
@@ -154,7 +154,7 @@ function ApiKeys() {
       <Modal open={creating} onClose={close} title={secret ? 'Copy your new key' : 'New API key'} footer={secret ? <Button variant="primary" onClick={close}>I have copied it</Button> : <><Button onClick={close}>Cancel</Button><Button variant="primary" type="submit" form="key" loading={!!busy} disabled={!scopes.length}>Create key</Button></>}>
         {secret ? (
           <div className="space-y-3">
-            <Notice tone="warn">This is the only time the key is shown. OpsPilot stores only a hash of it.</Notice>
+            <Notice tone="warn">This is the only time the key is shown. OPSILUME stores only a hash of it.</Notice>
             <div className="flex gap-2"><Input readOnly aria-label="API key" value={secret} className="font-mono text-[12px]" onFocus={(e) => e.target.select()} /><Button icon={<Copy className="size-3.5" aria-hidden />} onClick={() => { void navigator.clipboard.writeText(secret); setCopied(true); }}>{copied ? 'Copied' : 'Copy'}</Button></div>
             <p className="text-[12px] text-ink-2">Send it in the <Mono>x-api-key</Mono> header.</p>
           </div>

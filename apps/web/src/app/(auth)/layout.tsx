@@ -1,3 +1,5 @@
+import { BRAND } from '@/lib/brand';
+
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="grid min-h-dvh lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]">
@@ -8,10 +10,14 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
               <path d="M3 13h4l2.5-7 4 13 2.5-6H21" />
             </svg>
           </span>
-          <span className="text-lg font-semibold tracking-tight text-white">OpsPilot</span>
+          <span className="flex flex-col leading-tight">
+            <span className="text-lg font-semibold tracking-[0.08em] text-white">{BRAND.name}</span>
+            <span className="text-[12px] text-white/70">{BRAND.category}</span>
+          </span>
         </div>
         <div>
-          <p className="max-w-md text-[28px] leading-tight font-semibold tracking-tight text-white">From alert to evidence-backed hypothesis, with a human on every production change.</p>
+          <p className="max-w-md text-[28px] leading-tight font-semibold tracking-tight text-white">{BRAND.tagline}</p>
+          <p className="mt-3 max-w-md text-sm">From alert to evidence-backed hypothesis, with a human on every production change.</p>
           <ul className="mt-6 space-y-2.5 text-sm">
             <li>Correlates logs, deployments, code changes and metrics around an incident</li>
             <li>Every claim in an investigation cites the record it came from</li>

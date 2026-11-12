@@ -1,0 +1,17 @@
+{
+  "name": "opsilume-demo-services",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Small instrumented microservices used to give OPSILUME real telemetry and real failures to investigate. Local demonstration only.",
+  "license": "MIT",
+  "dependencies": {
+    "@opentelemetry/api": "^1.10.0",
+    "@opentelemetry/auto-instrumentations-node": "^0.83.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.301.1",
+    "@opentelemetry/sdk-node": "^0.301.1",
+    "express": "^4.21.2",
+    "ioredis": "^5.4.2",
+    "pg": "^8.13.1",
+    "prom-client": "^15.1.3"
+  }
+}

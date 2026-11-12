@@ -37,7 +37,7 @@ describe('API client', () => {
 
   it('reports an unreachable API in plain language', async () => {
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('fetch failed'));
-    await expect(api.get('/dashboard')).rejects.toMatchObject({ status: 0, message: expect.stringContaining('Cannot reach the OpsPilot API') });
+    await expect(api.get('/dashboard')).rejects.toMatchObject({ status: 0, message: expect.stringContaining('Cannot reach the OPSILUME API') });
   });
 
   it('useApi shows data, and does not retry client errors', async () => {
@@ -106,5 +106,60 @@ describe('components', () => {
     expect(screen.getByRole('button', { name: 'Previous' })).toBeDisabled();
     await userEvent.click(screen.getByRole('button', { name: 'Next' }));
     await waitFor(() => expect(onPage).toHaveBeenCalledWith(2));
+  });
+});
+
+describe('healthy-state conclusions and checked figures', () => {
+  it('shows the outcome with what it rests on and what was not examined', async () => {
+    const { AssessmentCard } = await import('@/components/findings');
+    render(
+      <AssessmentCard
+        assessment={{
+          outcome: 'HEALTHY', confidence: 0.82, supportingRefs: ['E1'], rationale: 'No material evidence of a fault in the window examined: metrics held steady.',
+          signals: [{ level: 'weak', kind: 'logs', text: '6× WARN in billing', evidenceRefs: ['E2'] }, { level: 'moderate', kind: 'metric', text: 'p95 up 30%', evidenceRefs: ['E3'] }],
+          missingTelemetry: ['Traces were not examined.'],
+        }}
+        renderRefs={(refs) => <span>[{refs.join(',')}]</span>}
+      />,
+    );
+    const card = screen.getByRole('region', { name: 'Assessment' });
+    expect(card).toHaveTextContent('Healthy · no fault found');
+    expect(card).toHaveTextContent('82% confidence in this assessment');
+    expect(card).toHaveTextContent('metrics held steady. [E1]');
+    // Weak signals are observations, not listed as signals of a fault; what was not examined is always shown.
+    expect(card).toHaveTextContent('moderate signal');
+    expect(card).not.toHaveTextContent('6× WARN in billing');
+    expect(card).toHaveTextContent('Traces were not examined.');
+  });
+
+  it('marks a statement whose figure is not in the evidence, where the statement is read', async () => {
+    const { VerificationMark, IntegritySummary } = await import('@/components/findings');
+    const { rerender, container } = render(<VerificationMark verification={{ status: 'unsupported', checks: [{ text: '44%', kind: 'number', status: 'unsupported', detail: 'no cited evidence holds this value' }] }} />);
+    expect(screen.getByText('Unsupported figure')).toBeInTheDocument();
+    expect(container).toHaveTextContent('44% · not found in the evidence: no cited evidence holds this value');
+    rerender(<VerificationMark verification={{ status: 'verified', checks: [{ text: '12%', kind: 'number', status: 'rounded', detail: 'E1 holds 12.37%, which rounds to this' }] }} />);
+    expect(screen.getByText('Figures verified')).toBeInTheDocument();
+    rerender(<VerificationMark verification={{ status: 'no_claims', checks: [] }} />);
+    expect(container).toBeEmptyDOMElement();
+
+    render(<IntegritySummary integrity={{ checked: 26, supported: 24, flagged: [{ where: 'fact 3', text: '44%', status: 'unsupported', detail: 'no cited evidence holds this value' }, { where: 'summary', text: '5000 ms', status: 'estimate', detail: 'stated as approximate' }] }} />);
+    const check = screen.getByRole('region', { name: 'Evidence check' });
+    expect(check).toHaveTextContent('24 of 26 figures and identifiers in this report match the evidence they cite.');
+    expect(check).toHaveTextContent('1 could not be matched');
+    expect(check).toHaveTextContent('44% in fact 3');
+  });
+
+  it('labels every outcome and every action effect in words, not colour alone', async () => {
+    const { OutcomeBadge, EffectBadge } = await import('@/components/badges');
+    const { rerender, container } = render(<OutcomeBadge outcome="DEGRADED" />);
+    expect(screen.getByText('Degraded · cause not established')).toBeInTheDocument();
+    rerender(<OutcomeBadge outcome="UNDETERMINED" />);
+    expect(screen.getByText('Undetermined · no telemetry')).toBeInTheDocument();
+    rerender(<EffectBadge effect="state_changing" />);
+    expect(screen.getByText('Changes production')).toBeInTheDocument();
+    rerender(<EffectBadge effect="read_only" />);
+    expect(screen.getByText('Read-only check')).toBeInTheDocument();
+    rerender(<EffectBadge effect={null} />);
+    expect(container).toBeEmptyDOMElement();
   });
 });

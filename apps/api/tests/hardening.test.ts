@@ -167,7 +167,10 @@ describe('remediation risk floor', () => {
     expect((await propose({ type: 'rollback_deployment' })).body.risk).toBe('MEDIUM');
     expect((await propose({ type: 'config_change' })).body.risk).toBe('MEDIUM');
     expect((await propose({ type: 'restart_service', serviceId: tier1.id })).body.risk).toBe('MEDIUM');
-    expect((await propose({ type: 'manual' })).body.risk).toBe('LOW');
+    // A manual step is judged by what it does: "Do the thing" could be anything, so it counts as a change.
+    expect((await propose({ type: 'manual' })).body).toMatchObject({ risk: 'MEDIUM', effect: 'state_changing' });
+    expect((await propose({ type: 'manual', title: 'Check the error dashboard', description: 'Compare the error rate with yesterday.' })).body).toMatchObject({ risk: 'LOW', effect: 'read_only', requiredApprovals: 0 });
+    expect((await propose({ type: 'run_runbook', title: 'Flush the order cache', description: 'Purge every order key.' })).body).toMatchObject({ risk: 'MEDIUM', effect: 'state_changing' });
     expect((await propose({ type: 'rollback_deployment', risk: 'HIGH' })).body).toMatchObject({ risk: 'HIGH', requiredApprovals: 2 });
   });
 });

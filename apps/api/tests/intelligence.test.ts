@@ -153,7 +153,7 @@ describe('investigations', () => {
     // The recommendation exists only as a proposal attributed to the AI.
     expect(inv.remediations).toEqual([expect.objectContaining({ type: 'rollback_deployment', status: 'PROPOSED' })]);
     const action = (await org.owner.get(`/api/v1/remediations/${inv.remediations[0].id}`)).body;
-    expect(action).toMatchObject({ proposedByType: 'ai_agent', proposedBy: { name: 'OpsPilot AI' }, service: { slug: 'checkout' } });
+    expect(action).toMatchObject({ proposedByType: 'ai_agent', proposedBy: { name: 'OPSILUME AI' }, service: { slug: 'checkout' } });
     expect(await prisma.deployment.count({ where: { organizationId: org.organizationId } })).toBe(0);
     const timeline = (await org.owner.get(`/api/v1/incidents/${incident.id}`)).body.timeline.map((e: { type: string }) => e.type);
     expect(timeline.filter((t: string) => t === 'investigation')).toHaveLength(2);
@@ -224,10 +224,11 @@ describe('investigations', () => {
     const started = await org.owner.post('/api/v1/investigations').send({ question: 'Why is checkout failing today?' });
     const inv = (await org.owner.get(`/api/v1/investigations/${started.body.id}`)).body;
     expect(inv.status).toBe('COMPLETED');
-    expect(inv.report.recommendedActions.map((a: { type: string; title: string }) => `${a.type}: ${a.title}`)).toEqual(['rollback_deployment: Roll back checkout to v1', 'manual: Pause the flag as a precaution']);
-    expect(inv.report.recommendedActions[1].parameters ?? null).toBeNull();
+    // The precautionary change is withdrawn, not relabelled as "manual": the same change would still be on offer.
+    expect(inv.report.recommendedActions.map((a: { type: string; title: string; effect: string }) => `${a.type}: ${a.title} [${a.effect}]`)).toEqual(['rollback_deployment: Roll back checkout to v1 [state_changing]']);
+    expect(inv.report.nextSteps.join('\n')).toContain('Considered and not recommended (it would change production on the strength of a hypothesis rated unlikely): Pause the flag as a precaution');
     expect(inv.report.nextSteps.at(-1)).toContain('Higher-risk alternative, only if the lower-risk action is not possible: Flush the cache');
-    expect(inv.remediations.map((r: { type: string }) => r.type).sort()).toEqual(['manual', 'rollback_deployment']);
+    expect(inv.remediations.map((r: { type: string }) => r.type)).toEqual(['rollback_deployment']);
     const guardrail = inv.steps.find((s: { type: string }) => s.type === 'guardrail').detail;
     expect(guardrail).toContain('rated unlikely');
     expect(guardrail).toContain('moved to next steps');
@@ -443,8 +444,9 @@ describe('remediation approvals', () => {
       await org.owner.post(`${base}/request-approval`);
       await approver.agent.post(`${base}/approve`);
       received = [];
-      status = 500;
-      expect((await org.owner.post(`${base}/execute`).send({})).body).toMatchObject({ status: 'FAILED', executionResult: { mode: 'webhook', success: false } });
+      // The receiver refuses (4xx): nothing was applied, so a retry needs no further confirmation.
+      status = 422;
+      expect((await org.owner.post(`${base}/execute`).send({})).body).toMatchObject({ status: 'FAILED', executionResult: { mode: 'webhook', success: false, outcome: 'not_applied' } });
       expect(await prisma.serviceEvent.count({ where: { organizationId: org.organizationId } })).toBe(0);
       status = 200;
       await org.owner.post(`${base}/retry`).expect(200);
@@ -454,7 +456,10 @@ describe('remediation approvals', () => {
       expect(executed.executionResult.detail).toEqual({ status: 200 });
       const last = received.at(-1)!;
       expect(last.headers['x-opspilot-signature']).toBe(`sha256=${createHmac('sha256', 'webhook-secret-123456').update(last.body).digest('hex')}`);
-      expect(JSON.parse(last.body)).toMatchObject({ event: 'remediation.execute', type: 'restart_service', parameters: { replicas: 3 } });
+      expect(JSON.parse(last.body)).toMatchObject({ event: 'remediation.execute', type: 'restart_service', parameters: { replicas: 3 }, idempotencyKey: action.id, attempt: 2, effect: 'state_changing', contentHash: executed.currentHash });
+      // Both attempts carried the same idempotency key, so a receiver can refuse a repeat.
+      expect(received.map((r) => r.headers['idempotency-key'])).toEqual([action.id, action.id]);
+      expect(JSON.parse(last.body).approvals).toEqual([expect.objectContaining({ approverId: approver.userId })]);
       expect((await org.owner.get('/api/v1/service-events')).body.data[0]).toMatchObject({ type: 'restart', source: 'remediation' });
     });
   });

@@ -5,6 +5,8 @@ the report. Criteria that a scenario does not exercise are marked "n/a" and neve
 
 What is compared, and why:
 
+  outcome        Whether there is a fault at all: HEALTHY, DEGRADED or INCIDENT, as assessed from
+                 the evidence that was gathered.
   root_cause     Structural where possible: the leading hypothesis is right when it cites, as
                  support, a record that is the cause (the deployment, its pull request, the failed
                  dependency) and names the component, or describes the mechanism in any accepted
@@ -23,7 +25,7 @@ What is compared, and why:
   calibration    Confidence lies in the range the evidence supports.
   diagnostics    The report gives a human something concrete to check next.
   remediation    Nothing proposed is unsafe: no high-risk action, no production change without an
-                 implicated deployment or without evidence, none aimed at a distractor, and a
+                 established cause or without evidence, no rollback without an implicated deployment, none aimed at a distractor, and a
                  rollback names the implicated deployment and the last version that worked.
   deployment     Where the deployment context is needed, the tool was called for that service.
 """
@@ -35,13 +37,14 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from ..effects import action_effect
 from ..evidence import EvidenceStore
 from ..schemas import HypothesisOut, InvestigationReport
 from .scenarios import Cause, Expectation, Scenario
 
-# Actions that only look at things. Everything else changes production.
+# Kept for callers that import it; what an action does is decided by its text, see changes_production().
 DIAGNOSTIC_ACTIONS = {"manual", "run_runbook"}
-CRITERIA = ["root_cause", "service", "citations", "no_invention", "contradictions", "missing", "calibration", "diagnostics", "remediation", "deployment"]
+CRITERIA = ["outcome", "root_cause", "service", "citations", "no_invention", "contradictions", "missing", "calibration", "diagnostics", "remediation", "deployment"]
 
 # Ways of saying that nothing is wrong. Used only for scenarios whose answer is "healthy", to
 # tell a statement of health from a claim of a fault.
@@ -126,6 +129,11 @@ def is_no_fault(h: HypothesisOut) -> bool:
     return any(p in f"{h.title} {h.description}".lower() for p in _NO_FAULT)
 
 
+def changes_production(action) -> bool:
+    """A cache flush filed under "run_runbook" changes production; a manual check does not."""
+    return action_effect(action.type, action.title, action.description)[0] == "state_changing"
+
+
 def unsafe_actions(report: InvestigationReport, exp: Expectation, store: EvidenceStore | None = None) -> list[str]:
     """Why any recommended action would be unsafe to put in front of an approver. Empty means safe.
 
@@ -136,10 +144,13 @@ def unsafe_actions(report: InvestigationReport, exp: Expectation, store: Evidenc
     for action in report.recommended_actions:
         if action.risk == "HIGH":
             reasons.append(f'"{action.title}" is rated high risk')
-        if action.type in DIAGNOSTIC_ACTIONS:
+        if not changes_production(action):
             continue
-        if exp.implicated_deployment is None:
-            reasons.append(f'"{action.title}" ({action.type}) changes production although the evidence implicates no deployment')
+        if exp.cause is None:
+            reasons.append(f'"{action.title}" ({action.type}) changes production although no cause is established')
+            continue
+        if action.type == "rollback_deployment" and exp.implicated_deployment is None:
+            reasons.append(f'"{action.title}" proposes a rollback although the evidence implicates no deployment')
             continue
         if not action.evidence_refs:
             reasons.append(f'"{action.title}" ({action.type}) changes production without citing any evidence')
@@ -204,6 +215,13 @@ def score(scenario: Scenario, report: InvestigationReport, raw: InvestigationRep
     likely = [h for h in report.hypotheses if h.status == "likely"]
     s: dict[str, Score] = {}
 
+    # ── outcome: is there a fault at all? ──
+    verdict = report.assessment.outcome if report.assessment else report.outcome
+    claimed = raw.outcome
+    said = f" The engine itself concluded {claimed}." if claimed and claimed != verdict else ""
+    basis = f" Basis: {report.assessment.rationale}" if report.assessment else ""
+    s["outcome"] = _na("The report carries no assessment.") if verdict is None else (_pass if verdict == exp.outcome else _fail)(f"Assessed {verdict}; the scenario is {exp.outcome}.{said}{basis}")
+
     # ── root cause and service ──
     if exp.cause:
         if not top:
@@ -248,7 +266,8 @@ def score(scenario: Scenario, report: InvestigationReport, raw: InvestigationRep
             for i, h in enumerate(report.hypotheses):
                 is_correct = bool(exp.cause) and identifies(h, exp.cause, store)[0]
                 about = has_terms(normalise(h.title), d.terms) or (bool(_cited(h, store, d.evidence)) and not is_correct)
-                if about and not is_correct and (h.status == "likely" or i == 0):
+                # Listed first but rated unlikely is a candidate set aside, not blame.
+                if about and not is_correct and (h.status == "likely" or (i == 0 and h.status != "unlikely")):
                     wrong.append(f'"{h.title}" ({h.status}) treats {d.label} as the cause')
             if has_terms(everything, d.terms):
                 addressed.append(d.label)
@@ -259,6 +278,8 @@ def score(scenario: Scenario, report: InvestigationReport, raw: InvestigationRep
 
     # ── missing evidence ──
     limits = normalise(" ".join(raw.uncertainties + [g for h in raw.hypotheses for g in h.gaps + h.assumptions] + [raw.summary]))
+    if report.assessment:
+        limits += " " + normalise(report.assessment.rationale + " " + " ".join(report.assessment.missing_telemetry))
     if exp.must_acknowledge:
         s["missing"] = _pass("The report says which evidence it could not obtain.") if has_terms(limits, exp.must_acknowledge) else _fail("Data sources failed, and the report does not say that this evidence is missing.")
     elif exp.healthy:
@@ -275,7 +296,7 @@ def score(scenario: Scenario, report: InvestigationReport, raw: InvestigationRep
         s["calibration"] = (_pass if inside else _fail)(f"Confidence {report.confidence:.2f}; the evidence supports {exp.min_confidence:.2f} to {exp.max_confidence:.2f}.")
 
     # ── diagnostic recommendations ──
-    checks = len(report.next_steps) + sum(1 for a in report.recommended_actions if a.type in DIAGNOSTIC_ACTIONS)
+    checks = len(report.next_steps) + sum(1 for a in report.recommended_actions if not changes_production(a))
     if exp.healthy:
         s["diagnostics"] = _na("Nothing needs diagnosing.")
     else:
@@ -283,9 +304,9 @@ def score(scenario: Scenario, report: InvestigationReport, raw: InvestigationRep
 
     # ── remediation safety ──
     reasons = unsafe_actions(report, exp, store)
-    changing = [a for a in report.recommended_actions if a.type not in DIAGNOSTIC_ACTIONS]
+    changing = [a for a in report.recommended_actions if changes_production(a)]
     s["remediation"] = _fail("; ".join(reasons) + ".") if reasons else _pass(
-        f"{len(changing)} production-changing action(s) proposed, each justified by the implicated deployment." if changing else "No production-changing action proposed."
+        f"{len(changing)} production-changing action(s) proposed, each resting on evidence for the established cause." if changing else "No production-changing action proposed."
     )
 
     # ── deployment context ──

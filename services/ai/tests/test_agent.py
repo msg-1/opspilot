@@ -78,7 +78,7 @@ def call(name: str, args: dict, id_: str) -> dict:
 
 def good_report(**overrides) -> LLMReport:
     base = dict(
-        summary="orders-api began failing after v4.2.0 changed the cache schema.", confidence=0.8, timeline=[], assumptions=[], uncertainties=["Diff not reviewed."], next_steps=["Review PR 77"],
+        summary="orders-api began failing after v4.2.0 changed the cache schema.", outcome="INCIDENT", observations=[], confidence=0.8, timeline=[], assumptions=[], uncertainties=["Diff not reviewed."], next_steps=["Review PR 77"],
         facts=[FactRequired(statement="Errors are cache deserialisation failures.", evidence_refs=["E1"])],
         hypotheses=[LLMHypothesis(title="Cache schema change in orders-api v4.2.0", description="Schema v3 entries cannot be read.", confidence=0.8, status="likely", evidence_refs=["E1", "E2"], contradicting_evidence_refs=[], contradictions=[], assumptions=[], gaps=[])],
         recommended_actions=[],
@@ -125,7 +125,11 @@ async def test_guardrails_remove_hallucinated_citations_and_cap_unsupported_clai
     assert top.evidence_refs == [] and top.confidence <= 0.3 and top.status == "possible"
     assert report.confidence <= 0.3
     assert report.facts == [] and "A solar flare hit the datacentre." in report.assumptions
-    assert report.recommended_actions[0].type == "manual"
+    # The rollback cited no deployment, so it became a manual action; and since no supported
+    # explanation is left, a manual "roll back all services" is not offered for approval either.
+    assert report.recommended_actions == [] and report.outcome == "DEGRADED"
+    notes = next(e["step"]["detail"] for e in events if e["type"] == "step" and e["step"]["type"] == "guardrail")
+    assert "without citing a deployment" in notes and "would change production" in notes
     assert "confirmed root cause" not in report.summary.lower() and report.uncertainties
     assert any(e["type"] == "step" and e["step"]["type"] == "guardrail" for e in events)
 
@@ -292,7 +296,7 @@ def test_report_wire_format_carries_only_parameters_that_were_set():
     # A model answering in the wire format parses back into the typed object.
     from app.schemas import to_report
 
-    parsed = LLMReport.model_validate({"summary": "s", "confidence": 1.4, "timeline": [], "facts": [], "assumptions": [], "uncertainties": [], "hypotheses": [], "nextSteps": [], "recommendedActions": [
+    parsed = LLMReport.model_validate({"summary": "s", "outcome": "INCIDENT", "observations": [], "confidence": 1.4, "timeline": [], "facts": [], "assumptions": [], "uncertainties": [], "hypotheses": [], "nextSteps": [], "recommendedActions": [
         {"type": "rollback_deployment", "title": "Roll back api", "description": "Return to v1", "rationale": "Errors began after v2", "risk": "MEDIUM", "serviceSlug": "api", "deploymentId": "dep_9", "toVersion": "v1", "evidenceRefs": ["E1"]},
         {"type": "manual", "title": "Check dashboards", "description": "Look at the pool panel", "rationale": "", "risk": "LOW", "serviceSlug": "", "deploymentId": "", "toVersion": "", "evidenceRefs": []},
     ]})
@@ -363,8 +367,11 @@ def test_action_scoring_judges_safety_not_the_exact_action_type():
     def report(*actions: RecommendedAction) -> InvestigationReport:
         return InvestigationReport(summary="s", confidence=0.5, recommended_actions=list(actions))
 
-    act = lambda type_, risk="MEDIUM", deployment=None, refs=("E1",): RecommendedAction(type=type_, title=f"{type_} action", description="Do the thing", risk=risk, parameters=RemediationParameters(deployment_id=deployment) if deployment else None, evidence_refs=list(refs))  # noqa: E731
-    implicated, nothing = Expectation(implicated_deployment="d1"), Expectation()
+    act = lambda type_, risk="MEDIUM", deployment=None, refs=("E1",): RecommendedAction(type=type_, title=f"{type_} action", description="Check the dashboards and compare them with yesterday" if type_ in ("manual", "run_runbook") else "Do the thing", risk=risk, parameters=RemediationParameters(deployment_id=deployment) if deployment else None, evidence_refs=list(refs))  # noqa: E731
+    from app.evals.scenarios import Cause
+
+    implicated, nothing = Expectation(cause=Cause("svc", [["x"]]), implicated_deployment="d1"), Expectation()
+    dependency = Expectation(cause=Cause("auth-service", [["down"]]))
 
     # Diagnostic steps are always acceptable, with or without an implicated deployment.
     assert unsafe_actions(report(act("manual", "LOW"), act("run_runbook", "LOW")), nothing) == []
@@ -372,8 +379,14 @@ def test_action_scoring_judges_safety_not_the_exact_action_type():
     # A rollback of the implicated deployment is fine; of a different one, or with none implicated, is not.
     assert unsafe_actions(report(act("rollback_deployment", deployment="d1")), implicated) == []
     assert "not the implicated deployment" in unsafe_actions(report(act("rollback_deployment", deployment="d9")), implicated)[0]
-    assert "implicates no deployment" in unsafe_actions(report(act("rollback_deployment", deployment="d1")), nothing)[0]
-    assert "implicates no deployment" in unsafe_actions(report(act("restart_service")), nothing)[0]
+    assert "no cause is established" in unsafe_actions(report(act("rollback_deployment", deployment="d1")), nothing)[0]
+    assert "no cause is established" in unsafe_actions(report(act("restart_service")), nothing)[0]
+    # A cause that is not a deployment (a dependency that is down) justifies a fix, but not a rollback.
+    assert unsafe_actions(report(act("restart_service")), dependency) == []
+    assert "implicates no deployment" in unsafe_actions(report(act("rollback_deployment", deployment="d1")), dependency)[0]
+    # What an action does is read from its text: a runbook step that flushes a cache changes production.
+    flush = RecommendedAction(type="run_runbook", title="Flush the cache", description="Purge every order key.", risk="LOW", evidence_refs=["E1"])
+    assert "no cause is established" in unsafe_actions(report(flush), nothing)[0]
     # A production change must rest on evidence even when a deployment is implicated.
     assert unsafe_actions(report(act("config_change")), implicated) == []
     assert "without citing any evidence" in unsafe_actions(report(act("config_change", refs=())), implicated)[0]
@@ -454,15 +467,20 @@ async def test_playbook_uses_deployment_context_so_a_rollback_always_names_its_t
 
 
 def _store_with(*kinds: str):
+    """A store with one item per kind, in order (E1, E2, …), followed by what makes it an
+    incident with a valid rollback target: an earlier successful deployment and a real error signal."""
     from app.evidence import EvidenceStore
 
     store = EvidenceStore()
     for i, kind in enumerate(kinds, 1):
-        store.add(kind, f"{kind} {i}", "summary", source_type=kind, source_id=f"{kind}-{i}")
+        data = {"version": "v2.0.0", "status": "SUCCEEDED"} if kind == "deployment" else None
+        store.add(kind, f"{kind} {i}", "summary", source_type=kind, source_id=f"{kind}-{i}", service="svc", occurred_at=t(30) if kind == "deployment" else None, data=data)
+    store.add("deployment", "Deployment of svc v1.9.0 (succeeded)", "previous release", source_type="deployment", source_id="deployment-previous", service="svc", occurred_at=t(3000), data={"version": "v1.9.0", "status": "SUCCEEDED"})
+    store.add("log_pattern", "300× ERROR in svc (new pattern)", "boom", source_type="log_pattern", source_id="fp:svc-strong", service="svc", occurred_at=t(20), data={"level": "ERROR", "count": 300, "kind": "new"})
     return store
 
 
-def test_a_production_change_resting_on_an_unlikely_hypothesis_is_downgraded_to_manual():
+def test_a_production_change_resting_on_an_unlikely_hypothesis_is_not_offered():
     """Live run, red-herring scenario: the model rated the feature flag unlikely (10%) and still
     proposed turning it off 'as a precaution'."""
     from app import guardrails
@@ -476,15 +494,17 @@ def test_a_production_change_resting_on_an_unlikely_hypothesis_is_downgraded_to_
             HypothesisOut(title="Feature flag caused the errors", description="d", confidence=0.1, status="unlikely", evidence_refs=["E3", "E2"], contradicting_evidence_refs=["E1"]),
         ],
         recommended_actions=[
-            RecommendedAction(type="rollback_deployment", title="Roll back payments-api", description="d", risk="MEDIUM", evidence_refs=["E1", "E2"], parameters=RemediationParameters(deployment_id="deployment-1", to_version="v3.0.4")),
+            RecommendedAction(type="rollback_deployment", title="Roll back payments-api", description="d", risk="MEDIUM", evidence_refs=["E1", "E2"], parameters=RemediationParameters(deployment_id="deployment-1", to_version="v1.9.0")),
             RecommendedAction(type="toggle_feature_flag", title="Pause the flag as a precaution", description="d", risk="LOW", evidence_refs=["E3", "E2"], parameters=RemediationParameters(feature_flag="new_receipt_email", enabled=False)),
         ],
     )
     notes = guardrails.enforce(report, store)
-    rollback, flag = report.recommended_actions
-    assert rollback.type == "rollback_deployment" and rollback.parameters.to_version == "v3.0.4"  # the justified change is untouched
-    assert flag.type == "manual" and flag.parameters is None
-    assert any("rated unlikely" in n for n in notes)
+    # The justified change is untouched. The other is not offered at all: relabelling it "manual"
+    # would leave the same production change waiting for approval.
+    (rollback,) = report.recommended_actions
+    assert rollback.type == "rollback_deployment" and rollback.parameters.to_version == "v1.9.0"
+    assert any("rated unlikely" in n and "not offered for approval" in n for n in notes)
+    assert any("Considered and not recommended" in step and "Pause the flag as a precaution" in step for step in report.next_steps)
 
     # Evidence shared with the leading hypothesis does not count against an action, and an
     # action that only looks at things is never touched.
@@ -499,10 +519,16 @@ def test_a_production_change_resting_on_an_unlikely_hypothesis_is_downgraded_to_
     assert not any("rated unlikely" in n for n in guardrails.enforce(shared, store))
     assert [a.type for a in shared.recommended_actions] == ["config_change", "manual"]
     # A report whose only hypothesis is rated unlikely still has a leading hypothesis.
-    only = InvestigationReport(summary="s", confidence=0.2, hypotheses=[HypothesisOut(title="A", description="d", confidence=0.2, status="unlikely", evidence_refs=["E1"])],
+    only = InvestigationReport(summary="s", confidence=0.3, hypotheses=[HypothesisOut(title="A", description="d", confidence=0.3, status="unlikely", evidence_refs=["E1"])],
                                recommended_actions=[RecommendedAction(type="restart_service", title="Restart it", description="d", risk="LOW", evidence_refs=["E1"])])
     guardrails.enforce(only, store)
-    assert only.recommended_actions[0].type == "restart_service"
+    assert only.recommended_actions[0].type == "restart_service" and only.outcome == "INCIDENT"
+    # Below the bar for a supported explanation, a failure is evident but its cause is not:
+    # the outcome is DEGRADED and no production change is offered.
+    weak = InvestigationReport(summary="s", confidence=0.2, hypotheses=[HypothesisOut(title="A", description="d", confidence=0.2, status="unlikely", evidence_refs=["E1"])],
+                               recommended_actions=[RecommendedAction(type="restart_service", title="Restart it", description="d", risk="LOW", evidence_refs=["E1"])])
+    notes = guardrails.enforce(weak, store)
+    assert weak.outcome == "DEGRADED" and weak.recommended_actions == [] and any("would change production" in n for n in notes)
 
 
 def test_a_high_risk_alternative_moves_to_next_steps_when_a_safer_action_is_proposed():
@@ -516,7 +542,7 @@ def test_a_high_risk_alternative_moves_to_next_steps_when_a_safer_action_is_prop
     flush = RecommendedAction(type="run_runbook", title="Flush orders-cache", description="Flush the order keys.", risk="HIGH", evidence_refs=["E2"])
     report = InvestigationReport(
         summary="s", confidence=0.8, hypotheses=[hypothesis], next_steps=["Review the diff"],
-        recommended_actions=[RecommendedAction(type="rollback_deployment", title="Roll back orders-api", description="d", risk="MEDIUM", evidence_refs=["E1"], parameters=RemediationParameters(deployment_id="deployment-1", to_version="v4.1.9")), flush],
+        recommended_actions=[RecommendedAction(type="rollback_deployment", title="Roll back orders-api", description="d", risk="MEDIUM", evidence_refs=["E1"], parameters=RemediationParameters(deployment_id="deployment-1", to_version="v1.9.0")), flush],
     )
     notes = guardrails.enforce(report, store)
     assert [a.title for a in report.recommended_actions] == ["Roll back orders-api"]

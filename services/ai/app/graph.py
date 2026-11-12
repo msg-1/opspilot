@@ -40,6 +40,8 @@ How to work:
 - Start from what changed. Most incidents follow a deployment, a configuration or flag change, a dependency failure, or a traffic shift. Establish when the problem started (logs, metrics), then look at what happened just before it.
 - Check alternatives before settling. If one change looks guilty, also look at the other changes in the window and at upstream dependencies, and say why they fit less well.
 - Read the content of changes, not only their timing. A pull request description or changed file that matches the failure mode is much stronger evidence than proximity in time. For a deployment that precedes the problem, get_deployment_context returns what it shipped, the error rate before and after it, and the version it replaced.
+- Not every question has a fault behind it. If logs, metrics and health show no material problem, say so plainly: the outcome is HEALTHY, there is no fault hypothesis to rank, and anything merely noteworthy (routine warnings, an old deployment) goes in observations. Do not construct a cause in order to be helpful. If something is off but you cannot tell why, the outcome is DEGRADED and you say what is missing.
+- Use get_traces to see where in the call chain time is lost or errors start.
 - Use the knowledge base for runbooks and past postmortems that describe the same symptoms.
 - Call several tools in parallel when the calls are independent. Stop gathering when further calls would not change your conclusion.
 
@@ -57,7 +59,10 @@ REPORT_INSTRUCTIONS = """Write the investigation report as structured output.
 
 - summary: what happened, the leading explanation, and how confident you are, in 3-6 sentences for an on-call engineer.
 - facts: only things directly shown by evidence, each with evidenceRefs.
-- hypotheses: 1 to 4, ranked. For each give the causal mechanism, confidence between 0 and 1, status (likely / possible / unlikely), evidenceRefs (evidence that supports it), contradictingEvidenceRefs and contradictions (evidence that argues against it, and what does not fit), the assumptions it rests on, and gaps (missing evidence that would confirm or refute it). Include a plausible alternative you ruled down, with the reason. If nothing contradicts a hypothesis, say what you checked rather than leaving it unexamined.
+- outcome: HEALTHY when the evidence shows no material fault; DEGRADED when there are anomalies or warnings but no established cause; INCIDENT when a failure is evident and a cause is supported; UNDETERMINED when no telemetry could be examined. The service checks this against the evidence.
+- observations: things worth knowing that are not evidence of a fault, each with evidence references. Empty if none.
+- Figures: quote numbers exactly as the evidence gives them, with their units. If you round, calculate or estimate a value, say so in words ("about", "roughly 30 times"). Give timestamps in UTC ending in Z. Every figure is compared with the evidence you cite.
+- hypotheses: 0 to 4, ranked. Give none when the outcome is HEALTHY. For each give the causal mechanism, confidence between 0 and 1, status (likely / possible / unlikely), evidenceRefs (evidence that supports it), contradictingEvidenceRefs and contradictions (evidence that argues against it, and what does not fit), the assumptions it rests on, and gaps (missing evidence that would confirm or refute it). Include a plausible alternative you ruled down, with the reason. If nothing contradicts a hypothesis, say what you checked rather than leaving it unexamined.
 - confidence: your confidence in the top hypothesis. Above 0.8 requires both timing and a matching mechanism in the evidence. Use below 0.4 when you mostly have timing.
 - timeline: key events in chronological order with ISO timestamps taken from the evidence.
 - uncertainties: what you could not check or what the data does not show.
@@ -253,6 +258,8 @@ def build_graph(ctx: Context):
         catalogue = {s["slug"]: s for s in state.get("catalogue", [])}
 
         await run_tool(ctx, "find_log_anomalies", {"services": scope, "from_time": w_from, "to_time": w_to}, "Detect new or spiking error patterns")
+        # Whether the services logged at all: silence is not the same as a clean log.
+        await run_tool(ctx, "get_log_histogram", {"services": scope, "from_time": w_from, "to_time": w_to}, "Count the log lines received in the window")
         if not ctx.store.by_kind("log_pattern"):
             await run_tool(ctx, "get_log_patterns", {"services": scope, "from_time": w_from, "to_time": w_to}, "Group warning and error logs into patterns")
         if not scope:
@@ -267,11 +274,28 @@ def build_graph(ctx: Context):
         # For each service in scope, what its latest deployment shipped and replaced.
         for slug in scope[:2]:
             await run_tool(ctx, "get_deployment_context", {"service": slug}, f"Examine the latest deployment of {slug} and its rollback target")
+            # The most recent deployment may be a rollback, which the call above passes over. What
+            # happened to the error rate after it is exactly what says whether it helped or hurt.
+            latest = max((d for d in ctx.store.by_kind("deployment") if d.service == slug and d.occurred_at), key=lambda d: d.occurred_at or "", default=None)
+            if latest and not any(i.source_id == latest.source_id for i in ctx.store.by_kind("deployment_impact")):
+                await run_tool(ctx, "get_deployment_context", {"service": slug, "deployment_id": latest.source_id}, f"Examine the most recent deployment of {slug} and the error rate around it")
         await run_tool(ctx, "list_service_events", {"services": wide, "from_time": day_before, "to_time": w_to}, "List config, flag, scaling and restart events")
         for slug in scope[:4]:
             await run_tool(ctx, "get_metrics", {"service": slug, "from_time": w_from, "to_time": w_to}, f"Compare metrics for {slug} with the preceding window")
         for slug in scope[:3]:
-            await run_tool(ctx, "get_service", {"service": slug}, f"Check upstream dependencies of {slug}")
+            await run_tool(ctx, "get_service", {"service": slug}, f"Check health and upstream dependencies of {slug}")
+        # An unhealthy dependency may itself be failing because of one further down. Follow the
+        # chain (at most three levels, six services) so the report names where it starts.
+        looked = set(scope[:3])
+        for _ in range(3):
+            frontier = [d.service for d in ctx.store.by_kind("dependency") if d.service and d.service not in looked and d.service in catalogue][: 6 - min(6, len(looked))]
+            if not frontier:
+                break
+            for slug in frontier:
+                looked.add(slug)
+                await run_tool(ctx, "get_service", {"service": slug}, f"Check what the unhealthy dependency {slug} itself depends on")
+        for slug in scope[:2]:
+            await run_tool(ctx, "get_traces", {"service": slug, "from_time": w_from, "to_time": w_to}, f"Sample slow and failed traces through {slug}")
         query = str((dominant.data or {}).get("sample") or "") if dominant else ""
         await run_tool(ctx, "search_knowledge_base", {"query": (query or req.question)[:300], **({"service": scope[0]} if scope else {})}, "Search runbooks and postmortems for this symptom")
         if not req.incident and scope:
@@ -320,7 +344,7 @@ def build_graph(ctx: Context):
 
     async def guard(state: State) -> State:
         report = state["report"]
-        notes = guardrails.enforce(report, ctx.store)
+        notes = guardrails.enforce(report, ctx.store, scope=list(state.get("scope", [])), tool_failures=ctx.tool_failures, known_times=[state.get("window_from", ""), state.get("window_to", ""), iso(ctx.now())])
         if notes:
             await _step(ctx, "guardrail", "Output guardrails adjusted the report", detail="\n".join(notes))
         for i, h in enumerate(report.hypotheses, 1):
