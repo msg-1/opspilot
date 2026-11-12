@@ -43,7 +43,7 @@ export function ingestKey() {
 export class Session {
   cookies = new Map();
 
-  async request(method, path, body, { key } = {}) {
+  async request(method, path, body, { key, retried = false } = {}) {
     const headers = { 'content-type': 'application/json' };
     if (key) headers['x-api-key'] = key;
     else if (this.cookies.size) headers.cookie = [...this.cookies].map(([k, v]) => `${k}=${v}`).join('; ');
@@ -52,6 +52,13 @@ export class Session {
       const [pair] = cookie.split(';');
       const i = pair.indexOf('=');
       this.cookies.set(pair.slice(0, i), pair.slice(i + 1));
+    }
+    // Access tokens are short-lived and the end-to-end run is not: sign in again and repeat once.
+    if (res.status === 401 && !key && !retried && !path.startsWith('/auth/')) {
+      await res.arrayBuffer();
+      this.cookies.clear();
+      await this.signIn();
+      return this.request(method, path, body, { retried: true });
     }
     const text = await res.text();
     let data = null;

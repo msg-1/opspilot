@@ -115,8 +115,15 @@ function reportChecks(c, inv, prov) {
   c.ok(`figures in the report match the evidence (${inv.report.integrity?.supported}/${inv.report.integrity?.checked})`, unsupported.length === 0, unsupported.map((f) => `${f.text} in ${f.where}`).join('; '));
 }
 
+const dir = join(ROOT, 'demo', 'results');
+mkdirSync(dir, { recursive: true });
+const file = join(dir, `${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
+// Written after every scenario, so an interrupted run keeps what it has.
+const save = () => writeFileSync(file, `${JSON.stringify({ ranAt: iso(), engine: 'rule-based (deterministic); no model was called', holdSeconds: HOLD_S, settleSeconds: SETTLE_S, results }, null, 2)}\n`);
+
 async function recordResult(name, title, c, extra = {}) {
   results.push({ scenario: name, title, passed: c.passed, checks: c.list, ...extra });
+  save();
 }
 
 async function settle(reason) {
@@ -158,6 +165,7 @@ async function failureScenario(name, { question, expect }) {
   last.checks.push({ name: 'metrics held by OPSILUME are back to normal (gateway error rate < 1%, p95 < 400 ms)', pass: back, detail: `error_rate ${value('error_rate')}, p95 ${value('latency_p95_ms')}` });
   last.passed = last.passed && back;
   last.metricsAfterRecovery = { errorRate: value('error_rate'), latencyP95Ms: value('latency_p95_ms') };
+  save();
   log(`    ${back ? 'ok  ' : 'FAIL'} metrics held by OPSILUME are back to normal (error rate ${value('error_rate')}%, p95 ${value('latency_p95_ms')} ms)`);
 }
 
@@ -331,10 +339,7 @@ if (wanted('runbook-safety')) {
 // ───────────────────────── report ─────────────────────────
 
 await baseline();
-const dir = join(ROOT, 'demo', 'results');
-mkdirSync(dir, { recursive: true });
-const file = join(dir, `${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
-writeFileSync(file, `${JSON.stringify({ ranAt: iso(), engine: 'rule-based (deterministic); no model was called', holdSeconds: HOLD_S, settleSeconds: SETTLE_S, results }, null, 2)}\n`);
+save();
 console.log('\nscenario                 result  outcome        checks  leading hypothesis');
 for (const r of results) console.log(`${r.scenario.padEnd(24)} ${(r.passed ? 'pass' : 'FAIL').padEnd(7)} ${(r.outcome ?? '-').padEnd(14)} ${`${r.checks.filter((c) => c.pass).length}/${r.checks.length}`.padEnd(7)} ${(r.hypotheses?.[0] ?? '-').slice(0, 80)}`);
 console.log(`\n${results.filter((r) => r.passed).length}/${results.length} scenarios passed. Details: ${file}`);
