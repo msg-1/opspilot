@@ -156,6 +156,7 @@ If a scenario is interrupted half-way, `npm run demo:scenario -- baseline` resto
 
 - **Rule-based engine only.** The demo has not been run with a language model: that would cost money and was not authorised. What a model would make of this telemetry is untested.
 - **One trace store, one tenant.** Jaeger is not tenant-aware. The API only asks it about services of the caller's organisation, and expects the OpenTelemetry `service.name` to equal the service's slug.
+- **Traces are kept in memory for about ten minutes** (4,000 traces). An investigation of an older window finds none and says so.
 - **Traces are sampled by the query, not by the tracer.** The API reads up to 60 traces per request from Jaeger, failed and slowest first. Rare failures can be missed.
 - **Metrics are averages over the window.** A short spike inside a long window is diluted. The scenarios hold a failure for 100 seconds and investigate that window.
 - **`bad-deploy` is a behaviour switch**, not a container rollout, and no source repository is linked, so the investigation has the deployment record but no commit or pull request to read.

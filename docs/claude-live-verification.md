@@ -218,6 +218,15 @@ Applying the new guardrails to the model output saved in run 1 (no model calls) 
 5. **Only Haiku was run.** Sonnet and Opus remain untested live.
 6. **The data is synthetic.** Six small scenarios served by a fake of the tool API; the deployment tool has not been exercised by a real model against the real database.
 
+## Milestone 4: no model calls
+
+No paid API call was made in Milestone 4, and none was authorised. What was done with the model output already paid for:
+
+- The nine reports saved from the two runs above were scored again with the new checks (`--rescore`, no model). With the guardrails as they are now applied to what the model wrote then, **6 of 6 and 3 of 3 pass**, including the healthy-service scenario that failed calibration twice: the evidence shows no fault, so its 0.30 hypothesis is limited to 0.20 and marked unlikely, and the report's outcome is HEALTHY.
+- The claim validator was run over the same nine reports: 453 figures and identifiers, 447 supported by the evidence they cite, 4 correctly flagged as appearing only in evidence the statement does not cite, 2 false positives. No wrong measurement was found.
+
+What this does **not** show: how a model behaves with the instructions and report schema as changed in Milestone 4 (the `outcome` and `observations` fields, the instruction to give no hypothesis for a healthy service and to quote figures exactly), with the new `get_traces` tool, or against the demo environment's real telemetry. Those need a live run and a budget.
+
 ## Total API spend to date
 
 | Activity | Estimated cost |

@@ -125,7 +125,12 @@ export async function queryTraces(serviceName: string, from: Date, to: Date, opt
   } catch (err) {
     return none(`The trace store could not be reached: ${(err as Error).message}`);
   }
-  const all = (body.data ?? []).map(summarise).filter((t): t is TraceSummary => !!t && t.services.includes(serviceName));
+  // Spans reach the store in batches, a few seconds after they end. A trace that began in the
+  // last moments may still be missing spans, and summarising it would misplace its time.
+  const settled = Date.now() - 8000;
+  const all = (body.data ?? [])
+    .map(summarise)
+    .filter((t): t is TraceSummary => !!t && t.services.includes(serviceName) && new Date(t.startedAt).getTime() + t.durationMs < settled);
   const durations = all.map((t) => t.durationMs).sort((a, b) => a - b);
   const failedCount = all.filter((t) => t.errorSpans.length).length;
   // Failed traces first, then the slowest: the ones worth reading.

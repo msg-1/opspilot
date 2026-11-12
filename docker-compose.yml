@@ -227,10 +227,13 @@ services:
   demo-jaeger:
     profiles: ["demo"]
     image: jaegertracing/all-in-one:1.62.0
+    restart: unless-stopped
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
-      MEMORY_MAX_TRACES: "20000"
-    mem_limit: 384m
+      # In-memory storage: about ten minutes of traces at the demo's request rate. More than
+      # that does not fit in the memory limit below (found the hard way: the container was killed).
+      MEMORY_MAX_TRACES: "4000"
+    mem_limit: 512m
     ports:
       - "127.0.0.1:16686:16686" # Jaeger UI and query API
 

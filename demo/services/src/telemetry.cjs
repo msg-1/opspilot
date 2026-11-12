@@ -13,6 +13,8 @@ if (process.env.OTEL_EXPORTER_OTLP_ENDPOINT) {
         '@opentelemetry/instrumentation-fs': { enabled: false },
         '@opentelemetry/instrumentation-dns': { enabled: false },
         '@opentelemetry/instrumentation-net': { enabled: false },
+        // One span per request handler is enough; a span per middleware triples the volume.
+        '@opentelemetry/instrumentation-express': { ignoreLayersType: ['middleware', 'router'] },
         // Health checks, metric scrapes and log shipping are not user traffic.
         '@opentelemetry/instrumentation-http': {
           ignoreIncomingRequestHook: (req) => ['/health', '/metrics'].includes(req.url) || req.url.startsWith('/admin'),

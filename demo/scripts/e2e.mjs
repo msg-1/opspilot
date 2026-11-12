@@ -85,7 +85,8 @@ async function provenance(inv, from) {
         const res = await fetch(`${JAEGER}/api/traces/${e.sourceId}`, { signal: AbortSignal.timeout(8000) });
         const body = res.ok ? await res.json() : null;
         const spans = body?.data?.[0]?.spans?.length ?? 0;
-        mark(e, spans > 0 && spans === data.spanCount, `trace ${e.sourceId} not found in the trace store, or its span count differs (${spans} vs ${data.spanCount})`);
+        // The store may have received late spans since; it must hold at least those the evidence counted.
+        mark(e, spans > 0 && spans >= data.spanCount, `trace ${e.sourceId} not found in the trace store, or it holds fewer spans than the evidence counted (${spans} vs ${data.spanCount})`);
       } else if (e.kind === 'service_health' || e.kind === 'dependency') {
         const slug = e.kind === 'dependency' ? e.sourceId.replace(/^dep:/, '') : null;
         const svc = await s.request('GET', `/services/${slug ? demo.services[slug] : e.sourceId}`);
@@ -162,6 +163,8 @@ async function failureScenario(name, { question, expect }) {
 
 // ───────────────────────── scenarios ─────────────────────────
 
+const traceStore = await fetch(`${JAEGER}/api/services`, { signal: AbortSignal.timeout(5000) }).then((r) => r.ok).catch(() => false);
+if (!traceStore) throw new Error(`The trace store is not reachable at ${JAEGER}. Is demo-jaeger running? (docker compose --profile demo up -d demo-jaeger)`);
 await baseline();
 log('baseline restored; checking that the shop is healthy before starting');
 const before = await verifyRecovered();
