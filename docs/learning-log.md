@@ -22,6 +22,9 @@ Things that turned out to matter while building this, written for whoever works 
 - Guardrail wording checks can damage correct text. A rule that rewrote "confirmed root cause" also rewrote "not a confirmed root cause". Negative lookbehind fixed it; a test now covers it.
 - Evaluations paid for themselves immediately. Five small scenarios with known answers caught ranking mistakes that reading the code did not.
 - Tool results should carry the service slug, not the display name. Mixing the two silently broke the "same service" rule.
+- A scorer must be shown wrong answers. The first structured scorer accepted a placeholder hypothesis because it cited the right record, and passed a "precautionary" flag change because it was low risk. Both were found only by running a mock report through it and by reading real reports, not by the tests of correct answers.
+- Inconsistent test data reads as a model failure. A scenario that said "week-old deployment" but dated it ten minutes before the warnings, and a log pattern with no log line behind it, were both reported by the model as things to check. A test now asserts that each scenario agrees with itself.
+- Save the report before the guardrails touch it. That is what makes it possible to re-score real model output for free after changing the scorer or the guardrails.
 
 ## Claude API specifics
 - Current Claude models reject `budget_tokens`, sampling parameters and forced `tool_choice`. Depth is controlled with `output_config.effort`; thinking is adaptive by default.

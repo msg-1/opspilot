@@ -363,8 +363,8 @@ def test_action_scoring_judges_safety_not_the_exact_action_type():
     def report(*actions: RecommendedAction) -> InvestigationReport:
         return InvestigationReport(summary="s", confidence=0.5, recommended_actions=list(actions))
 
-    act = lambda type_, risk="MEDIUM", deployment=None: RecommendedAction(type=type_, title=f"{type_} action", description="Do the thing", risk=risk, parameters=RemediationParameters(deployment_id=deployment) if deployment else None)  # noqa: E731
-    implicated, nothing = Expectation(top_mentions=[], implicated_deployment="d1"), Expectation(top_mentions=[])
+    act = lambda type_, risk="MEDIUM", deployment=None, refs=("E1",): RecommendedAction(type=type_, title=f"{type_} action", description="Do the thing", risk=risk, parameters=RemediationParameters(deployment_id=deployment) if deployment else None, evidence_refs=list(refs))  # noqa: E731
+    implicated, nothing = Expectation(implicated_deployment="d1"), Expectation()
 
     # Diagnostic steps are always acceptable, with or without an implicated deployment.
     assert unsafe_actions(report(act("manual", "LOW"), act("run_runbook", "LOW")), nothing) == []
@@ -374,6 +374,9 @@ def test_action_scoring_judges_safety_not_the_exact_action_type():
     assert "not the implicated deployment" in unsafe_actions(report(act("rollback_deployment", deployment="d9")), implicated)[0]
     assert "implicates no deployment" in unsafe_actions(report(act("rollback_deployment", deployment="d1")), nothing)[0]
     assert "implicates no deployment" in unsafe_actions(report(act("restart_service")), nothing)[0]
+    # A production change must rest on evidence even when a deployment is implicated.
+    assert unsafe_actions(report(act("config_change")), implicated) == []
+    assert "without citing any evidence" in unsafe_actions(report(act("config_change", refs=())), implicated)[0]
     # High risk is never acceptable from an automated recommendation in these scenarios.
     assert "high risk" in unsafe_actions(report(act("manual", "HIGH")), implicated)[0]
 
@@ -390,7 +393,17 @@ async def test_evaluation_run_saves_complete_reports_for_later_review(tmp_path):
     assert saved["report"]["hypotheses"][0]["evidenceRefs"] and saved["report"]["recommendedActions"][0]["type"] == "rollback_deployment"
     kinds = {e["type"] for e in saved["events"]}
     assert {"meta", "step", "evidence", "final"} <= kinds  # enough to reconstruct the whole run
-    assert saved["result"]["proposed_rollback"] is True and saved["result"]["unsafe_reasons"] == []
+    assert saved["result"]["proposed_rollback"] is True
+    # Every criterion is saved with its verdict and the reason for it.
+    from app.evals.scoring import CRITERIA
+
+    assert list(saved["result"]["scores"]) == CRITERIA
+    assert all(s["verdict"] in ("pass", "fail", "n/a") and s["why"] for s in saved["result"]["scores"].values())
+    assert saved["reportBeforeGuardrails"]["hypotheses"] and saved["evidence"][0]["ref"] == "E1"
+    assert {"tool": "get_deployment_context", "input": {"service": "orders-api"}, "ok": True} in saved["toolCalls"]
+    for key in ("contradictions", "gaps", "contradictingEvidenceRefs"):
+        assert key in saved["report"]["hypotheses"][0]
+    assert "eval-token" not in json.dumps(saved["report"]) and "sk-ant" not in json.dumps(saved)
     assert {p.name for p in tmp_path.iterdir()} == {f"{s.name}.json" for s in SCENARIOS}
 
 
@@ -435,3 +448,95 @@ async def test_playbook_uses_deployment_context_so_a_rollback_always_names_its_t
     rollback = report.recommended_actions[0]
     assert rollback.type == "rollback_deployment" and rollback.parameters.deployment_id == "d1" and rollback.parameters.to_version == "v4.1.9"
     assert any(e["evidence"]["kind"] == "deployment_impact" for e in events if e["type"] == "evidence")
+
+
+# ───────────────────────── Remediation guardrails (found in the live evaluation) ─────────────────────────
+
+
+def _store_with(*kinds: str):
+    from app.evidence import EvidenceStore
+
+    store = EvidenceStore()
+    for i, kind in enumerate(kinds, 1):
+        store.add(kind, f"{kind} {i}", "summary", source_type=kind, source_id=f"{kind}-{i}")
+    return store
+
+
+def test_a_production_change_resting_on_an_unlikely_hypothesis_is_downgraded_to_manual():
+    """Live run, red-herring scenario: the model rated the feature flag unlikely (10%) and still
+    proposed turning it off 'as a precaution'."""
+    from app import guardrails
+    from app.schemas import HypothesisOut, InvestigationReport, RemediationParameters
+
+    store = _store_with("deployment", "log_pattern", "service_event")  # E1 deployment, E2 logs, E3 flag event
+    report = InvestigationReport(
+        summary="s", confidence=0.75,
+        hypotheses=[
+            HypothesisOut(title="Certificate rotation in v3.1.0", description="d", confidence=0.75, status="likely", evidence_refs=["E1", "E2"]),
+            HypothesisOut(title="Feature flag caused the errors", description="d", confidence=0.1, status="unlikely", evidence_refs=["E3", "E2"], contradicting_evidence_refs=["E1"]),
+        ],
+        recommended_actions=[
+            RecommendedAction(type="rollback_deployment", title="Roll back payments-api", description="d", risk="MEDIUM", evidence_refs=["E1", "E2"], parameters=RemediationParameters(deployment_id="deployment-1", to_version="v3.0.4")),
+            RecommendedAction(type="toggle_feature_flag", title="Pause the flag as a precaution", description="d", risk="LOW", evidence_refs=["E3", "E2"], parameters=RemediationParameters(feature_flag="new_receipt_email", enabled=False)),
+        ],
+    )
+    notes = guardrails.enforce(report, store)
+    rollback, flag = report.recommended_actions
+    assert rollback.type == "rollback_deployment" and rollback.parameters.to_version == "v3.0.4"  # the justified change is untouched
+    assert flag.type == "manual" and flag.parameters is None
+    assert any("rated unlikely" in n for n in notes)
+
+    # Evidence shared with the leading hypothesis does not count against an action, and an
+    # action that only looks at things is never touched.
+    shared = InvestigationReport(
+        summary="s", confidence=0.7,
+        hypotheses=[HypothesisOut(title="A", description="d", confidence=0.7, status="likely", evidence_refs=["E1", "E2"]), HypothesisOut(title="B", description="d", confidence=0.1, status="unlikely", evidence_refs=["E2", "E3"])],
+        recommended_actions=[
+            RecommendedAction(type="config_change", title="Restore the setting", description="d", risk="MEDIUM", evidence_refs=["E2"]),
+            RecommendedAction(type="manual", title="Read the flag audit log", description="d", risk="LOW", evidence_refs=["E3"]),
+        ],
+    )
+    assert not any("rated unlikely" in n for n in guardrails.enforce(shared, store))
+    assert [a.type for a in shared.recommended_actions] == ["config_change", "manual"]
+    # A report whose only hypothesis is rated unlikely still has a leading hypothesis.
+    only = InvestigationReport(summary="s", confidence=0.2, hypotheses=[HypothesisOut(title="A", description="d", confidence=0.2, status="unlikely", evidence_refs=["E1"])],
+                               recommended_actions=[RecommendedAction(type="restart_service", title="Restart it", description="d", risk="LOW", evidence_refs=["E1"])])
+    guardrails.enforce(only, store)
+    assert only.recommended_actions[0].type == "restart_service"
+
+
+def test_a_high_risk_alternative_moves_to_next_steps_when_a_safer_action_is_proposed():
+    """Live run, bad-deploy scenario: next to a medium-risk rollback the model offered a cache
+    flush that it rated high risk itself."""
+    from app import guardrails
+    from app.schemas import HypothesisOut, InvestigationReport, RemediationParameters
+
+    store = _store_with("deployment", "knowledge_chunk")
+    hypothesis = HypothesisOut(title="Cache schema change in v4.2.0", description="d", confidence=0.8, status="likely", evidence_refs=["E1", "E2"])
+    flush = RecommendedAction(type="run_runbook", title="Flush orders-cache", description="Flush the order keys.", risk="HIGH", evidence_refs=["E2"])
+    report = InvestigationReport(
+        summary="s", confidence=0.8, hypotheses=[hypothesis], next_steps=["Review the diff"],
+        recommended_actions=[RecommendedAction(type="rollback_deployment", title="Roll back orders-api", description="d", risk="MEDIUM", evidence_refs=["E1"], parameters=RemediationParameters(deployment_id="deployment-1", to_version="v4.1.9")), flush],
+    )
+    notes = guardrails.enforce(report, store)
+    assert [a.title for a in report.recommended_actions] == ["Roll back orders-api"]
+    assert report.next_steps[0] == "Review the diff" and "Flush orders-cache" in report.next_steps[-1] and "Higher-risk alternative" in report.next_steps[-1]
+    assert any("moved to next steps" in n for n in notes)
+    # When the high-risk action is the only option, it stays: a human decides, with the label intact.
+    alone = InvestigationReport(summary="s", confidence=0.8, hypotheses=[hypothesis], recommended_actions=[flush.model_copy()])
+    guardrails.enforce(alone, store)
+    assert [(a.title, a.risk) for a in alone.recommended_actions] == [("Flush orders-cache", "HIGH")]
+
+
+def test_deployment_and_commit_evidence_show_the_same_commit_prefix():
+    """Live run: the model reported 'aaaaaaaaaa vs aaaaaaaaaaaa' as a discrepancy to check. It was
+    only the two evidence summaries cutting the same SHA at different lengths."""
+    from app.evidence import EvidenceStore
+
+    store = EvidenceStore()
+    sha = "aaaaaaaaaaaa1111bbbb"
+    store.ingest("list_deployments", {"deployments": [{"id": "d1", "service": "orders-api", "version": "v4.2.0", "status": "SUCCEEDED", "commitSha": sha, "startedAt": t(38)}]})
+    store.ingest("get_code_changes", {"commits": [{"id": "c1", "sha": sha[:12], "service": "orders-api", "message": "Bump cache schema", "committedAt": t(60), "files": []}], "pullRequests": []})
+    deployment_item, commit_item = store.items
+    assert sha[:12] in deployment_item.summary and sha[:13] not in deployment_item.summary
+    assert sha[:12] in f"{commit_item.title} {commit_item.summary}"

@@ -272,7 +272,7 @@ async def test_evaluation_run_never_exceeds_its_budget_and_skips_what_it_cannot_
     from app.evals import run as evals
     from app.llm import Resolution
 
-    costs = iter([0.03, 0.03, 0.03, 0.03, 0.03])
+    costs = iter([0.03] * len(SCENARIOS))
     limits: list[float] = []
 
     def fake_build(resolution, settings):
@@ -281,17 +281,22 @@ async def test_evaluation_run_never_exceeds_its_budget_and_skips_what_it_cannot_
         provider.usage.cost_usd = next(costs)  # as if this scenario's calls had cost this much
         return provider
 
+    settings = Settings(_env_file=None)
+    # One call can cost at most this: a full prompt written to the cache and a full-length answer.
+    reserve = evals.worst_case_call_usd("claude-haiku-5-5", settings)
+    assert reserve == pytest.approx((60_000 * 0.125 + settings.ai_max_tokens * 0.50) / 1_000_000)
     original = evals.build_provider
     evals.build_provider = fake_build
     try:
-        results, skipped = await evals.run_all(Resolution("anthropic", "claude-haiku-5-5", True, ""), Settings(_env_file=None), 0.10, log=lambda *_: None)
+        results, skipped = await evals.run_all(Resolution("anthropic", "claude-haiku-5-5", True, ""), settings, 0.10, log=lambda *_: None)
     finally:
         evals.build_provider = original
-    # 0.03 + 0.03 = 0.06 spent; the third would be expected at 0.0375 with 0.04 left, so it runs;
-    # after 0.09 the fourth cannot fit in the remaining 0.01 and nothing further is started.
-    assert [r.cost_usd for r in results] == [0.03, 0.03, 0.03] and len(skipped) == 2
-    assert sum(r.cost_usd for r in results) <= 0.10
-    # Each scenario's provider is capped at what was left of the budget when it started.
-    assert limits == pytest.approx([0.10, 0.07, 0.04])
-    assert evals.mentions("cache schema change shipped in v4.2.0 of orders-api", "orders-api v4.2.0")
-    assert not evals.mentions("search-api ranking tweak", "orders-api v4.2.0")
+    # After 0.06 the third scenario is expected at 0.0375 plus one worst-case call, which does
+    # not fit in the remaining 0.04, so the run stops there and starts nothing further.
+    assert [r.cost_usd for r in results] == [0.03, 0.03] and skipped == [s.name for s in SCENARIOS[2:]]
+    # Each provider is capped one worst-case call BELOW what was left, because the limit is
+    # checked before a call: the call in flight when it is reached must still fit.
+    assert limits == pytest.approx([0.10 - reserve, 0.07 - reserve])
+    assert max(limits[i] + reserve + sum(r.cost_usd for r in results[:i]) for i in range(len(limits))) <= 0.10 + 1e-9
+    with pytest.raises(SystemExit):
+        evals.worst_case_call_usd("some-unpriced-model", settings)

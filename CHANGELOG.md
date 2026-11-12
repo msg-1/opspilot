@@ -5,6 +5,9 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- MIT licence.
+- Evaluation: structured expected causes instead of keyword matching; ten separately scored criteria with explanations; a deployment rollback-target scenario; `--estimate`, `--only` and `--rescore`; a spending ceiling that reserves one worst-case call.
+- Guardrails (AI service and API): a production change resting on a hypothesis rated unlikely becomes a manual action; a high-risk action moves to the next steps when a lower-risk one is proposed.
 - Queue reliability tests on real BullMQ and Redis with the AI service mocked: queued work waits for a worker, runs once, survives a worker restart; indexing retries with backoff and stops after the configured attempts. `QUEUE_PREFIX` and `QUEUE_BACKOFF_MS` settings.
 - Deployment intelligence: `GET /api/v1/tools/deployment-context` and the agent tool `get_deployment_context` report, for a service's deployment, the last successful version it replaced (the rollback target, however old), the commits and pull requests it shipped, the error rate before and after it, incidents opened after it, and whether it has already been rolled back.
 - Claude provider: configurable model (default `claude-haiku-5-5`), prompt caching, bounded retries, timeouts, clear handling of rejected keys, exhausted credit, unknown models and rate limits.
@@ -22,6 +25,7 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 - Failed sign-ins are audited; retrieved records are marked as untrusted data for the model.
 
 ### Fixed
+- Deployment and commit evidence show the same 12-character commit prefix (a model reported the two lengths as a discrepancy).
 - Evaluation harness: scenarios run as of their own clock, actions are scored for safety rather than exact type, and every run saves complete reports for review.
 - The report schema sent to Claude is flat, so the provider accepts it (found in live testing); a schema a provider refuses to compile is retried as plain JSON.
 - The browser test suite skips itself when a paid model is active, so it can never spend credit.

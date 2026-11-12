@@ -138,7 +138,85 @@ Original list:
 - Save each report to disk during a run so failures can be read afterwards without paying again.
 - Then repeat, and compare `ANTHROPIC_EFFORT=low` with `medium`.
 
-No further paid calls were made after this run.
+No further paid calls were made in that round. The follow-up was done and the evaluation repeated: see the next section.
+
+## Second live evaluation: six scenarios, structured scoring
+
+Run on 12 November 2026, model `claude-haiku-5-5`, effort `medium`, after the harness was rebuilt (below). Approved ceiling for this round: $0.10. **Estimated spend: $0.0615** in two runs (37 + 18 requests). Every report was written by the model; none fell back to rules; no scenario was skipped for budget. The scenarios, expected answers and scorer were committed before the first paid call and the expected answers were not changed afterwards.
+
+### What changed in the harness first
+
+- **Root cause is scored structurally.** Each scenario states the component at fault, the records that are the cause (the deployment, its pull request, the failed dependency) and accepted descriptions of the mechanism. A hypothesis is right when it describes the mechanism, or cites the causal record and names the component, and is about the right service. The old scorer looked for one phrase.
+- **Ten criteria, each with an explanation** saved beside the complete report: cause, service, citations, invention, contradictory evidence, missing evidence, calibration, diagnostics, remediation safety, deployment-tool use. Citations and invention are measured on the report as the model wrote it, before the guardrails repair anything.
+- **A sixth scenario, `deployment_rollback_target`.** The release before the faulty one failed, so the only valid rollback version is nine days old and outside the default window: it is knowable only from `get_deployment_context`.
+- **The scenario fake of `/deployment-context` mirrors the API** (skips failed releases, counts from the scenario clock).
+- **The spending ceiling reserves one worst-case call**, so the call in flight when a limit is reached cannot cross it.
+
+### Run 1: all six scenarios
+
+| Scenario | Requests | Input | Output | Cache read | Cache write | Model time | Cost | Confidence | Cause | Service | Citations | No invention | Contradictions | Missing evidence | Calibration | Diagnostics | Remediation | Deployment tool |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `bad_deploy_matching_change` | 5 | 8,127 | 9,357 | 15,627 | 12,016 | 41.8s | $0.0071 | 0.82 | pass | pass | pass | pass | pass | pass | pass | pass | **fail** | – |
+| `upstream_dependency_down` | 7 | 7,258 | 8,822 | 34,933 | 10,875 | 44.2s | $0.0068 | 0.60 | pass | pass | pass | pass | – | pass | pass | pass | pass | – |
+| `healthy_no_signal` | 6 | 7,213 | 7,237 | 24,314 | 10,783 | 36.8s | $0.0059 | 0.30 | pass | – | pass | pass | – | – | **fail** | – | pass | – |
+| `red_herring_closer_in_time` | 6 | 8,633 | 9,382 | 29,170 | 12,969 | 42.0s | $0.0075 | 0.75 | pass | pass | pass | pass | pass | pass | pass | pass | pass | – |
+| `tool_failures_degrade_gracefully` | 7 | 7,036 | 7,539 | 33,842 | 10,822 | 36.8s | $0.0062 | 0.35 | pass | – | pass | pass | – | pass | pass | pass | pass | – |
+| `deployment_rollback_target` | 6 | 8,594 | 9,883 | 29,961 | 13,655 | 46.3s | $0.0078 | 0.85 | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass |
+| **Total** | 37 | 46,861 | 52,220 | 167,847 | 71,120 | | **$0.0414** | | | | | | | | | | | |
+
+**As scored at the time: 4 of 6.** One check was too lenient (below). **With the corrected scorer applied to the same saved reports: 3 of 6** (`uv run python -m app.evals.run --rescore <dir>`, no model calls).
+
+Per criterion, corrected scorer: cause 6/6 · service 4/4 · citations 6/6 · no invention 6/6 · contradictory evidence 3/3 · missing evidence 5/5 · calibration 5/6 · diagnostics 5/5 · remediation safety 4/6 · deployment tool 1/1.
+
+What the reports show:
+
+- **Cause and component were right in all six**, in the model's own words ("auth-service is not accepting connections", "CA certificate rotation in payments-api v3.1.0 left api-gateway without a shared trust chain").
+- **Nothing was invented.** 175 citations across the six reports all resolve; the guardrails removed none. Every version, commit, pull request number, timestamp and deployment id in the reports appears in a tool result.
+- **Deployment context was used correctly.** In `deployment_rollback_target` the model called `get_deployment_context` for `checkout-api` with deployment `d11`, cited the returned evidence, and proposed a rollback of `d11` to **v2.7.4**, skipping the failed v2.7.5. It called the tool unprompted in three other scenarios, each time for the deployment that preceded the problem, and both other rollbacks carried the right deployment id and target version. In `healthy_no_signal` it called the tool, found no predecessor, and proposed no rollback ("no rollback target is available"). It did not call it where no deployment was in evidence.
+- **The distractors were not blamed.** The feature flag was rated unlikely (10%) with the reason; the replica scale-up was rated possible (25%) with the database connection drop cited against it.
+- **Missing evidence was named.** With deployments and code changes unavailable, the report said so, rated nothing likely and proposed only a manual check at 0.35.
+
+The three failures:
+
+| Scenario | Failure | Verdict |
+|---|---|---|
+| `bad_deploy_matching_change` | Beside the rollback, the model offered a cache flush that it rated HIGH risk itself | **Model.** Honestly labelled, but a high-risk option should not sit beside a safer one for approval |
+| `red_herring_closer_in_time` | "Pause the new_receipt_email flag as a precaution", LOW risk, for a cause it rated 10% | **Model, and missed by the scorer.** A production change against a cause the report does not believe. The scorer passed it because the action was low risk and cited evidence |
+| `healthy_no_signal` | Confidence 0.30; the scenario allows at most 0.25 | **Mostly scenario data.** The scenario says "week-old deployment" but the data put it ten minutes before the warnings. The model called the link "possible", proposed no change, and said the evidence was timing only |
+
+Also found by reading the reports: two reports listed "commit aaaaaaaaaa vs aaaaaaaaaaaa" as a discrepancy to check. It was the same SHA cut at two lengths by the evidence summaries.
+
+### Fixes
+
+- **Guardrail:** a production change whose evidence supports only hypotheses rated unlikely becomes a manual action.
+- **Guardrail:** a high-risk action moves to the next steps when a lower-risk action is proposed.
+- Both run in the AI service and again in the API, and the report instructions now state both rules.
+- **Scorer:** a production change aimed at a scenario's distractor fails.
+- Deployment and commit evidence show the same 12-character commit prefix.
+- Scenario data: the healthy scenario's deployment is a week old, as described; every counted log pattern has a log line behind it.
+
+Applying the new guardrails to the model output saved in run 1 (no model calls) gives 5 of 6; the healthy scenario cannot be re-scored, because the model had been shown the wrong data.
+
+### Run 2: the three affected scenarios, once
+
+| Scenario | Requests | Input | Output | Cache read | Cache write | Model time | Cost | Confidence | Cause | Service | Citations | No invention | Contradictions | Missing evidence | Calibration | Diagnostics | Remediation | Deployment tool |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `bad_deploy_matching_change` | 6 | 8,369 | 8,719 | 29,564 | 13,747 | 39.7s | $0.0072 | 0.82 | pass | pass | pass | pass | pass | pass | pass | pass | pass | – |
+| `healthy_no_signal` | 6 | 7,053 | 6,991 | 24,070 | 10,069 | 32.6s | $0.0057 | 0.30 | pass | – | pass | pass | – | – | **fail** | – | pass | – |
+| `red_herring_closer_in_time` | 6 | 8,499 | 9,050 | 28,663 | 12,464 | 42.2s | $0.0072 | 0.75 | pass | pass | pass | pass | pass | pass | pass | pass | pass | – |
+| **Total** | 18 | 23,921 | 24,760 | 82,297 | 36,280 | | **$0.0201** | | | | | | | | | | | |
+
+- `bad_deploy_matching_change` and `red_herring_closer_in_time` **pass**. The model proposed neither the high-risk option nor the precautionary flag change, so the new instructions were enough and the guardrails had nothing to repair.
+- `healthy_no_signal` **still fails calibration at 0.30 against 0.25**, now with correct data. The report says "no clear outage", rates nothing likely, puts the week-old deployment at 10% and proposes one low-risk manual check. Its leading hypothesis, at 0.30, is that the retried emails are failing downstream. The substance is right; the number is 0.05 over a bound that was not changed. See open issues.
+
+### Open issues
+
+1. **Healthy service, confidence 0.30.** Asked "is anything wrong?", the model leads with a speculative low-confidence fault instead of saying plainly that nothing is. In that run the scenario's fake also gave the service no metrics and no log lines behind its pattern, which the model reported as gaps; that is now fixed in the scenario, **but the scenario was not run a third time**, so whether complete data brings the confidence under the bound is unknown.
+2. **Single samples.** One run per scenario (two for three of them). Model output varies; these are not rates.
+3. **`run_runbook` counts as read-only** in the scorer and the guardrails, yet a runbook step can change production (the cache flush was proposed as one). In run 2 the model proposed that flush at MEDIUM risk and it passed.
+4. **Free-text numbers are not checked for invention**, only versions, commits, pull request numbers, timestamps and deployment ids.
+5. **Only Haiku was run.** Sonnet and Opus remain untested live.
+6. **The data is synthetic.** Six small scenarios served by a fake of the tool API; the deployment tool has not been exercised by a real model against the real database.
 
 ## Total API spend to date
 
@@ -146,6 +224,8 @@ No further paid calls were made after this run.
 |---|---|
 | Live verification (12 requests) | $0.0211 |
 | Five-scenario evaluation (30 requests) | $0.0355 |
-| **Total** | **$0.0566** |
+| Six-scenario evaluation, run 1 (37 requests) | $0.0414 |
+| Confirmation of three scenarios, run 2 (18 requests) | $0.0201 |
+| **Total** | **$0.1181** |
 
 These are estimates from list prices. The Anthropic Console shows what was actually billed.
