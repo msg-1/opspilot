@@ -392,3 +392,46 @@ async def test_evaluation_run_saves_complete_reports_for_later_review(tmp_path):
     assert {"meta", "step", "evidence", "final"} <= kinds  # enough to reconstruct the whole run
     assert saved["result"]["proposed_rollback"] is True and saved["result"]["unsafe_reasons"] == []
     assert {p.name for p in tmp_path.iterdir()} == {f"{s.name}.json" for s in SCENARIOS}
+
+
+# ───────────────────────── Deployment intelligence ─────────────────────────
+
+
+async def test_deployment_context_tool_yields_the_rollback_target_and_impact_as_evidence():
+    from app.evidence import EvidenceStore
+
+    scenario = BY_NAME["bad_deploy_matching_change"]
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return scenario.handler()(request)
+
+    client = ToolClient("http://opspilot.test", "tok", transport=httpx.MockTransport(handler))
+    result = await client.call("get_deployment_context", {"service": "orders-api", "deployment_id": "d1"})
+    assert seen[0].url.path == "/api/v1/tools/deployment-context" and dict(seen[0].url.params) == {"service": "orders-api", "deploymentId": "d1"}
+    # The previous version is found however long ago it was deployed (here 30 hours earlier).
+    assert result["rollbackTarget"] == {"deploymentId": "d1", "fromVersion": "v4.2.0", "toVersion": "v4.1.9", "previousDeployedAt": result["previousSuccessful"]["startedAt"]}
+
+    store = EvidenceStore()
+    items = store.ingest("get_deployment_context", result)
+    kinds = [e.kind for e in items]
+    assert kinds.count("deployment") == 2 and "deployment_impact" in kinds and "pull_request" in kinds and "commit" in kinds
+    impact = next(e for e in items if e.kind == "deployment_impact")
+    assert impact.source_id == "d1" and "Replaced v4.1.9" in impact.summary and impact.data["rollbackTarget"]["toVersion"] == "v4.1.9"
+    # Asking again, or listing deployments afterwards, does not duplicate evidence.
+    again = store.ingest("list_deployments", {"deployments": [result["deployment"], result["previousSuccessful"]]})
+    assert {e.ref for e in again} <= {e.ref for e in items} and len(store.by_kind("deployment")) == 2
+
+    empty = await client.call("get_deployment_context", {"service": "search-api", "deployment_id": "nope"})
+    assert empty["deployment"] is None and store.ingest("get_deployment_context", empty) == []
+    await client.aclose()
+
+
+async def test_playbook_uses_deployment_context_so_a_rollback_always_names_its_target():
+    report, events, ctx = await run("bad_deploy_matching_change", None)
+    tools_used = [e["step"]["toolName"] for e in events if e["type"] == "step" and e["step"].get("toolName")]
+    assert "get_deployment_context" in tools_used
+    rollback = report.recommended_actions[0]
+    assert rollback.type == "rollback_deployment" and rollback.parameters.deployment_id == "d1" and rollback.parameters.to_version == "v4.1.9"
+    assert any(e["evidence"]["kind"] == "deployment_impact" for e in events if e["type"] == "evidence")

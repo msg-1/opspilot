@@ -103,6 +103,25 @@ class Scenario:
                 return httpx.Response(200, json={"window": window, "totalMatching": len(self.logs), "returned": len(self.logs), "logs": pick(self.logs)})
             if path == "/logs/histogram":
                 return httpx.Response(200, json={"window": window, "bucketSeconds": 300, "buckets": []})
+            if path == "/deployment-context":
+                slug = request.url.params.get("service", "")
+                mine = sorted((d for d in self.deployments if d["service"] == slug), key=lambda d: d["startedAt"], reverse=True)
+                wanted_id = request.url.params.get("deploymentId")
+                target = next((d for d in mine if d["id"] == wanted_id), None) if wanted_id else (mine[0] if mine else None)
+                if not target:
+                    return httpx.Response(200, json={"service": slug, "environment": "production", "deployment": None, "note": "No deployment is recorded for this service in this environment."})
+                previous = next((d for d in mine if d["startedAt"] < target["startedAt"]), None)
+                sha = (target.get("commitSha") or "")[:12]
+                errors_after = sum(p["count"] for p in self.anomalies if p["serviceSlug"] == slug and p["level"] in ("ERROR", "FATAL") and p["firstSeen"] >= target["startedAt"])
+                return httpx.Response(200, json={
+                    "service": slug, "environment": "production", "deployment": target, "isLatest": mine[0]["id"] == target["id"], "minutesSinceDeployment": 38,
+                    "previousSuccessful": previous,
+                    "rollbackTarget": {"deploymentId": target["id"], "fromVersion": target["version"], "toVersion": previous["version"], "previousDeployedAt": previous["startedAt"]} if previous else None,
+                    "alreadyRolledBack": False,
+                    "changes": {"commits": [c for c in self.commits if c["sha"] == sha], "pullRequests": [p for p in self.pulls if p["mergeCommitSha"] == sha]},
+                    "errorLogs": {"windowMinutes": 30, "before": 2, "after": min(errors_after, 400), "beforePerMinute": 0.07, "afterPerMinute": round(min(errors_after, 400) / 30, 2)},
+                    "incidentsAfter": [], "recentDeployments": mine[:6],
+                })
             if path == "/deployments":
                 return httpx.Response(200, json={"window": window, "deployments": pick(self.deployments)})
             if path == "/code-changes":

@@ -66,6 +66,11 @@ class MetricArgs(BaseModel):
     metrics: list[str] = Field(default_factory=list, description="Metric names, e.g. error_rate, latency_p95_ms. Empty means all")
 
 
+class DeploymentContextArgs(BaseModel):
+    service: str = Field(description="Service slug")
+    deployment_id: str | None = Field(default=None, description="Id of a specific deployment (the sourceId of its evidence item). Defaults to the service's latest deployment")
+
+
 class KnowledgeArgs(BaseModel):
     query: str = Field(description="Natural-language description of the symptom or topic")
     service: str | None = Field(default=None, description="Prefer documents for this service slug")
@@ -152,8 +157,17 @@ TOOLS: list[ToolSpec] = [
     ToolSpec(
         "get_code_changes",
         "Commits and merged pull requests in a time window for the repositories linked to the given services, including changed "
-        "file names and PR descriptions. Items marked sampleData come from the mock GitHub adapter.",
+        "file names and PR descriptions. Code is usually merged hours or days before it is deployed, so start the window at "
+        "least 24 hours before the deployment you are examining. Items marked sampleData come from the mock GitHub adapter.",
         WindowArgs, "GET", "/code-changes",
+    ),
+    ToolSpec(
+        "get_deployment_context",
+        "Everything about one deployment as a suspect: the version it replaced (the rollback target, however long ago that was "
+        "deployed), every commit and pull request it shipped, error-log rates in the 30 minutes before and after it, incidents "
+        "that began within 6 hours, and whether it has already been rolled back. Use it on any deployment that precedes a "
+        "problem, and before recommending a rollback: its rollbackTarget gives the deploymentId and toVersion to use.",
+        DeploymentContextArgs, "GET", "/deployment-context",
     ),
     ToolSpec(
         "list_service_events",
@@ -210,6 +224,10 @@ def _request_for(spec: ToolSpec, args: BaseModel) -> tuple[str, dict[str, Any] |
         params = {**_window(args), "service": args.service}
         if args.metrics:
             params["metric"] = ",".join(args.metrics)
+    elif isinstance(args, DeploymentContextArgs):
+        params = {"service": args.service}
+        if args.deployment_id:
+            params["deploymentId"] = args.deployment_id
     elif isinstance(args, KnowledgeArgs):
         body = {"query": args.query, "limit": args.limit}
         if args.service:

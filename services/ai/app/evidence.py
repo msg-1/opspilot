@@ -141,6 +141,33 @@ class EvidenceStore:
             ))
         return out
 
+    def _from_get_deployment_context(self, r: dict[str, Any]) -> list[EvidenceItem | None]:
+        target = r.get("deployment")
+        if not target:
+            return []
+        out: list[EvidenceItem | None] = [self._deployment(target)]
+        previous = r.get("previousSuccessful")
+        if previous:
+            out.append(self._deployment(previous))
+        errors = r.get("errorLogs") or {}
+        before, after = errors.get("beforePerMinute"), errors.get("afterPerMinute")
+        if after is not None and before is not None and (errors.get("before") or errors.get("after")):
+            if before == 0:
+                change = "none before" if after else "none either side"
+            else:
+                change = f"{after / before:.1f}x the rate before"
+            out.append(self.add(
+                "deployment_impact", f"Error logs around {target.get('service')} {target.get('version')}: {errors.get('after')} after vs {errors.get('before')} before",
+                f"{errors.get('after')} ERROR/FATAL log lines in the {errors.get('windowMinutes')} minutes after the deployment ({after}/min) against "
+                f"{errors.get('before')} in the 30 minutes before ({before}/min): {change}."
+                + (f" Replaced {previous.get('version')}, deployed {previous.get('startedAt')}." if previous else " No earlier successful deployment is recorded.")
+                + (" This deployment has already been rolled back." if r.get("alreadyRolledBack") else ""),
+                source_type="deployment_impact", source_id=target["id"], occurred_at=target.get("startedAt"), service=target.get("service"),
+                data={"errorLogs": errors, "rollbackTarget": r.get("rollbackTarget"), "alreadyRolledBack": r.get("alreadyRolledBack"), "minutesSinceDeployment": r.get("minutesSinceDeployment")},
+            ))
+        out += self._from_get_code_changes(r.get("changes") or {})
+        return out
+
     def _from_get_metrics(self, r: dict[str, Any]) -> list[EvidenceItem | None]:
         out = []
         service = r.get("service")
