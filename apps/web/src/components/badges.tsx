@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import { AlertOctagon, AlertTriangle, CheckCircle2, CircleDashed, CircleDot, HelpCircle, Info, Loader2, MinusCircle, XCircle } from 'lucide-react';
+import { AlertOctagon, AlertTriangle, CheckCircle2, CircleDashed, CircleDot, Cog, FlaskConical, HelpCircle, Info, Loader2, MinusCircle, Sparkles, XCircle } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { titleCase } from '@/lib/format';
 
@@ -134,6 +134,23 @@ export function ConfidenceMeter({ value, status }: { value: number; status?: str
       <span className="text-[12px] text-ink-2">{status ? titleCase(status) : word}</span>
     </div>
   );
+}
+
+const PROVIDER_NAME: Record<string, string> = { anthropic: 'Claude', openai: 'OpenAI', ollama: 'Ollama' };
+
+/**
+ * Says which engine produced an investigation. A scripted or rule-based result must never be
+ * mistaken for model output, so the three cases look different and are worded explicitly.
+ */
+export function EngineBadge({ mode, provider, model, attemptedProvider }: { mode?: string | null; provider?: string | null; model?: string | null; attemptedProvider?: string | null }) {
+  const resolved = mode ?? (provider === 'heuristic' ? 'heuristic' : provider === 'mock' ? 'mock' : provider ? 'llm' : null);
+  if (!resolved) return null;
+  if (resolved === 'mock') return <Badge tone="warn" icon={<FlaskConical className={I} aria-hidden />}>Mock AI · no model was called</Badge>;
+  if (resolved === 'heuristic') {
+    const fellBack = attemptedProvider && attemptedProvider !== 'heuristic';
+    return <Badge tone={fellBack ? 'warn' : 'neutral'} icon={<Cog className={I} aria-hidden />}>{fellBack ? `Rule-based engine · ${PROVIDER_NAME[attemptedProvider] ?? attemptedProvider} was unavailable` : 'Rule-based engine · no AI model'}</Badge>;
+  }
+  return <Badge tone="info" icon={<Sparkles className={I} aria-hidden />}>{PROVIDER_NAME[provider ?? ''] ?? provider} · {model ?? 'model'}</Badge>;
 }
 
 export const TierBadge = ({ tier }: { tier: string }) => <Badge tone={tier === 'TIER1' ? 'info' : 'neutral'}>{tier.replace('TIER', 'Tier ')}</Badge>;

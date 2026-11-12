@@ -228,7 +228,8 @@ async def test_anthropic_provider_builds_requests_and_parses_tool_calls():
     provider = AnthropicProvider(Settings(_env_file=None, anthropic_api_key="k"), client=SimpleNamespace(messages=fake))
     reply = await provider.invoke([SystemMessage("sys"), HumanMessage("hi")], TOOLS[:2])
     sent = fake.calls[0]
-    assert sent["model"] == "claude-opus-5-5" and sent["system"] == "sys" and sent["output_config"] == {"effort": "medium"}
+    assert sent["model"] == "claude-haiku-5-5" and sent["system"] == "sys" and sent["output_config"] == {"effort": "medium"}
+    assert sent["cache_control"] == {"type": "ephemeral"} and sent["max_tokens"] == 8000
     assert "thinking" not in sent and "temperature" not in sent and "tool_choice" not in sent
     assert sent["tools"][0]["input_schema"]["additionalProperties"] is False
     assert reply.tool_calls[0]["name"] == "list_services" and reply.content == "Looking."

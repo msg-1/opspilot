@@ -41,7 +41,7 @@ def enforce(report: InvestigationReport, store: EvidenceStore) -> list[str]:
     """Mutates the report so that it only claims what the evidence supports. Returns notes on what changed."""
     known = store.refs()
     notes: list[str] = []
-    cap = MAX_LLM_CONFIDENCE if report.analysis_mode == "llm" else 0.75
+    cap = {"llm": MAX_LLM_CONFIDENCE, "mock": 0.1}.get(report.analysis_mode, 0.75)
 
     def keep(refs: list[str], where: str) -> list[str]:
         normalised = [r.strip().strip("[]()").upper() for r in refs]
@@ -53,6 +53,7 @@ def enforce(report: InvestigationReport, store: EvidenceStore) -> list[str]:
 
     for h in report.hypotheses:
         h.evidence_refs = keep(h.evidence_refs, f'hypothesis "{h.title[:60]}"')
+        h.contradicting_evidence_refs = keep(h.contradicting_evidence_refs, f'the evidence against "{h.title[:60]}"')
         if not h.evidence_refs and (h.confidence > UNSUPPORTED_CONFIDENCE_CAP or h.status == "likely"):
             notes.append(f'Hypothesis "{h.title[:60]}" cites no evidence: confidence capped at {UNSUPPORTED_CONFIDENCE_CAP} and status set to possible.')
             h.confidence = min(h.confidence, UNSUPPORTED_CONFIDENCE_CAP)

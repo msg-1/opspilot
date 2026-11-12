@@ -11,7 +11,7 @@ interface S { count: number; mean: number | null; median: number | null; p90: nu
 interface Overview {
   incidents: { total: number; open: number; bySeverity: Record<string, number>; weekly: Record<string, number | string>[]; topServices: { id: string; name: string; incidents: number; minutes: number }[]; mttaMinutes: S; mttrMinutes: S; mttrBySeverity: Record<string, S> };
   deployments: { total: number; perDay: number; rollbacks: number; changeFailureRate: number | null; failedChanges: number; daily: { date: string; total: number }[]; byService: { name: string; total: number }[] };
-  investigations: { total: number; byStatus: Record<string, number>; averageConfidence: number | null; durationSeconds: S; byProvider: Record<string, number> };
+  investigations: { total: number; byStatus: Record<string, number>; averageConfidence: number | null; durationSeconds: S; byProvider: Record<string, number>; estimatedCostUsd: number; tokens: number };
   remediation: { total: number; byStatus: Record<string, number>; proposedByAi: number; approvalMinutes: S };
 }
 
@@ -75,7 +75,9 @@ export default function AnalyticsPage() {
               <div><dt className="text-[12px] text-ink-2">Outcomes</dt><dd className="mt-1">{Object.entries(inv.byStatus).map(([k, v]) => `${v} ${titleCase(k).toLowerCase()}`).join(', ')}</dd></div>
               <div><dt className="text-[12px] text-ink-2">Average confidence of completed runs</dt><dd className="tabular mt-1 text-lg font-semibold">{inv.averageConfidence === null ? '—' : `${inv.averageConfidence}%`}</dd></div>
               <div><dt className="text-[12px] text-ink-2">Median duration</dt><dd className="tabular mt-1 text-lg font-semibold">{inv.durationSeconds.median === null ? '—' : `${inv.durationSeconds.median}s`}</dd></div>
-              <div><dt className="text-[12px] text-ink-2">Analysis engine</dt><dd className="mt-1">{Object.entries(inv.byProvider).map(([k, v]) => `${k === 'heuristic' ? 'rule-based' : k} (${v})`).join(', ') || '—'}</dd></div>
+              <div><dt className="text-[12px] text-ink-2">Analysis engine</dt><dd className="mt-1">{Object.entries(inv.byProvider).map(([k, v]) => `${k === 'heuristic' ? 'rule-based' : k === 'anthropic' ? 'Claude' : k} (${v})`).join(', ') || '—'}</dd></div>
+              <div><dt className="text-[12px] text-ink-2">Estimated model spend</dt><dd className="tabular mt-1 text-lg font-semibold">${inv.estimatedCostUsd.toFixed(4)}</dd></div>
+              <div><dt className="text-[12px] text-ink-2">Model tokens</dt><dd className="tabular mt-1 text-lg font-semibold">{inv.tokens.toLocaleString()}</dd></div>
             </dl>
           )}
         </Card>

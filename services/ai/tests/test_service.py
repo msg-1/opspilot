@@ -70,7 +70,9 @@ def test_http_api_requires_the_internal_token(client):
 def test_http_status_and_embeddings(client):
     headers = {"x-internal-token": TOKEN}
     status = client.get("/v1/status", headers=headers).json()
-    assert status["llm"] == {"provider": "heuristic", "configuredProvider": "none", "model": None, "available": False, "detail": status["llm"]["detail"]}
+    llm = status["llm"]
+    assert (llm["provider"], llm["configuredProvider"], llm["model"], llm["available"]) == ("heuristic", "none", None, False)
+    assert llm["credentials"] == {"anthropic": False, "openai": False} and llm["limits"]["maxCostUsdPerInvestigation"] == 0.5
     assert status["embeddings"]["dimensions"] == 768
     body = client.post("/v1/embeddings", json={"texts": ["pool timeout", "smtp"], "kind": "query"}, headers=headers).json()
     assert body["provider"] == "local" and len(body["vectors"]) == 2 and len(body["vectors"][0]) == 768

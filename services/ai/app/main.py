@@ -17,11 +17,27 @@ from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_
 from .config import EMBEDDING_DIMENSIONS, Settings, get_settings
 from .embeddings import embed, resolve_embeddings
 from .graph import Context, run_investigation
-from .llm import build_provider, resolve
+from .llm import build_provider, resolve, scrub
 from .schemas import EmbeddingRequest, InvestigationRequest
 from .tools import ToolClient
 
-logging.basicConfig(level=get_settings().log_level.upper(), format='{"time":"%(asctime)s","level":"%(levelname)s","logger":"%(name)s","message":"%(message)s"}')
+
+class JsonFormatter(logging.Formatter):
+    """One valid JSON object per line, whatever the message contains."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        entry: dict[str, Any] = {"time": self.formatTime(record), "level": record.levelname, "logger": record.name, "message": scrub(record.getMessage())}
+        if record.exc_info:
+            entry["exception"] = scrub(self.formatException(record.exc_info))[:4000]
+        return json.dumps(entry)
+
+
+_handler = logging.StreamHandler()
+_handler.setFormatter(JsonFormatter())
+logging.basicConfig(level=get_settings().log_level.upper(), handlers=[_handler], force=True)
+# HTTP client libraries log full request URLs at INFO; keep them quiet.
+for _noisy in ("httpx", "httpx2", "httpcore", "anthropic", "openai"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
 log = logging.getLogger("opspilot.ai")
 
 app = FastAPI(title="OpsPilot AI service", version="0.1.0")
@@ -30,6 +46,7 @@ INVESTIGATIONS = Counter("opspilot_ai_investigations_total", "Investigations run
 INVESTIGATION_SECONDS = Histogram("opspilot_ai_investigation_seconds", "Investigation duration", ["provider"], buckets=(1, 2, 5, 10, 20, 40, 80, 160, 320, 640))
 EMBEDDED_TEXTS = Counter("opspilot_ai_embedded_texts_total", "Texts embedded", ["provider"])
 TOKENS = Counter("opspilot_ai_llm_tokens_total", "LLM tokens used", ["provider", "direction"])
+COST = Counter("opspilot_ai_llm_estimated_cost_usd_total", "Estimated model spend in USD (list prices)", ["provider", "model"])
 
 if get_settings().otel_enabled:  # pragma: no cover - optional
     from opentelemetry import trace
@@ -62,10 +79,24 @@ async def metrics() -> PlainTextResponse:
 
 
 @app.get("/v1/status", dependencies=[Depends(require_internal)])
-async def status(settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+async def status(verify: bool = False, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
     llm, emb = await asyncio.gather(resolve(settings), resolve_embeddings(settings))
+    verification: dict[str, Any] | None = None
+    if verify and llm.available:
+        # A metadata lookup, not an inference call: it proves the key and model id without spending tokens.
+        ok, detail = await build_provider(llm, settings).verify()  # type: ignore[union-attr]
+        verification = {"ok": ok, "detail": detail}
     return {
-        "llm": {"provider": llm.provider if llm.available else "heuristic", "configuredProvider": llm.provider, "model": llm.model if llm.available else None, "available": llm.available, "detail": llm.detail},
+        "llm": {
+            "provider": llm.provider if llm.available else "heuristic", "configuredProvider": llm.provider, "model": llm.model if llm.available else None,
+            "available": llm.available, "detail": llm.detail, "verification": verification,
+            # Whether a key is present — never the key itself.
+            "credentials": {"anthropic": bool(settings.anthropic_api_key), "openai": bool(settings.openai_api_key)},
+            "limits": {
+                "maxOutputTokensPerCall": settings.ai_max_tokens, "requestTimeoutSeconds": settings.ai_request_timeout_seconds, "maxRetries": settings.ai_max_retries,
+                "maxCostUsdPerInvestigation": settings.ai_max_cost_usd_per_investigation, "maxTokensPerInvestigation": settings.ai_max_tokens_per_investigation,
+            },
+        },
         "embeddings": {"provider": emb.provider, "model": emb.model, "dimensions": EMBEDDING_DIMENSIONS, "detail": emb.detail},
     }
 
@@ -96,7 +127,8 @@ async def run(body: InvestigationRequest, settings: Settings = Depends(get_setti
             if not resolution.available and resolution.provider != "none":
                 # A provider was explicitly requested but is unusable: say so instead of silently degrading.
                 await queue.put({"type": "step", "step": {"type": "error", "title": "Configured LLM provider is unavailable; using rule-based analysis", "detail": resolution.detail, "status": "failed"}})
-            await run_investigation(Context(request=body, settings=settings, tools=tools, provider=provider, emit=queue.put))
+            unavailable = resolution.provider if not resolution.available and resolution.provider != "none" else None
+            await run_investigation(Context(request=body, settings=settings, tools=tools, provider=provider, emit=queue.put, unavailable_provider=unavailable))
             INVESTIGATIONS.labels(label, "completed").inc()
         except asyncio.CancelledError:
             INVESTIGATIONS.labels(label, "cancelled").inc()
@@ -104,12 +136,14 @@ async def run(body: InvestigationRequest, settings: Settings = Depends(get_setti
         except Exception as exc:
             log.exception("investigation %s failed", body.investigation_id)
             INVESTIGATIONS.labels(label, "failed").inc()
-            await queue.put({"type": "error", "message": f"Investigation failed: {exc}"})
+            await queue.put({"type": "error", "message": scrub(f"Investigation failed: {exc}")[:500]})
         finally:
             INVESTIGATION_SECONDS.labels(label).observe(time.perf_counter() - started)
             if provider:
                 TOKENS.labels(label, "input").inc(provider.usage.input_tokens)
                 TOKENS.labels(label, "output").inc(provider.usage.output_tokens)
+                TOKENS.labels(label, "cache_read").inc(provider.usage.cache_read_tokens)
+                COST.labels(label, provider.model).inc(provider.usage.cost_usd)
             await tools.aclose()
             await queue.put(None)
 

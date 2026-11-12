@@ -2,15 +2,15 @@ import type { Prisma } from '@prisma/client';
 import { Router } from 'express';
 import { z } from 'zod';
 import { env } from '../config/env';
-import { type InvestigationEvent, aiService } from '../integrations/aiService';
+import { type InvestigationEvent, type InvestigationUsage, aiService } from '../integrations/aiService';
 import { audit, writeAudit } from '../lib/audit';
-import { conflict, notFound } from '../lib/errors';
+import { AppError, conflict, notFound } from '../lib/errors';
 import { csvEnum, paged, paginate, paginationQuery, param } from '../lib/http';
 import { logger } from '../lib/logger';
 import { investigationsTotal } from '../lib/metrics';
 import { notifyUsers } from '../lib/notify';
 import { prisma } from '../lib/prisma';
-import { authOf, requirePermission, signToolToken } from '../middleware/auth';
+import { authOf, can, requirePermission, signToolToken } from '../middleware/auth';
 import { enqueue, registerProcessor } from '../queues';
 import { addIncidentEvent, incidentKey, requireIncident } from './incidents';
 import { REMEDIATION_TYPES, proposeRemediation } from './remediation';
@@ -25,6 +25,8 @@ const hypothesisSchema = z.object({
   confidence: z.number().min(0).max(1),
   status: z.enum(['likely', 'possible', 'unlikely']).default('possible'),
   evidenceRefs: refs,
+  contradictingEvidenceRefs: refs,
+  contradictions: z.array(z.string()).default([]),
   facts: z.array(z.string()).default([]),
   assumptions: z.array(z.string()).default([]),
   gaps: z.array(z.string()).default([]),
@@ -33,7 +35,7 @@ const hypothesisSchema = z.object({
 export const reportSchema = z.object({
   summary: z.string().min(1).max(6000),
   confidence: z.number().min(0).max(1),
-  analysisMode: z.enum(['llm', 'heuristic']),
+  analysisMode: z.enum(['llm', 'heuristic', 'mock']),
   // The agent never confirms a root cause; a human does that on the incident.
   rootCauseConfirmed: z.literal(false).default(false),
   timeline: z.array(z.object({ timestamp: z.string(), description: z.string(), evidenceRefs: refs })).default([]),
@@ -151,7 +153,7 @@ export async function runInvestigation(investigationId: string) {
         const parsed = reportSchema.safeParse(event.report);
         if (!parsed.success) throw new Error(`AI service returned a malformed report: ${parsed.error.issues[0]?.message ?? 'invalid'}`);
         const report = await applyGuardrails(parsed.data, evidenceRefs, addStep);
-        await persistFinal(investigationId, report, event.usage);
+        await persistFinal(investigationId, report, event.usage, event.engine);
         finished = true;
         break;
       }
@@ -231,7 +233,7 @@ async function applyGuardrails(
       confidence = Math.min(confidence, 0.3);
       if (status === 'likely') status = 'possible';
     }
-    return { ...h, evidenceRefs: evidence, confidence, status };
+    return { ...h, evidenceRefs: evidence, contradictingEvidenceRefs: clean(h.contradictingEvidenceRefs, `the evidence against "${h.title}"`), confidence, status };
   });
   const ceiling = hypotheses.length ? Math.max(...hypotheses.map((h) => h.confidence)) : 0.2;
   let confidence = report.confidence;
@@ -257,12 +259,17 @@ async function applyGuardrails(
   return result;
 }
 
-async function persistFinal(investigationId: string, report: InvestigationReport, usage?: { inputTokens?: number; outputTokens?: number }) {
+async function persistFinal(
+  investigationId: string,
+  report: InvestigationReport,
+  usage?: InvestigationUsage,
+  engine?: { mode: string; provider: string; model: string | null; attemptedProvider: string | null },
+) {
   const investigation = await prisma.investigation.findUniqueOrThrow({ where: { id: investigationId } });
   await prisma.$transaction([
     prisma.hypothesis.deleteMany({ where: { investigationId } }),
     prisma.hypothesis.createMany({
-      data: report.hypotheses.map((h, i) => ({ investigationId, rank: i + 1, title: h.title, description: h.description, confidence: h.confidence, status: h.status, evidenceRefs: h.evidenceRefs, facts: h.facts, assumptions: h.assumptions, gaps: h.gaps })),
+      data: report.hypotheses.map((h, i) => ({ investigationId, rank: i + 1, title: h.title, description: h.description, confidence: h.confidence, status: h.status, evidenceRefs: h.evidenceRefs, contradictingRefs: h.contradictingEvidenceRefs, contradictions: h.contradictions, facts: h.facts, assumptions: h.assumptions, gaps: h.gaps })),
     }),
     prisma.investigation.updateMany({
       where: { id: investigationId, status: 'RUNNING' },
@@ -272,8 +279,16 @@ async function persistFinal(investigationId: string, report: InvestigationReport
         summary: report.summary,
         confidence: report.confidence,
         completedAt: new Date(),
+        // The report itself says which engine wrote it; that is what the UI labels it with.
+        analysisMode: report.analysisMode,
+        ...(engine ? { provider: engine.provider, model: engine.model, attemptedProvider: engine.attemptedProvider } : {}),
         inputTokens: usage?.inputTokens ?? 0,
         outputTokens: usage?.outputTokens ?? 0,
+        cacheReadTokens: usage?.cacheReadTokens ?? 0,
+        cacheWriteTokens: usage?.cacheWriteTokens ?? 0,
+        llmCalls: usage?.llmCalls ?? 0,
+        llmLatencyMs: usage?.llmLatencyMs ?? 0,
+        estimatedCostUsd: usage?.estimatedCostUsd ?? null,
       },
     }),
   ]);
@@ -327,6 +342,8 @@ const listSelect = {
   status: true,
   provider: true,
   model: true,
+  analysisMode: true,
+  estimatedCostUsd: true,
   summary: true,
   confidence: true,
   error: true,
@@ -350,18 +367,50 @@ investigationsRouter.get('/', requirePermission('read'), async (req, res) => {
 });
 
 /** Which model will run the next investigation; shown in the workspace before submitting. */
-investigationsRouter.get('/ai-status', requirePermission('read'), async (_req, res) => {
+investigationsRouter.get('/ai-status', requirePermission('read'), async (req, res) => {
+  const { organizationId } = authOf(req);
+  // ?verify=true asks the provider to confirm the key and model (a free metadata lookup).
+  const verify = req.query.verify === 'true' && can(authOf(req), 'investigation:run');
+  const usage = await usageToday(organizationId);
+  const limits = { maxConcurrent: env.INVESTIGATION_MAX_CONCURRENT, dailyInvestigations: env.INVESTIGATION_DAILY_LIMIT, dailyCostUsd: env.AI_DAILY_COST_LIMIT_USD };
   try {
-    res.json({ reachable: true, ...(await aiService.status()) });
+    res.json({ reachable: true, ...(await aiService.status(verify)), usageToday: usage, organizationLimits: limits });
   } catch (err) {
-    res.json({ reachable: false, detail: (err as Error).message });
+    res.json({ reachable: false, detail: (err as Error).message, usageToday: usage, organizationLimits: limits });
   }
 });
+
+/** What this organisation has used since midnight UTC. */
+async function usageToday(organizationId: string) {
+  const since = new Date();
+  since.setUTCHours(0, 0, 0, 0);
+  const [agg, running] = await Promise.all([
+    prisma.investigation.aggregate({ where: { organizationId, createdAt: { gte: since } }, _count: true, _sum: { estimatedCostUsd: true, inputTokens: true, outputTokens: true } }),
+    prisma.investigation.count({ where: { organizationId, status: { in: ['QUEUED', 'RUNNING'] } } }),
+  ]);
+  return { investigations: agg._count, running, estimatedCostUsd: Math.round((agg._sum.estimatedCostUsd ?? 0) * 10_000) / 10_000, tokens: (agg._sum.inputTokens ?? 0) + (agg._sum.outputTokens ?? 0) };
+}
+
+/** Spending guard: refuses new investigations once the organisation's limits are reached. */
+async function assertWithinLimits(organizationId: string) {
+  const usage = await usageToday(organizationId);
+  const refuse = (message: string) => new AppError(429, 'limit_reached', message);
+  if (env.INVESTIGATION_MAX_CONCURRENT && usage.running >= env.INVESTIGATION_MAX_CONCURRENT) {
+    throw refuse(`${usage.running} investigations are already in progress (limit ${env.INVESTIGATION_MAX_CONCURRENT}). Wait for one to finish or cancel it.`);
+  }
+  if (env.INVESTIGATION_DAILY_LIMIT && usage.investigations >= env.INVESTIGATION_DAILY_LIMIT) {
+    throw refuse(`The daily limit of ${env.INVESTIGATION_DAILY_LIMIT} investigations has been reached. It resets at midnight UTC.`);
+  }
+  if (env.AI_DAILY_COST_LIMIT_USD && usage.estimatedCostUsd >= env.AI_DAILY_COST_LIMIT_USD) {
+    throw refuse(`Today's estimated model spend ($${usage.estimatedCostUsd.toFixed(2)}) has reached the daily limit of $${env.AI_DAILY_COST_LIMIT_USD.toFixed(2)}. It resets at midnight UTC; raise AI_DAILY_COST_LIMIT_USD to allow more.`);
+  }
+}
 
 investigationsRouter.post('/', requirePermission('investigation:run'), async (req, res) => {
   const auth = authOf(req);
   const body = createBody.parse(req.body);
   const incident = body.incidentId ? await requireIncident(auth.organizationId, body.incidentId) : null;
+  await assertWithinLimits(auth.organizationId);
   const investigation = await prisma.investigation.create({
     data: {
       organizationId: auth.organizationId,

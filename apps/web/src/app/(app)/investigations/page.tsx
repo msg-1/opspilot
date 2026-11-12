@@ -4,7 +4,7 @@ import { Sparkles } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { ConfidenceMeter, InvestigationStatusBadge } from '@/components/badges';
+import { ConfidenceMeter, EngineBadge, InvestigationStatusBadge } from '@/components/badges';
 import { type AiStatus, EngineNotice } from '@/components/engine-notice';
 import { Button, Card, EmptyState, ErrorState, FormError, PageHeader, Pagination, Select, Spinner, Textarea } from '@/components/ui';
 import { api, qs, useApi } from '@/lib/api';
@@ -28,7 +28,7 @@ export default function InvestigationsPage() {
   const { run, busy, error } = useAction();
   const canRun = session.can('investigation:run');
   const list = useApi<Paged<InvestigationSummary>>(`/investigations${qs({ page, pageSize: 15 })}`, { refetchInterval: 10_000, placeholderData: (p) => p });
-  const status = useApi<AiStatus>('/investigations/ai-status', { staleTime: 30_000 });
+  const status = useApi<AiStatus>('/investigations/ai-status', { staleTime: 15_000 });
   const incidents = useApi<Paged<Incident>>(canRun ? '/incidents?active=true&pageSize=50' : null);
 
   async function submit(e: React.FormEvent) {
@@ -82,7 +82,8 @@ export default function InvestigationsPage() {
                       {i.confidence !== null && <ConfidenceMeter value={i.confidence} />}
                       {i.incident && <span>INC-{i.incident.number}</span>}
                       <span>{i._count?.evidence ?? 0} evidence · {i._count?.hypotheses ?? 0} hypotheses</span>
-                      <span>{i.provider === 'heuristic' ? 'Rule-based' : i.provider ?? ''}</span>
+                      <EngineBadge mode={i.analysisMode} provider={i.provider} model={i.model} attemptedProvider={i.attemptedProvider} />
+                      {!!i.estimatedCostUsd && <span className="tabular">${i.estimatedCostUsd.toFixed(4)}</span>}
                       <span>{timeAgo(i.createdAt)}</span>
                     </div>
                   </Link>
