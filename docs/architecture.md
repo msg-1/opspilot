@@ -91,6 +91,25 @@ POST /investigations ─▶ row QUEUED ─▶ BullMQ ─▶ worker ─▶ POST a
 
 The UI polls the investigation while it runs, so steps and evidence appear live. Cancelling sets the status; the worker notices on the next event and aborts the stream.
 
+### When a run does not finish
+
+An investigation is run at most once, and it ends in exactly one of `COMPLETED`, `FAILED` or `CANCELLED`. There is no retry: with a model, a second run is a second charge, and that is the asker's decision.
+
+| What happens | What is recorded | How soon |
+|---|---|---|
+| The queue (Redis) is unreachable when the request arrives | The request is refused with 503 and the row is `FAILED` | At once |
+| The AI service is unreachable, answers with an error, or reports its own failure | `FAILED`, with that reason | At once |
+| The stream is cut, or contains something that is not an event | `FAILED`: "interrupted" or "not a valid event". The text received is not repeated | At once |
+| The stream ends without a report, or the report does not have the shape of one | `FAILED` | At once |
+| The run exceeds `INVESTIGATION_TIMEOUT_MS` (15 minutes) | `FAILED`, and the request to the AI service is abandoned | At the limit |
+| The worker is asked to stop (SIGTERM) | Runs get `WORKER_SHUTDOWN_GRACE_MS` (10 s) to finish; what is still running is `FAILED` as interrupted before the process exits | Within the grace period |
+| The worker dies (SIGKILL, crash, power) | The queue hands the job out again once the dead worker's claim lapses; the worker that receives it records `FAILED` as interrupted. It is not started again | About a minute (`QUEUE_LOCK_MS` + `QUEUE_STALLED_INTERVAL_MS`) |
+| The database is unreachable while a run ends | The write that records the failure is retried for about 8 seconds. If that is not enough the row stays `RUNNING` until the sweep | Sweep: `INVESTIGATION_TIMEOUT_MS` + 5 minutes |
+| The same job is delivered twice | One run: the job is named after the investigation, and starting a run is a conditional update | — |
+| Redis loses the job of an accepted investigation | The sweep puts the job back under the same id once the investigation has waited two minutes; the worker restores its own schedules if they are missing | Two to three minutes |
+
+Evidence and steps gathered before a failure are kept and shown as gathered. A report, hypotheses, proposed actions, the timeline entry and the "completed" notification exist only if the report was stored, in the same transaction that sets `COMPLETED`. What was tested, and how, is in [reliability-readiness-report.md](reliability-readiness-report.md).
+
 ### Analysis engines
 
 Selected by `AI_PROVIDER`; details, costs and limits in [claude-integration.md](claude-integration.md).
@@ -162,4 +181,4 @@ The local demonstration environment (`demo/`) connects all of these to three ins
 - **Logs:** structured JSON (pino in Node, JSON lines in Python).
 - **Metrics:** Prometheus at `/metrics` on the API and AI service: HTTP duration by route, logs ingested, job counts and durations, investigations by outcome and provider, LLM tokens.
 - **Traces:** when `OTEL_ENABLED=true`, one investigation is one OpenTelemetry trace across the API, the queue, the worker, the AI service and every tool call. Spans are scrubbed before export. `npm run tracing:up` and `npm run trace -- <investigation id>` show it locally: see [tracing.md](tracing.md).
-- **Health:** `/health` (liveness) and `/ready` (database and Redis).
+- **Health:** `/health` (liveness: the process is up) and `/ready` (it can reach the database and Redis), on the API and on the worker. The Compose health checks of both use `/ready`, so "healthy" means able to work.

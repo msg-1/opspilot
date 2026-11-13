@@ -122,10 +122,10 @@ Never rebase or force-push `main` or `develop`. Rebasing your own unpublished fe
 | Workflow | Runs on | Jobs |
 |---|---|---|
 | `ci.yml` | Pull requests into `develop` and `main`; pushes to `develop`, `main`, `release/**`, `hotfix/**` | Commit messages · Frontend (lint, typecheck, unit tests) · Backend (lint, typecheck) · Database integration tests (PostgreSQL + pgvector) · AI service (lint, tests, agent evaluations) · Build verification (builds, dependency audit, container images) |
-| `e2e.yml` | Pull requests into `main`; pushes to `release/**`, `hotfix/**`; manual | Starts the whole stack with Docker Compose and runs the browser tests |
+| `e2e.yml` | Pull requests into `develop` and `main`; pushes to `release/**`, `hotfix/**`; manual | Builds a throwaway copy of the whole stack (its own Compose project, generated secrets, rule-based engine, no provider key), runs the browser tests against it, then the failure drills. Uploads screenshots, Playwright traces and service logs when it fails. Not a required check |
 | `release.yml` | Push of a `vX.Y.Z` tag | Checks the tag is on `main` and matches `package.json`, then publishes a GitHub release |
 
-The repository is published at https://github.com/msg-1/opspilot. `ci.yml` runs on every pull request and has passed on `develop`; `e2e.yml` has passed on `release/0.1.0`. `release.yml` has never run, because no version tag has been pushed.
+The repository is published at https://github.com/msg-1/opspilot. `ci.yml` runs on every pull request and has passed on `develop`; `e2e.yml` has passed on `release/0.1.0` and, since Milestone 6, runs on every pull request. `release.yml` has never run, because no version tag has been pushed.
 
 ## Branch protection
 

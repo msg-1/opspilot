@@ -5,6 +5,14 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- Failure handling for investigations: a run is started by a conditional update and named in the queue after its investigation, so it runs at most once; a run whose worker was killed is recorded as interrupted when the queue hands the job out again (about a minute), and a worker asked to stop records its unfinished runs as interrupted before it exits. Settings `INVESTIGATION_TIMEOUT_MS`, `WORKER_SHUTDOWN_GRACE_MS`, `QUEUE_LOCK_MS`, `QUEUE_STALLED_INTERVAL_MS`.
+- Accepted work survives a loss of Redis data: Redis writes an append-only file to a volume; the sweep puts back the job of an investigation that has waited more than two minutes; the worker restores the schedules of its repeating jobs when they are missing.
+- `/ready` on the worker (PostgreSQL and Redis). The Compose health checks of the API and the worker use readiness instead of liveness.
+- A throwaway copy of the stack for tests that break things: `npm run isolated:up`, `isolated:e2e`, `drills`, `isolated:down`. Its own Compose project, ports, volume and generated secrets; rule-based engine, no provider key. Published ports are configurable (`HOST_PORT_*`).
+- Failure drills (`npm run drills`): worker killed and stopped in the middle of a run, AI service, Redis and PostgreSQL stopped and started, Redis killed and wiped while a job is waiting, a full restart, tracing switched on with no trace store, and a search of every service log for credentials. Each checks what was recorded and that an investigation completes afterwards.
+- Reliability tests on the API (27 new, beside the 3 for the risk fix): the real AI client against a scripted HTTP stub (unreachable, error, never answering, stalling, cut stream, invalid events, missing or malformed report, repeated events), Redis and PostgreSQL cut through a proxy, a real worker process killed and restarted, duplicate delivery, cancellation, failing trace exporters.
+- Browser tests in CI on every pull request (`e2e.yml`), on the throwaway stack, with two new tests of what the page shows while the AI service or the queue is down and after it returns. Screenshots, Playwright traces and service logs are uploaded on failure.
+- docs/reliability-readiness-report.md.
 - A temporary dataset for manual testing (`npm run demo:seed`, `demo:status`, `demo:reset`): a dedicated organisation, Acme Commerce, with six services, eight incidents and their telemetry, removable without touching any other data. Local databases only. See docs/manual-demo-testing.md.
 - Shared contracts (`contracts/`): one definition of the closed value sets, guardrail limits, action-effect rules, the investigation report, the agent tools and the API responses the web app uses. `npm run contracts` generates the TypeScript and Python representations; `npm run contracts:check` and CI fail when one is stale.
 - Web API types generated from the API's response contracts (`apps/api/src/contracts/api.ts`), with a test that validates real API responses against them.
@@ -51,6 +59,12 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 - Failed sign-ins are audited; retrieved records are marked as untrusted data for the model.
 
 ### Fixed
+- A report that arrived for an investigation that was no longer running (cancelled, failed, timed out) still created hypotheses and proposed remediation actions, and a repeated final event proposed the actions a second time. Everything that follows from a report now happens only if that report was stored.
+- A stream from the AI service that was cut in the middle of an event, or that carried an invalid line, was recorded as a JSON syntax error quoting the text received. Timeout, interrupted connection and invalid event now have their own messages, and none repeats the input.
+- A database error during an investigation was stored on the investigation, and shown, with the database host and port in it.
+- A failure after the report was stored (writing the timeline entry or a notification) added a "failed" step and notification to a completed investigation.
+- The worker waited without limit for running jobs on shutdown and was killed by Docker after 10 seconds, leaving the investigation `RUNNING` for 20 minutes.
+- On the incident page, a refused investigation (queue unreachable, limit reached) showed its reason behind the open dialog. It is shown in the dialog.
 - Editing a remediation action without naming a risk no longer resets it to medium. A high-risk action keeps its risk and its two approvals; an explicit change of risk is validated, held to the floor for what the action does, recorded in the audit log, and supersedes the approvals given. Approvals are counted against the risk's requirement again when one is given and at execution, whatever number the row holds; with too few, nothing runs and the action waits for the rest.
 - The sign-in page showed a demo password the seed does not set.
 - After a bad release was rolled back, the rule-based engine could blame the rollback deployment for an unrelated problem and propose returning to the bad release. Deployments can now be recorded as rollbacks (`rollbackOf`), a rolled-back version is never a rollback target, and a deployment after which errors fell loses standing as a suspect.
