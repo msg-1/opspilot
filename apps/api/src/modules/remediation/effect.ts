@@ -47,3 +47,12 @@ export function requiredApprovals(settings: Awaited<ReturnType<typeof getSetting
   // Never fewer than one for something that changes state, whatever the settings say.
   return Math.max(1, risk === 'HIGH' ? settings.approvalsHighRisk : risk === 'MEDIUM' ? settings.approvalsMediumRisk : settings.approvalsLowRisk);
 }
+
+/**
+ * The approvals a state-changing action needs now: what its risk requires under the current
+ * settings, and never fewer than it was submitted with. Computed again wherever approvals are
+ * counted (approve, execute), so the stored number alone never lets an action through.
+ */
+export function approvalThreshold(settings: Awaited<ReturnType<typeof getSettings>>, action: { risk: RiskLevel; requiredApprovals: number }) {
+  return Math.max(action.requiredApprovals, requiredApprovals(settings, action.risk, 'state_changing'));
+}

@@ -308,6 +308,116 @@ describe('state-changing actions', () => {
   });
 });
 
+describe('risk and the approval threshold', () => {
+  const RESIZE = { type: 'config_change', title: 'Raise cache maxmemory to 4 GB', description: 'Set maxmemory to 4gb on the primary.', risk: 'HIGH', parameters: { maxmemory: '4gb' } };
+
+  it('keeps the risk, and the two approvals it needs, when an edit does not mention the risk', async () => {
+    const org = await createOrg();
+    await useWebhook(org);
+    const [first, second] = [await org.member('ADMIN'), await org.member('ADMIN')];
+    const action = (await org.owner.post('/api/v1/remediations').send(RESIZE).expect(201)).body;
+    expect(action).toMatchObject({ risk: 'HIGH', requiredApprovals: 2 });
+    const base = `/api/v1/remediations/${action.id}`;
+    await org.owner.post(`${base}/request-approval`).expect(200);
+    await first.agent.post(`${base}/approve`).send({}).expect(200);
+
+    // Every field except the risk, one at a time and together: the risk is never touched.
+    for (const patch of [{ description: 'Set maxmemory to 4gb on the primary, during the quiet hour.' }, { title: 'Raise cache maxmemory to 4 GB (primary)' }, { rationale: 'Evictions started at 02:10.' }, { parameters: { maxmemory: '4gb', node: 'primary' } }, {}]) {
+      expect((await org.owner.patch(base).send(patch).expect(200)).body).toMatchObject({ risk: 'HIGH', requiredApprovals: 2 });
+    }
+    const edited = (await org.owner.get(base)).body;
+    // The content changed, so the approval given for the old content stopped counting.
+    expect(edited).toMatchObject({ status: 'PROPOSED', risk: 'HIGH', requiredApprovals: 2, approvalsGranted: 0 });
+    expect(edited.approvals).toEqual([expect.objectContaining({ decision: 'approved', counts: false })]);
+    expect((await auditOf(action.id)).filter((a) => a.action === 'remediation.edit').every((a) => !('newRisk' in (a.meta ?? {})))).toBe(true);
+
+    // It still takes two people. One approval is not enough to execute.
+    await org.owner.post(`${base}/request-approval`).expect(200);
+    expect((await first.agent.post(`${base}/approve`).send({ expectedHash: edited.currentHash }).expect(200)).body).toMatchObject({ status: 'PENDING_APPROVAL', approvalsGranted: 1 });
+    expect((await org.owner.post(`${base}/execute`).send({})).status).toBe(409);
+    expect(received).toHaveLength(0);
+    expect((await second.agent.post(`${base}/approve`).send({ expectedHash: edited.currentHash }).expect(200)).body).toMatchObject({ status: 'APPROVED', approvalsGranted: 2 });
+    const done = (await org.owner.post(`${base}/execute`).send({}).expect(200)).body;
+    expect(done.status).toBe('EXECUTED');
+    expect(done.executionResult.approvedBy.map((a: { approverId: string }) => a.approverId).sort()).toEqual([first.userId, second.userId].sort());
+    expect(received).toHaveLength(1);
+  });
+
+  it('validates an explicit change of risk, applies the floor, and makes approvers decide again', async () => {
+    const org = await createOrg();
+    const [first, second] = [await org.member('ADMIN'), await org.member('ADMIN')];
+    const action = (await org.owner.post('/api/v1/remediations').send(RESIZE).expect(201)).body;
+    const base = `/api/v1/remediations/${action.id}`;
+    // Not a risk level: refused, and nothing changes.
+    for (const risk of ['CRITICAL', 'medium', '', null, 2]) expect((await org.owner.patch(base).send({ risk })).status).toBe(400);
+    expect((await org.owner.get(base)).body).toMatchObject({ risk: 'HIGH', requiredApprovals: 2, currentHash: action.currentHash });
+
+    // Lowered on purpose while one approval is in: allowed, recorded, and the approval no longer counts.
+    await org.owner.post(`${base}/request-approval`).expect(200);
+    await first.agent.post(`${base}/approve`).send({}).expect(200);
+    const lowered = (await org.owner.patch(base).send({ risk: 'MEDIUM' }).expect(200)).body;
+    expect(lowered).toMatchObject({ status: 'PROPOSED', risk: 'MEDIUM', requiredApprovals: 1, approvalsGranted: 0 });
+    expect(lowered.currentHash).not.toBe(action.currentHash);
+    expect((await auditOf(action.id)).findLast((a) => a.action === 'remediation.edit')!.meta).toMatchObject({ previousRisk: 'HIGH', newRisk: 'MEDIUM', supersededApprovals: 1, previousStatus: 'PENDING_APPROVAL' });
+    // An approval of the high-risk version cannot be replayed onto the medium-risk one.
+    await org.owner.post(`${base}/request-approval`).expect(200);
+    expect((await second.agent.post(`${base}/approve`).send({ expectedHash: action.currentHash })).status).toBe(409);
+
+    // A configuration change cannot be declared low risk by editing it either.
+    // The floor leaves it at medium, so nothing an approver sees changed and it stays submitted.
+    expect((await org.owner.patch(base).send({ risk: 'LOW' }).expect(200)).body).toMatchObject({ risk: 'MEDIUM', requiredApprovals: 1, status: 'PENDING_APPROVAL' });
+
+    // Raised after it was fully approved: it needs two again, and the single approval does not carry over.
+    expect((await first.agent.post(`${base}/approve`).send({}).expect(200)).body.status).toBe('APPROVED');
+    const raised = (await org.owner.patch(base).send({ risk: 'HIGH' }).expect(200)).body;
+    expect(raised).toMatchObject({ status: 'PROPOSED', risk: 'HIGH', requiredApprovals: 2, approvalsGranted: 0 });
+    expect((await org.owner.post(`${base}/execute`).send({ confirmManual: true })).status).toBe(409);
+    // High risk is for admins and owners to approve, also after an edit.
+    await org.owner.post(`${base}/request-approval`).expect(200);
+    expect((await (await org.member('ENGINEER')).agent.post(`${base}/approve`).send({})).status).toBe(403);
+  });
+
+  it('counts the approvals again at execution and refuses when there are too few', async () => {
+    const org = await createOrg();
+    await useWebhook(org);
+    // The stored requirement and status are wrong (a bug, a script, a direct write): one approval on a high-risk action.
+    const [first, second] = [await org.member('ADMIN'), await org.member('ADMIN')];
+    const action = (await org.owner.post('/api/v1/remediations').send(RESIZE).expect(201)).body;
+    const base = `/api/v1/remediations/${action.id}`;
+    await org.owner.post(`${base}/request-approval`).expect(200);
+    await first.agent.post(`${base}/approve`).send({}).expect(200);
+    await prisma.remediationAction.update({ where: { id: action.id }, data: { status: 'APPROVED', requiredApprovals: 1 } });
+    const refused = await org.owner.post(`${base}/execute`).send({});
+    expect(refused.status).toBe(409);
+    expect(refused.body.error.message).toContain('needs 2 approvals and has 1');
+    expect(received).toHaveLength(0);
+    // Nothing ran. The approval that was given still counts, and the action waits for the second.
+    expect((await org.owner.get(base)).body).toMatchObject({ status: 'PENDING_APPROVAL', requiredApprovals: 2, approvalsGranted: 1, attempts: 0 });
+    expect((await auditOf(action.id)).at(-1)).toMatchObject({ action: 'remediation.approval_insufficient', meta: { risk: 'HIGH', validApprovals: 1, required: 2, recorded: 1 } });
+    await second.agent.post(`${base}/approve`).send({}).expect(200);
+    expect((await org.owner.post(`${base}/execute`).send({}).expect(200)).body.status).toBe('EXECUTED');
+    expect(received).toHaveLength(1);
+
+    // The same when only the stored number is wrong while approvals are being collected.
+    const other = (await org.owner.post('/api/v1/remediations').send(RESIZE).expect(201)).body;
+    const otherBase = `/api/v1/remediations/${other.id}`;
+    await org.owner.post(`${otherBase}/request-approval`).expect(200);
+    await prisma.remediationAction.update({ where: { id: other.id }, data: { requiredApprovals: 1 } });
+    expect((await first.agent.post(`${otherBase}/approve`).send({}).expect(200)).body).toMatchObject({ status: 'PENDING_APPROVAL', requiredApprovals: 2, approvalsGranted: 1 });
+    expect((await org.owner.post(`${otherBase}/execute`).send({})).status).toBe(409);
+
+    // The organisation raises its requirement after an action was approved: the action waits for the extra approval.
+    const { base: flush, approver } = await approved(org);
+    await org.owner.patch('/api/v1/settings').send({ approvalsMediumRisk: 2 }).expect(200);
+    expect((await org.owner.post(`${flush}/execute`).send({})).status).toBe(409);
+    expect((await org.owner.get(flush)).body).toMatchObject({ status: 'PENDING_APPROVAL', requiredApprovals: 2, approvalsGranted: 1 });
+    expect((await approver.agent.post(`${flush}/approve`).send({})).status).toBe(409); // the same person cannot count twice
+    await second.agent.post(`${flush}/approve`).send({}).expect(200);
+    expect((await org.owner.post(`${flush}/execute`).send({}).expect(200)).body.status).toBe('EXECUTED');
+    expect(received).toHaveLength(2);
+  });
+});
+
 describe('trace retrieval', () => {
   let jaeger: Server;
   let asked: string[] = [];

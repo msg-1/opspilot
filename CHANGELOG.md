@@ -51,6 +51,7 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 - Failed sign-ins are audited; retrieved records are marked as untrusted data for the model.
 
 ### Fixed
+- Editing a remediation action without naming a risk no longer resets it to medium. A high-risk action keeps its risk and its two approvals; an explicit change of risk is validated, held to the floor for what the action does, recorded in the audit log, and supersedes the approvals given. Approvals are counted against the risk's requirement again when one is given and at execution, whatever number the row holds; with too few, nothing runs and the action waits for the rest.
 - The sign-in page showed a demo password the seed does not set.
 - After a bad release was rolled back, the rule-based engine could blame the rollback deployment for an unrelated problem and propose returning to the bad release. Deployments can now be recorded as rollbacks (`rollbackOf`), a rolled-back version is never a rollback target, and a deployment after which errors fell loses standing as a suspect.
 - Trace retrieval sampled only the end of the window.

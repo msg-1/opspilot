@@ -9,9 +9,9 @@ import { prisma } from '../../lib/prisma';
 import { authOf, can, requirePermission, requireUser, userOf } from '../../middleware/auth';
 import { addIncidentEvent } from '../incidents';
 import { getSettings } from '../organization';
-import { invalidateApproval, recordApproval, recordRejection, submitForApproval, supersedeApprovals, validApprovals } from './approvals';
+import { awaitMoreApprovals, invalidateApproval, recordApproval, recordRejection, submitForApproval, supersedeApprovals, validApprovals } from './approvals';
 import { contentHash } from './content';
-import { effectOf, effectiveRisk, requiredApprovals } from './effect';
+import { approvalThreshold, effectOf, effectiveRisk, requiredApprovals } from './effect';
 import { execute } from './execution';
 import { detailInclude, load, present, presentMany } from './presenter';
 import { decisionBody, editBody, executeBody, proposeRemediation, rejectionBody, remediationInput, retryBody } from './proposals';
@@ -83,9 +83,12 @@ remediationRouter.post('/:id/approve', requirePermission('remediation:approve'),
     throw forbidden('You cannot approve an action that you proposed or requested');
   }
   if (action.approvals.some((a) => a.approverId === auth.userId && !a.supersededAt)) throw conflict('You have already recorded a decision on this action');
-  const result = await recordApproval(action, auth.userId, hash, comment);
-  await audit(req, 'remediation.approve', 'remediation_action', action.id, { granted: result.granted, required: action.requiredApprovals, comment, contentHash: hash });
-  if (action.incidentId) await addIncidentEvent(action.incidentId, 'remediation', `${auth.label} approved: ${action.title} (${result.granted}/${action.requiredApprovals})`, auth, { actionId: action.id });
+  // The threshold is worked out from the risk as it is now, not read from the row alone.
+  const required = approvalThreshold(settings, action);
+  if (required !== action.requiredApprovals) await prisma.remediationAction.updateMany({ where: { id: action.id, status: 'PENDING_APPROVAL', contentHash: hash }, data: { requiredApprovals: required } });
+  const result = await recordApproval({ id: action.id, requiredApprovals: required }, auth.userId, hash, comment);
+  await audit(req, 'remediation.approve', 'remediation_action', action.id, { granted: result.granted, required, risk: action.risk, comment, contentHash: hash });
+  if (action.incidentId) await addIncidentEvent(action.incidentId, 'remediation', `${auth.label} approved: ${action.title} (${result.granted}/${required})`, auth, { actionId: action.id });
   if (result.approved) {
     await notifyUsers([action.requestedById], { organizationId: auth.organizationId, type: 'remediation.approved', title: `Approved: ${action.title}`, body: 'The action can now be executed.', link: `/remediation/${action.id}` });
   }
@@ -125,11 +128,20 @@ remediationRouter.post('/:id/execute', requirePermission('remediation:execute'),
   } else {
     if (action.status !== 'APPROVED') throw conflict(`Only approved actions can be executed (current status: ${action.status})`);
     const valid = validApprovals(action);
-    if (hash !== action.contentHash || valid.length < Math.max(1, action.requiredApprovals)) {
+    // Checked here independently of the APPROVED status: the approvals that count for this exact
+    // content, against what its risk requires now.
+    const required = Math.max(1, approvalThreshold(settings, action));
+    if (hash !== action.contentHash || !valid.length) {
       // The action is not what was approved. Its approvals no longer count and it starts again.
       await invalidateApproval(action.id);
-      await audit(req, 'remediation.approval_invalid', 'remediation_action', action.id, { approvedHash: action.contentHash, currentHash: hash, validApprovals: valid.length, required: action.requiredApprovals });
+      await audit(req, 'remediation.approval_invalid', 'remediation_action', action.id, { approvedHash: action.contentHash, currentHash: hash, validApprovals: valid.length, required });
       throw conflict('This action is not the one that was approved: its content changed afterwards. The approvals no longer count; submit it for approval again.');
+    }
+    if (valid.length < required) {
+      // Same content, too few approvals. Those given still count; the action waits for the rest.
+      if (!(await awaitMoreApprovals(action.id, hash, required))) await invalidateApproval(action.id);
+      await audit(req, 'remediation.approval_insufficient', 'remediation_action', action.id, { contentHash: hash, risk: action.risk, validApprovals: valid.length, required, recorded: action.requiredApprovals });
+      throw conflict(`This ${action.risk.toLowerCase()}-risk action needs ${required} approvals and has ${valid.length}. It is waiting for approval again; nothing was executed.`);
     }
     approvers = valid.map((a) => ({ approverId: a.approverId, approvedAt: a.createdAt }));
     if (!settings.remediationWebhookUrl && !body.confirmManual) {
@@ -167,8 +179,10 @@ remediationRouter.patch('/:id', requirePermission('remediation:propose'), requir
   const action = await load(auth.organizationId, param(req.params.id));
   if (!['PROPOSED', 'PENDING_APPROVAL', 'APPROVED'].includes(action.status)) throw conflict(`This action can no longer be edited (current status: ${action.status})`);
   if (patch.serviceId && !(await prisma.service.findFirst({ where: { id: patch.serviceId, organizationId: auth.organizationId }, select: { id: true } }))) throw badRequest('Service does not exist');
+  // Only the fields the edit names change. In particular the risk stays what it was unless a new one is given.
   const next = { ...action, ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) } as RemediationAction;
   const { effect, reasons } = await effectOf(auth.organizationId, next);
+  // An explicit risk is still subject to the floor for what the action does.
   next.risk = await effectiveRisk(auth.organizationId, next.type, next.risk, next.serviceId, effect);
   const before = contentHash(action);
   const after = contentHash(next);
@@ -188,8 +202,8 @@ remediationRouter.patch('/:id', requirePermission('remediation:propose'), requir
     });
   });
   if (!updated.count) throw conflict('This action changed state; reload and try again');
-  await audit(req, 'remediation.edit', 'remediation_action', action.id, { fields: Object.keys(patch), previousHash: before, newHash: after, supersededApprovals: superseded, previousStatus: action.status });
-  if (changed && action.incidentId) await addIncidentEvent(action.incidentId, 'remediation', `Remediation edited: ${next.title}${superseded ? ` (${superseded} approval(s) no longer count)` : ''}`, auth, { actionId: action.id });
+  await audit(req, 'remediation.edit', 'remediation_action', action.id, { fields: Object.keys(patch), previousHash: before, newHash: after, supersededApprovals: superseded, previousStatus: action.status, ...(next.risk !== action.risk ? { previousRisk: action.risk, newRisk: next.risk } : {}) });
+  if (changed && action.incidentId) await addIncidentEvent(action.incidentId, 'remediation', `Remediation edited: ${next.title}${next.risk !== action.risk ? ` (risk ${action.risk.toLowerCase()} → ${next.risk.toLowerCase()})` : ''}${superseded ? ` (${superseded} approval(s) no longer count)` : ''}`, auth, { actionId: action.id });
   res.json(await present(auth.organizationId, action.id));
 });
 

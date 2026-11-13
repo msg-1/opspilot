@@ -27,7 +27,21 @@ export const decisionBody = z.object({ comment: z.string().trim().max(2000).opti
 export const rejectionBody = decisionBody.extend({ comment: z.string().trim().min(3, 'Give a reason for rejecting').max(2000) });
 export const executeBody = z.object({ confirmManual: z.boolean().optional(), notes: z.string().trim().max(2000).optional() });
 export const retryBody = z.object({ confirmNotApplied: z.boolean().optional() });
-export const editBody = remediationInput.pick({ title: true, description: true, rationale: true, risk: true, serviceId: true, parameters: true }).partial();
+/**
+ * An edit changes only the fields it names. The risk is declared without a default on purpose:
+ * `remediationInput.risk` defaults to MEDIUM, and a default survives `.partial()`, so an edit that
+ * did not mention the risk used to set it to MEDIUM and with it lower the approvals needed.
+ */
+export const editBody = z
+  .object({
+    title: remediationInput.shape.title,
+    description: remediationInput.shape.description,
+    rationale: remediationInput.shape.rationale,
+    risk: z.enum(RISK_LEVELS),
+    serviceId: remediationInput.shape.serviceId,
+    parameters: z.record(z.string(), z.unknown()),
+  })
+  .partial();
 
 /** Used by users (HTTP) and by the investigation pipeline (AI proposals). */
 export async function proposeRemediation(
