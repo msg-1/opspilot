@@ -54,6 +54,7 @@ npm run dev                   # API :4000, worker, web :3000, AI service :8000
 |---|---|
 | `npm test` | API integration tests (real Postgres) and web unit tests |
 | `npm run test:ai` | AI service tests |
+| `npm run demo:seed`, `demo:status`, `demo:reset` | A removable dataset for manual testing: Acme Commerce, eight incidents ([docs/manual-demo-testing.md](docs/manual-demo-testing.md)) |
 | `npm run contracts` | Regenerate the shared contracts and the web app's API types (`contracts:check` fails if stale) |
 | `npm run tracing:up`, `npm run trace -- <id>` | Trace the platform itself, locally: one trace per investigation ([docs/tracing.md](docs/tracing.md)) |
 | `npm run evals` | Scores the investigation agent on ground-truth scenarios |

@@ -18,7 +18,8 @@
     "db:studio": "dotenv -e ../../.env -- prisma studio",
     "db:migrate:new": "dotenv -e ../../.env -- prisma migrate dev --create-only",
     "simulate": "tsx --env-file-if-exists=../../.env scripts/simulate.ts",
-    "contracts:api": "tsx scripts/export-api-contract.ts"
+    "contracts:api": "tsx scripts/export-api-contract.ts",
+    "demo:data": "tsx --env-file-if-exists=../../.env scripts/demo-data.ts"
   },
   "dependencies": {
     "@opentelemetry/api": "^1.10.0",
