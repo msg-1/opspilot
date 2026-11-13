@@ -27,7 +27,7 @@ Status as of 13 November 2026. "Verified" means exercised by automated tests or 
 
 | Suite | Count | Scope |
 |---|---|---|
-| API integration (Vitest + Supertest) | 120 | HTTP → PostgreSQL, all modules; shared contracts; real API responses against the response contracts; trace continuity through BullMQ; failure handling (AI service, Redis and PostgreSQL outages, a killed worker, duplicate delivery, failing trace export) |
+| API integration (Vitest + Supertest) | 121 | HTTP → PostgreSQL, all modules; shared contracts; real API responses against the response contracts; trace continuity through BullMQ; failure handling (AI service, Redis and PostgreSQL outages, a killed worker, duplicate delivery, failing trace export) |
 | AI service (pytest, mocked model APIs) | 171 | Agent graph, guardrails, providers, embeddings, HTTP API, MCP; each rule of the rule-based engine; a snapshot of all its reports; shared contracts; tracing |
 | Web (Vitest + Testing Library) | 47 | API client, formatting, accessible components; the seven journeys as rendered pages (sign-in, incident, starting an investigation, report, evidence, approval, execution outcomes) |
 | End-to-end (Playwright), in CI on every pull request | 11 | Sign-in, incident, investigation, approval, RBAC, logs, knowledge, audit, mobile layout; what the page shows while the AI service or the queue is down, and after it returns |
@@ -67,7 +67,7 @@ Not done, on purpose: the other API modules are not split; Prisma queries are no
 
 No new feature and no new lifecycle state. The question was what happens to an investigation, and to the application, when something around it fails, and whether that is tested by more than a status code. The full account, with what was not tested, is in [reliability-readiness-report.md](reliability-readiness-report.md).
 
-Done: the remediation risk defect found while preparing the demo (an edit without a risk reset a high-risk action to medium); an investigation runs at most once and reaches exactly one end; interrupted runs are recorded within about a minute instead of twenty; the worker shuts down within a grace period and says what it left unfinished; honest, non-leaking failure messages; readiness on the worker and in the Compose health checks; a throwaway stack; 30 API tests, 2 browser tests and 11 drills; accepted work that survives Redis being killed or wiped; the browser suite and the drills in CI on every pull request.
+Done: the remediation risk defect found while preparing the demo (an edit without a risk reset a high-risk action to medium); an investigation runs at most once and reaches exactly one end; interrupted runs are recorded within about a minute instead of twenty; the worker shuts down within a grace period and says what it left unfinished; honest, non-leaking failure messages; readiness on the worker and in the Compose health checks; a throwaway stack; 31 API tests, 2 browser tests and 11 drills; accepted work that survives Redis being killed or wiped; the browser suite and the drills in CI on every pull request.
 
 Not done, and why:
 

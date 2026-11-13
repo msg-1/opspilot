@@ -7,7 +7,7 @@ import { conflict, notFound } from '../../lib/errors';
 import { paged, paginate, param } from '../../lib/http';
 import { prisma } from '../../lib/prisma';
 import { authOf, can, requirePermission } from '../../middleware/auth';
-import { enqueue } from '../../queues';
+import { enqueueInvestigation } from './runner';
 import { addIncidentEvent, incidentKey, requireIncident } from '../incidents';
 import { assertWithinLimits, organizationLimits, usageToday } from './limits';
 import { createBody, listQuery } from './validation';
@@ -81,8 +81,7 @@ investigationsRouter.post('/', requirePermission('investigation:run'), async (re
   if (incident) await addIncidentEvent(incident.id, 'investigation', `AI investigation started: "${body.question.slice(0, 200)}"`, auth, { investigationId: investigation.id });
   annotate({ 'opspilot.investigation.id': investigation.id });
   try {
-    // The job is named after the investigation, so the queue holds at most one for it.
-    await enqueue('investigation', { investigationId: investigation.id }, { jobId: investigation.id });
+    await enqueueInvestigation(investigation.id);
   } catch (err) {
     // Never leave a row that looks queued when nothing will ever pick it up.
     await prisma.investigation.update({ where: { id: investigation.id }, data: { status: 'FAILED', error: (err as Error).message, completedAt: new Date() } });
