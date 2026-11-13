@@ -59,3 +59,16 @@ export const supersedeApprovals = (actionId: string, db: Prisma.TransactionClien
 export function invalidateApproval(actionId: string) {
   return prisma.$transaction([supersedeApprovals(actionId), prisma.remediationAction.updateMany({ where: { id: actionId, status: 'APPROVED' }, data: { status: 'PROPOSED', contentHash: null } })]);
 }
+
+/**
+ * The content is what was approved, but too few approvals count for it (the threshold was raised,
+ * or the stored number was wrong). The approvals given stay valid and the action goes back to
+ * waiting for the rest. Returns false when it could not (no requester on record, or it moved on).
+ */
+export async function awaitMoreApprovals(actionId: string, hash: string, required: number): Promise<boolean> {
+  const updated = await prisma.remediationAction.updateMany({
+    where: { id: actionId, status: 'APPROVED', contentHash: hash, requestedById: { not: null } },
+    data: { status: 'PENDING_APPROVAL', requiredApprovals: required },
+  });
+  return updated.count > 0;
+}

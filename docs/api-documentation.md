@@ -101,10 +101,10 @@ API key scopes: `ingest:logs`, `ingest:deployments`, `ingest:events`, `ingest:me
 | Method and path | Description |
 |---|---|
 | `GET /`, `POST /`, `GET /:id` | `type`, `title`, `description`, `rationale`, `risk`, `incidentId`, `serviceId`, `parameters`. The response adds `effect` (`read_only` or `state_changing`, decided from the type and text, and from the runbook in `parameters.runbookDocumentId`), `effectReasons`, `currentHash`, `attempts`, and per approval `counts` and `supersededAt` |
-| `PATCH /:id` | Edit before execution. Changing anything an approver was shown supersedes the approvals and returns the action to `PROPOSED` |
+| `PATCH /:id` | Edit before execution. Only the fields sent change; `risk` keeps its value when omitted. Changing anything an approver was shown, the risk included, supersedes the approvals and returns the action to `PROPOSED` |
 | `POST /:id/request-approval` | `PROPOSED` → `PENDING_APPROVAL`. Refused for read-only diagnostics, which need none |
 | `POST /:id/approve`, `/reject` | Signed-in users only. `comment` optional for approve, required for reject. `expectedHash` (the `currentHash` that was displayed) makes approval fail with 409 if the action changed meanwhile |
-| `POST /:id/execute` | State-changing: `APPROVED` only, and only if the approvals were given for the current content (409 otherwise). Without a webhook configured, requires `{ confirmManual: true, notes? }`. Read-only: from `PROPOSED`, always `{ confirmManual: true, notes? }`, never sent to the webhook. `executionResult.outcome` is `applied`, `not_applied` or `unknown` |
+| `POST /:id/execute` | State-changing: `APPROVED` only, and only if enough approvals for its risk were given for the current content (409 otherwise; with too few it returns to `PENDING_APPROVAL`). Without a webhook configured, requires `{ confirmManual: true, notes? }`. Read-only: from `PROPOSED`, always `{ confirmManual: true, notes? }`, never sent to the webhook. `executionResult.outcome` is `applied`, `not_applied` or `unknown` |
 | `POST /:id/retry` | Returns a failed action to `APPROVED`. After an `unknown` outcome it requires `{ confirmNotApplied: true }` |
 | `POST /:id/cancel` | Cancel before execution |
 
