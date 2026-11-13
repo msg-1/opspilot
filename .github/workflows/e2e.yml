@@ -1,10 +1,15 @@
 name: End-to-end
 
-# Full-stack browser tests against the Docker Compose deployment. This is the release gate:
-# it runs for release and hotfix branches and for every pull request into main.
+# The whole application, built from the Compose file and driven from outside: the browser
+# journeys in a real browser against the real pages, then failure drills that kill, stop and
+# start containers and check what was recorded and that real work is done again afterwards.
+#
+# It runs on its own throwaway stack (scripts/isolated-stack.mjs): a separate Compose project
+# with generated secrets, the rule-based engine and no key for any model provider. No step
+# here can call a paid API, and no secret of the repository is used.
 on:
   pull_request:
-    branches: [main]
+    branches: [develop, main]
   push:
     branches: ["release/**", "hotfix/**"]
   workflow_dispatch:
@@ -18,31 +23,43 @@ permissions:
 
 jobs:
   e2e:
-    name: Browser end-to-end tests
+    name: Browser journeys and failure drills (isolated stack)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
-      - name: Create .env with fresh secrets
-        run: |
-          cp .env.example .env
-          for v in JWT_SECRET INTERNAL_SERVICE_TOKEN ENCRYPTION_KEY; do
-            sed -i "s|^$v=.*|$v=$(openssl rand -hex 32)|" .env
-          done
-      - name: Start the stack (migrates and seeds the demo organisation)
-        run: docker compose --profile app up -d --build --wait --wait-timeout 300
       - run: npm ci
+      # Builds every image, applies the migrations to an empty database, seeds the demo
+      # organisation and waits until every service reports ready.
+      - name: Start the isolated stack from nothing
+        run: npm run isolated:up
+      - name: The engine is the rule-based one and no provider key is set
+        run: |
+          test "$(node scripts/isolated-stack.mjs compose exec -T ai printenv AI_PROVIDER)" = "deterministic"
+          test -z "$(node scripts/isolated-stack.mjs compose exec -T ai printenv ANTHROPIC_API_KEY)"
+          test -z "$(node scripts/isolated-stack.mjs compose exec -T ai printenv OPENAI_API_KEY)"
       - run: npx playwright install --with-deps chromium
         working-directory: apps/web
-      - run: npm run test:e2e
-      - name: Service logs
+      # Journeys first: they expect a freshly seeded organisation. The drills come after and
+      # leave investigations behind.
+      - name: Browser journeys (Playwright, Chromium)
+        run: npm run isolated:e2e
+      - name: Failure drills
+        run: npm run drills
+      - name: Collect service logs
         if: failure()
-        run: docker compose --profile app logs --no-color --tail 200
+        run: node scripts/isolated-stack.mjs compose logs --no-color --tail 400 > service-logs.txt 2>&1 || true
+      # Screenshots, the Playwright trace (which holds the browser console and network log)
+      # and the HTML report of every failed test, plus the logs of every service.
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: playwright-report
-          path: apps/web/playwright-report
+          name: e2e-failure-${{ github.run_attempt }}
+          path: |
+            apps/web/playwright-report
+            apps/web/test-results
+            service-logs.txt
           retention-days: 7
+          if-no-files-found: ignore
