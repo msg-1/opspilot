@@ -81,7 +81,8 @@ investigationsRouter.post('/', requirePermission('investigation:run'), async (re
   if (incident) await addIncidentEvent(incident.id, 'investigation', `AI investigation started: "${body.question.slice(0, 200)}"`, auth, { investigationId: investigation.id });
   annotate({ 'opspilot.investigation.id': investigation.id });
   try {
-    await enqueue('investigation', { investigationId: investigation.id });
+    // The job is named after the investigation, so the queue holds at most one for it.
+    await enqueue('investigation', { investigationId: investigation.id }, { jobId: investigation.id });
   } catch (err) {
     // Never leave a row that looks queued when nothing will ever pick it up.
     await prisma.investigation.update({ where: { id: investigation.id }, data: { status: 'FAILED', error: (err as Error).message, completedAt: new Date() } });

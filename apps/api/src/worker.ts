@@ -9,7 +9,7 @@ import { env } from './config/env';
 import { logger } from './lib/logger';
 import { registry } from './lib/metrics';
 import { prisma } from './lib/prisma';
-import { startWorkers } from './queues';
+import { redisPing, startWorkers } from './queues';
 
 /** The worker has no API, but it still needs to be health-checked and scraped. */
 function startOpsServer() {
@@ -17,7 +17,12 @@ function startOpsServer() {
     if (req.url === '/metrics') {
       res.writeHead(200, { 'content-type': registry.contentType }).end(await registry.metrics());
     } else if (req.url === '/health') {
+      // Liveness: the process is up. It says nothing about whether it can do its work.
       res.writeHead(200, { 'content-type': 'application/json' }).end('{"status":"ok","service":"opspilot-worker"}');
+    } else if (req.url === '/ready') {
+      // Readiness: it can reach what it needs to take and finish a job.
+      const [database, redis] = await Promise.all([prisma.$queryRaw`SELECT 1`.then(() => true).catch(() => false), redisPing()]);
+      res.writeHead(database && redis ? 200 : 503, { 'content-type': 'application/json' }).end(JSON.stringify({ status: database && redis ? 'ready' : 'not_ready', service: 'opspilot-worker', database, redis }));
     } else {
       res.writeHead(404).end();
     }
@@ -29,10 +34,15 @@ function startOpsServer() {
 async function main() {
   const ops = startOpsServer();
   const stop = await startWorkers();
+  let stopping = false;
   const shutdown = async (signal: string) => {
-    logger.info({ signal }, 'worker shutting down');
+    if (stopping) return;
+    stopping = true;
+    logger.info({ signal, graceMs: env.WORKER_SHUTDOWN_GRACE_MS }, 'worker shutting down');
     ops.close();
-    await stop();
+    // Running jobs get the grace period to finish. What is still running then is stopped and
+    // recorded as interrupted, so nothing is left looking as if it were still in progress.
+    await stop({ graceMs: env.WORKER_SHUTDOWN_GRACE_MS });
     await prisma.$disconnect();
     process.exit(0);
   };
