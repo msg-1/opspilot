@@ -12,8 +12,11 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import PlainTextResponse, StreamingResponse
+from opentelemetry import context as otel_context
+from opentelemetry.trace import Span, StatusCode
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 
+from . import tracing
 from .config import EMBEDDING_DIMENSIONS, Settings, get_settings
 from .embeddings import embed, resolve_embeddings
 from .graph import Context, run_investigation
@@ -49,17 +52,7 @@ TOKENS = Counter("opspilot_ai_llm_tokens_total", "LLM tokens used", ["provider",
 COST = Counter("opspilot_ai_llm_estimated_cost_usd_total", "Estimated model spend in USD (list prices)", ["provider", "model"])
 
 if get_settings().otel_enabled:  # pragma: no cover - optional
-    from opentelemetry import trace
-    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-    from opentelemetry.sdk.resources import Resource
-    from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export import BatchSpanProcessor
-
-    provider = TracerProvider(resource=Resource.create({"service.name": "opspilot-ai"}))
-    provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=f"{get_settings().otel_exporter_otlp_endpoint}/v1/traces")))
-    trace.set_tracer_provider(provider)
-    FastAPIInstrumentor.instrument_app(app)
+    tracing.setup(app, get_settings().otel_exporter_otlp_endpoint)
 
 
 def require_internal(x_internal_token: str = Header(default=""), settings: Settings = Depends(get_settings)) -> None:
@@ -121,7 +114,15 @@ async def run(body: InvestigationRequest, settings: Settings = Depends(get_setti
     tools = ToolClient(body.api_url, body.tool_token)
     label = provider.name if provider else "heuristic"
 
+    # The response is streamed after this handler returns, so the trace the worker's request
+    # arrived with is captured here and handed to the task that does the work.
+    parent = otel_context.get_current()
+
     async def worker() -> None:
+        with tracing.tracer.start_as_current_span("investigation", context=parent, attributes={"opspilot.investigation.id": body.investigation_id, "opspilot.engine.provider": label}, record_exception=False, set_status_on_exception=False) as span:
+            await investigate(span)
+
+    async def investigate(span: Span) -> None:
         started = time.perf_counter()
         try:
             if not resolution.available and resolution.provider != "none":
@@ -136,6 +137,8 @@ async def run(body: InvestigationRequest, settings: Settings = Depends(get_setti
         except Exception as exc:
             log.exception("investigation %s failed", body.investigation_id)
             INVESTIGATIONS.labels(label, "failed").inc()
+            # The class only: the message can carry what was asked or what an upstream said.
+            span.set_status(StatusCode.ERROR, type(exc).__name__)
             await queue.put({"type": "error", "message": scrub(f"Investigation failed: {exc}")[:500]})
         finally:
             INVESTIGATION_SECONDS.labels(label).observe(time.perf_counter() - started)
@@ -144,6 +147,7 @@ async def run(body: InvestigationRequest, settings: Settings = Depends(get_setti
                 TOKENS.labels(label, "output").inc(provider.usage.output_tokens)
                 TOKENS.labels(label, "cache_read").inc(provider.usage.cache_read_tokens)
                 COST.labels(label, provider.model).inc(provider.usage.cost_usd)
+                span.set_attributes({"opspilot.llm.input_tokens": provider.usage.input_tokens, "opspilot.llm.output_tokens": provider.usage.output_tokens})
             await tools.aclose()
             await queue.put(None)
 

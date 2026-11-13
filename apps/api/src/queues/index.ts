@@ -1,9 +1,11 @@
+import { SpanKind } from '@opentelemetry/api';
 import { type JobsOptions, Queue, Worker } from 'bullmq';
 import IORedis from 'ioredis';
 import { env } from '../config/env';
 import { serviceUnavailable } from '../lib/errors';
 import { logger } from '../lib/logger';
 import { jobDuration, jobsProcessed } from '../lib/metrics';
+import { currentCarrier, type TraceCarrier, withSpan } from '../lib/tracing';
 
 /** Payloads for every background job in the system. */
 export interface JobPayloads {
@@ -16,6 +18,23 @@ export interface JobPayloads {
 export type JobName = keyof JobPayloads;
 
 type Processor<N extends JobName> = (data: JobPayloads[N]) => Promise<void>;
+
+/**
+ * A job as it sits in Redis: the payload, plus the trace context of whoever enqueued it, so
+ * the worker's spans join the trace of the request that asked for the work. Processors never
+ * see `_trace`; it is removed before they are called.
+ */
+type Envelope = Record<string, unknown> & { _trace?: TraceCarrier };
+
+/** Ids that say which piece of work a span belongs to. Ids only: never payload content. */
+function jobAttributes(name: JobName, data: Record<string, unknown>) {
+  return {
+    'messaging.system': 'bullmq',
+    'messaging.destination.name': name,
+    ...(typeof data.investigationId === 'string' ? { 'opspilot.investigation.id': data.investigationId } : {}),
+    ...(typeof data.documentId === 'string' ? { 'opspilot.document.id': data.documentId } : {}),
+  };
+}
 
 const CONFIG: Record<JobName, { concurrency: number; attempts: number }> = {
   investigation: { concurrency: 2, attempts: 1 },
@@ -81,12 +100,15 @@ function queueFor(name: JobName, forWorker = false) {
   return queue;
 }
 
-async function run(name: JobName, data: unknown) {
+async function run(name: JobName, envelope: unknown, jobId?: string) {
   const processor = processors.get(name);
   if (!processor) throw new Error(`No processor registered for job "${name}"`);
+  const { _trace: parent, ...data } = (envelope ?? {}) as Envelope;
   const stop = jobDuration.startTimer({ queue: name });
   try {
-    await processor(data as JobPayloads[JobName]);
+    await withSpan(`process ${name}`, { kind: SpanKind.CONSUMER, parent, attributes: { ...jobAttributes(name, data), ...(jobId ? { 'messaging.message.id': jobId } : {}) } }, () =>
+      processor(data as JobPayloads[JobName]),
+    );
     jobsProcessed.inc({ queue: name, status: 'completed' });
   } catch (err) {
     jobsProcessed.inc({ queue: name, status: 'failed' });
@@ -104,16 +126,19 @@ export async function enqueue<N extends JobName>(name: N, data: JobPayloads[N], 
   }
   try {
     await producerReady();
-    await Promise.race([
-      queueFor(name).add(name, data, {
-        attempts: CONFIG[name].attempts,
-        backoff: { type: 'exponential', delay: env.QUEUE_BACKOFF_MS },
-        removeOnComplete: { age: 24 * 3600, count: 1000 },
-        removeOnFail: { age: 7 * 24 * 3600 },
-        ...options,
-      }),
-      timeout(PRODUCER_TIMEOUT_MS),
-    ]);
+    await withSpan(`enqueue ${name}`, { kind: SpanKind.PRODUCER, attributes: jobAttributes(name, data) }, () =>
+      Promise.race([
+        // The carrier is taken inside the span, so the worker's span becomes its child.
+        queueFor(name).add(name, { ...data, _trace: currentCarrier() } satisfies Envelope, {
+          attempts: CONFIG[name].attempts,
+          backoff: { type: 'exponential', delay: env.QUEUE_BACKOFF_MS },
+          removeOnComplete: { age: 24 * 3600, count: 1000 },
+          removeOnFail: { age: 7 * 24 * 3600 },
+          ...options,
+        }),
+        timeout(PRODUCER_TIMEOUT_MS),
+      ]),
+    );
   } catch (err) {
     logger.error({ err: (err as Error).message, queue: name }, 'could not enqueue job');
     throw serviceUnavailable('The background job queue (Redis) is not reachable. Nothing was started; try again shortly.');
@@ -126,7 +151,7 @@ export async function enqueue<N extends JobName>(name: N, data: JobPayloads[N], 
  */
 export async function startWorkers({ schedulers = true }: { schedulers?: boolean } = {}) {
   const workers = (Object.keys(CONFIG) as JobName[]).map((name) => {
-    const worker = new Worker(name, async (job) => run(name, job.data), { connection: redis(), concurrency: CONFIG[name].concurrency, prefix: env.QUEUE_PREFIX });
+    const worker = new Worker(name, async (job) => run(name, job.data, job.id), { connection: redis(), concurrency: CONFIG[name].concurrency, prefix: env.QUEUE_PREFIX });
     worker.on('failed', (job, err) => logger.error({ err, queue: name, jobId: job?.id }, 'job failed'));
     worker.on('completed', (job) => logger.debug({ queue: name, jobId: job.id }, 'job completed'));
     return worker;

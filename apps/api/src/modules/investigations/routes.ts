@@ -2,6 +2,7 @@ import type { Prisma } from '@prisma/client';
 import { Router } from 'express';
 import { aiService } from '../../integrations/aiService';
 import { audit } from '../../lib/audit';
+import { annotate } from '../../lib/tracing';
 import { conflict, notFound } from '../../lib/errors';
 import { paged, paginate, param } from '../../lib/http';
 import { prisma } from '../../lib/prisma';
@@ -78,6 +79,7 @@ investigationsRouter.post('/', requirePermission('investigation:run'), async (re
   });
   await audit(req, 'investigation.start', 'investigation', investigation.id, { incident: incident ? incidentKey(incident.number) : null });
   if (incident) await addIncidentEvent(incident.id, 'investigation', `AI investigation started: "${body.question.slice(0, 200)}"`, auth, { investigationId: investigation.id });
+  annotate({ 'opspilot.investigation.id': investigation.id });
   try {
     await enqueue('investigation', { investigationId: investigation.id });
   } catch (err) {

@@ -12,7 +12,10 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
+from opentelemetry.trace import SpanKind, StatusCode
 from pydantic import BaseModel, Field
+
+from .tracing import trace_headers, tracer
 
 
 class ToolError(Exception):
@@ -276,17 +279,23 @@ class ToolClient:
         except Exception as exc:  # pydantic.ValidationError
             raise ToolError(f"Invalid arguments for {name}: {exc}") from exc
         path, params, body = _request_for(spec, args)
-        try:
-            res = await self._http.request(spec.method, path, params=params, json=body)
-        except httpx.HTTPError as exc:
-            raise ToolError(f"OpsPilot API is not reachable: {exc}") from exc
-        if res.status_code >= 400:
+        # One span per tool call, named by the tool. Arguments stay out of it: they hold search
+        # text. The trace context travels in the request, so the API's span becomes its child.
+        with tracer.start_as_current_span(f"tool {name}", kind=SpanKind.CLIENT, attributes={"opspilot.tool.name": name}, record_exception=False, set_status_on_exception=False) as span:
             try:
-                message = res.json()["error"]["message"]
-            except Exception:
-                message = res.text[:300]
-            raise ToolError(f"{name} failed ({res.status_code}): {message}")
-        return res.json()
+                res = await self._http.request(spec.method, path, params=params, json=body, headers=trace_headers())
+            except httpx.HTTPError as exc:
+                span.set_status(StatusCode.ERROR, type(exc).__name__)
+                raise ToolError(f"OpsPilot API is not reachable: {exc}") from exc
+            span.set_attribute("http.response.status_code", res.status_code)
+            if res.status_code >= 400:
+                span.set_status(StatusCode.ERROR, f"HTTP {res.status_code}")
+                try:
+                    message = res.json()["error"]["message"]
+                except Exception:
+                    message = res.text[:300]
+                raise ToolError(f"{name} failed ({res.status_code}): {message}")
+            return res.json()
 
 
 def to_json(value: Any, limit: int = 7000) -> str:

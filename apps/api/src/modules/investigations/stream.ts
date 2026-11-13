@@ -1,5 +1,6 @@
 import type { InvestigationEvent } from '../../integrations/aiService';
 import { prisma } from '../../lib/prisma';
+import { annotate, withSpan } from '../../lib/tracing';
 import { applyGuardrails } from './guardrails';
 import { persistFinal, saveEngine, saveEvidence, savePlan, stepWriter } from './persistence';
 import { reportSchema } from './schema';
@@ -50,8 +51,9 @@ export function eventConsumer(investigationId: string, abort: AbortController) {
       case 'final': {
         const parsed = reportSchema.safeParse(event.report);
         if (!parsed.success) throw new Error(`AI service returned a malformed report: ${parsed.error.issues[0]?.message ?? 'invalid'}`);
-        const report = await applyGuardrails(parsed.data, evidenceRefs, addStep, deploymentRefs);
-        await persistFinal(investigationId, report, event.usage, event.engine);
+        const report = await withSpan('investigation.guardrails', {}, () => applyGuardrails(parsed.data, evidenceRefs, addStep, deploymentRefs));
+        await withSpan('investigation.persist', {}, () => persistFinal(investigationId, report, event.usage, event.engine));
+        annotate({ 'opspilot.engine.mode': report.analysisMode, 'opspilot.investigation.outcome': report.outcome ?? 'none', 'opspilot.investigation.evidence_count': evidenceRefs.size });
         state.finished = true;
         break;
       }

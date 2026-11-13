@@ -5,6 +5,7 @@
 #   Infra only (develop on host):   docker compose up -d postgres redis
 #   Full application:               docker compose --profile app up -d --build
 #   Observability add-on:           docker compose --profile observability up -d
+#   Traces of OPSILUME itself:      npm run tracing:up, then npm run trace -- <investigation id> (docs/tracing.md)
 #   Demo microservices (real telemetry and failures to investigate): npm run demo:up, see demo/README.md
 name: opspilot
 
@@ -30,6 +31,10 @@ x-app-env: &app-env
   INVESTIGATION_MAX_CONCURRENT: ${INVESTIGATION_MAX_CONCURRENT:-3}
   # Jaeger-compatible trace query API. Empty: no trace store (the demo sets it to http://demo-jaeger:16686).
   TRACES_URL: ${TRACES_URL:-}
+  # Tracing of the platform itself, off unless asked for (npm run tracing:up). The endpoint is
+  # the `tracing` service below; it is not taken from .env, where it points at localhost.
+  OTEL_ENABLED: ${OTEL_ENABLED:-false}
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://tracing:4318
 
 services:
   postgres:
@@ -139,6 +144,8 @@ services:
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.1}
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-auto}
+      OTEL_ENABLED: ${OTEL_ENABLED:-false}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://tracing:4318
     healthcheck:
       test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=2).status == 200 else 1)"]
       interval: 15s
@@ -198,6 +205,21 @@ services:
   # They exist to produce real logs, metrics and traces, and real failures, for OPSILUME to
   # investigate. Local only: nothing here is published beyond 127.0.0.1, nothing is persisted
   # (the database lives in memory), and each container is capped at a few hundred megabytes.
+  # Where OPSILUME's own traces go: one trace per investigation, from the HTTP request through
+  # the queue, the worker and the AI service to every tool call. Kept apart from demo-jaeger,
+  # which holds the telemetry of the systems being investigated. In memory, local only.
+  tracing:
+    profiles: ["tracing"]
+    image: jaegertracing/all-in-one:1.62.0
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+      MEMORY_MAX_TRACES: "2000"
+    mem_limit: 384m
+    ports:
+      - "127.0.0.1:16687:16686" # Jaeger UI and query API
+      - "127.0.0.1:4318:4318" # OTLP/HTTP, for services run on the host with `npm run dev`
+
   demo-postgres:
     profiles: ["demo"]
     image: postgres:16-alpine

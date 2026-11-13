@@ -24,6 +24,7 @@ npm run contracts:check    # the same, then fail if anything changed (what CI do
 |---|---|---|
 | `fixtures/action-effects.json` | `services/ai/tests/test_reliability.py`, `apps/api/tests/safety.test.ts` | 25 actions and the effect each must be given |
 | `fixtures/guardrail-cases.json` | `services/ai/tests/test_contracts.py`, `apps/api/tests/contract.test.ts` | Guardrail behaviour both implementations must show: invented citations removed, an unsupported hypothesis capped, a change resting on an unlikely hypothesis withdrawn, a rollback judged by the deployment it rolls back, a high-risk alternative moved to next steps, no production change without an incident |
+| `fixtures/span-scrubbing.json` | `services/ai/tests/test_tracing.py`, `apps/api/tests/tracing.test.ts` | What may leave a process inside a span: credentials, personal identifiers, query strings and statements are dropped or masked, the same way in both services |
 | `fixtures/report.contract.json` | written by `services/ai/tests/test_agent.py`, read by `apps/api/tests/contract.test.ts` | A complete report as the AI service really emits it; the API must accept it and keep every field |
 
 ## Two guardrail passes, one definition

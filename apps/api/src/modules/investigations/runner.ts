@@ -4,6 +4,7 @@ import { logger } from '../../lib/logger';
 import { investigationsTotal } from '../../lib/metrics';
 import { notifyUsers } from '../../lib/notify';
 import { prisma } from '../../lib/prisma';
+import { withSpan } from '../../lib/tracing';
 import { signToolToken } from '../../middleware/auth';
 import { registerProcessor } from '../../queues';
 import { incidentKey } from '../incidents';
@@ -52,7 +53,8 @@ export async function runInvestigation(investigationId: string) {
   };
 
   try {
-    await aiService.runInvestigation(request, onEvent, abort.signal);
+    // The request to the AI service, and everything done with what it streams back.
+    await withSpan('investigation.run', { attributes: { 'opspilot.investigation.id': investigationId } }, () => aiService.runInvestigation(request, onEvent, abort.signal));
     if (!state.finished) throw new Error('The AI service ended the investigation without producing a report');
     investigationsTotal.inc({ status: 'completed', provider: state.provider });
   } catch (err) {
