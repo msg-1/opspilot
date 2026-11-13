@@ -1,0 +1,3209 @@
+{
+ "bad_deploy_matching_change": {
+  "analysisMode": "heuristic",
+  "assessment": {
+   "confidence": 0.89,
+   "missingTelemetry": [
+    "The trace store returned no traces for the window (none recorded, or no trace store is connected)."
+   ],
+   "outcome": "INCIDENT",
+   "rationale": "A failure is evident (420\u00d7 ERROR in orders-api (new pattern); Error rate for orders-api up 2900%) and at least one explanation is supported by evidence.",
+   "signals": [
+    {
+     "evidenceRefs": [
+      "E1"
+     ],
+     "kind": "logs",
+     "level": "strong",
+     "text": "420\u00d7 ERROR in orders-api (new pattern)"
+    },
+    {
+     "evidenceRefs": [
+      "E8"
+     ],
+     "kind": "metric",
+     "level": "strong",
+     "text": "Error rate for orders-api up 2900%"
+    },
+    {
+     "evidenceRefs": [
+      "E10"
+     ],
+     "kind": "health",
+     "level": "moderate",
+     "text": "orders-api is recorded as DEGRADED"
+    }
+   ],
+   "supportingRefs": [
+    "E1",
+    "E8"
+   ]
+  },
+  "assumptions": [
+   "Temporal proximity is treated as a signal of causation; it has not been verified."
+  ],
+  "confidence": 0.64,
+  "facts": [
+   {
+    "evidenceRefs": [
+     "E1"
+    ],
+    "statement": "The most frequent error pattern is \"failed to deserialize cache entry for key order:<n>: unexpected schema version\" in orders-api, seen 420 times since 2026-06-01T11:30:00Z.",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T11:30Z appears in E1",
+       "evidenceRef": "E1",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T11:30:00Z"
+      },
+      {
+       "detail": "E1 holds 420 \u00d7",
+       "evidenceRef": "E1",
+       "kind": "number",
+       "status": "exact",
+       "text": "420 times"
+      }
+     ],
+     "status": "verified"
+    }
+   },
+   {
+    "evidenceRefs": [
+     "E1"
+    ],
+    "statement": "The earliest anomalous error pattern first appeared at 2026-06-01T11:30:00Z.",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T11:30Z appears in E1",
+       "evidenceRef": "E1",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T11:30:00Z"
+      }
+     ],
+     "status": "verified"
+    }
+   },
+   {
+    "evidenceRefs": [
+     "E8"
+    ],
+    "statement": "Error rate for orders-api up 2900%: error_rate averaged 12% (max 15.6%) between 2026-06-01T10:00:00Z and 2026-06-01T12:00:00Z, versus 0.4% in the preceding window",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T10:00Z appears in E8",
+       "evidenceRef": "E8",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T10:00:00Z"
+      },
+      {
+       "detail": "2026-06-01T12:00Z appears in E8",
+       "evidenceRef": "E8",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T12:00:00Z"
+      },
+      {
+       "detail": "E8 holds 2900%",
+       "evidenceRef": "E8",
+       "kind": "number",
+       "status": "exact",
+       "text": "2900%"
+      },
+      {
+       "detail": "E8 holds 12%",
+       "evidenceRef": "E8",
+       "kind": "number",
+       "status": "exact",
+       "text": "12%"
+      },
+      {
+       "detail": "E8 holds 15.6%",
+       "evidenceRef": "E8",
+       "kind": "number",
+       "status": "exact",
+       "text": "15.6%"
+      },
+      {
+       "detail": "E8 holds 0.4%",
+       "evidenceRef": "E8",
+       "kind": "number",
+       "status": "exact",
+       "text": "0.4%"
+      }
+     ],
+     "status": "verified"
+    }
+   }
+  ],
+  "hypotheses": [
+   {
+    "assumptions": [
+     "Temporal proximity is treated as a signal of causation; it has not been verified."
+    ],
+    "confidence": 0.64,
+    "contradictingEvidenceRefs": [],
+    "contradictions": [],
+    "description": "The error signal began about 8 minutes after this deployment. The shipped change touches cache, matching the failure mode in the logs.",
+    "evidenceRefs": [
+     "E3",
+     "E1",
+     "E5",
+     "E6",
+     "E8"
+    ],
+    "facts": [
+     "Deployment of orders-api v4.2.0 (succeeded) happened at 2026-06-01T11:22:00Z, 8 minutes before the first anomalous error (E3).",
+     "The dominant error pattern is in the same service as the change (E1).",
+     "The code shipped by this change mentions cache, which also appear in the error messages (E5, E6).",
+     "Metrics for the service shifted sharply in the window: Error rate for orders-api up 2900% (E8)."
+    ],
+    "gaps": [
+     "Confirm by comparing error rate per version, or by rolling back in a controlled way.",
+     "Review the diff of the linked change for the suspected mechanism."
+    ],
+    "status": "likely",
+    "title": "Regression introduced by Deployment of orders-api v4.2.0 (succeeded)"
+   }
+  ],
+  "integrity": {
+   "checked": 26,
+   "flagged": [],
+   "supported": 26
+  },
+  "nextSteps": [
+   "Confirm by comparing error rate per version, or by rolling back in a controlled way.",
+   "Review the diff of the linked change for the suspected mechanism.",
+   "Open the log explorer filtered to pattern f1 and follow a trace id across services.",
+   "Follow the documented procedure in \"Runbook: Cache schema migrations \u203a Symptoms\" (E11)."
+  ],
+  "observations": [
+   {
+    "evidenceRefs": [
+     "E3"
+    ],
+    "statement": "Most recent deployment on record: Deployment of orders-api v4.2.0 (succeeded), at 2026-06-01T11:22:00Z.",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T11:22Z appears in E3",
+       "evidenceRef": "E3",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T11:22:00Z"
+      },
+      {
+       "detail": "appears in E3",
+       "evidenceRef": "E3",
+       "kind": "version",
+       "status": "exact",
+       "text": "v4.2.0"
+      }
+     ],
+     "status": "verified"
+    }
+   }
+  ],
+  "outcome": "INCIDENT",
+  "recommendedActions": [
+   {
+    "description": "Roll back orders-api from v4.2.0 to the previous successful version v4.1.9, then watch error rate and latency for 15 minutes.",
+    "effect": "state_changing",
+    "effectReasons": [
+     "rollback_deployment changes production by definition"
+    ],
+    "evidenceRefs": [
+     "E3",
+     "E4",
+     "E1"
+    ],
+    "parameters": {
+     "deploymentId": "d1",
+     "fromVersion": "v4.2.0",
+     "toVersion": "v4.1.9"
+    },
+    "rationale": "Errors began shortly after v4.2.0 was deployed; v4.1.9 was running before the errors started. This is a hypothesis based on timing and content overlap, not a confirmed cause.",
+    "risk": "MEDIUM",
+    "serviceSlug": "orders-api",
+    "title": "Roll back orders-api to v4.1.9",
+    "type": "rollback_deployment"
+   }
+  ],
+  "rootCauseConfirmed": false,
+  "summary": "Rule-based analysis (no language model wrote these conclusions). The most frequent error pattern is \"failed to deserialize cache entry for key order:<n>: unexpected schema version\" in orders-api, seen 420 times since 2026-06-01T11:30:00Z. The leading hypothesis is: Regression introduced by Deployment of orders-api v4.2.0 (succeeded) (64% confidence, likely). The error signal began about 8 minutes after this deployment. The shipped change touches cache, matching the failure mode in the logs. No alternative hypotheses met the evidence bar. The cause has not been verified.",
+  "timeline": [
+   {
+    "description": "PR #77 in acme/orders-api: Bump cache schema version and config",
+    "evidenceRefs": [
+     "E5"
+    ],
+    "timestamp": "2026-06-01T11:00:00Z"
+   },
+   {
+    "description": "Deployment of orders-api v4.2.0 (succeeded)",
+    "evidenceRefs": [
+     "E3"
+    ],
+    "timestamp": "2026-06-01T11:22:00Z"
+   },
+   {
+    "description": "420\u00d7 ERROR in orders-api (new pattern)",
+    "evidenceRefs": [
+     "E1"
+    ],
+    "timestamp": "2026-06-01T11:30:00Z"
+   }
+  ],
+  "uncertainties": [
+   "This analysis used rule-based correlation without a language model; it cannot read code diffs or reason about mechanisms beyond keyword overlap."
+  ]
+ },
+ "degraded_incomplete_evidence": {
+  "analysisMode": "heuristic",
+  "assessment": {
+   "confidence": 0.61,
+   "missingTelemetry": [
+    "The trace store returned no traces for the window (none recorded, or no trace store is connected)."
+   ],
+   "outcome": "DEGRADED",
+   "rationale": "There are measurable anomalies (6\u00d7 ERROR in search-api (new pattern); p95 latency for search-api up 37%), but nothing that amounts to a clear failure, and no cause is established.",
+   "signals": [
+    {
+     "evidenceRefs": [
+      "E1"
+     ],
+     "kind": "logs",
+     "level": "moderate",
+     "text": "6\u00d7 ERROR in search-api (new pattern)"
+    },
+    {
+     "evidenceRefs": [
+      "E3"
+     ],
+     "kind": "metric",
+     "level": "moderate",
+     "text": "p95 latency for search-api up 37%"
+    },
+    {
+     "evidenceRefs": [
+      "E4"
+     ],
+     "kind": "metric",
+     "level": "weak",
+     "text": "Error rate for search-api up 33%"
+    }
+   ],
+   "supportingRefs": [
+    "E1",
+    "E3"
+   ]
+  },
+  "assumptions": [],
+  "confidence": 0.0,
+  "facts": [
+   {
+    "evidenceRefs": [
+     "E1"
+    ],
+    "statement": "The most frequent error pattern is \"upstream timeout after <n>ms calling index-node\" in search-api, seen 6 times since 2026-06-01T11:25:00Z.",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T11:25Z appears in E1",
+       "evidenceRef": "E1",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T11:25:00Z"
+      },
+      {
+       "detail": "E1 holds 6 \u00d7",
+       "evidenceRef": "E1",
+       "kind": "number",
+       "status": "exact",
+       "text": "6 times"
+      }
+     ],
+     "status": "verified"
+    }
+   },
+   {
+    "evidenceRefs": [
+     "E1"
+    ],
+    "statement": "The earliest anomalous error pattern first appeared at 2026-06-01T11:25:00Z.",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T11:25Z appears in E1",
+       "evidenceRef": "E1",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T11:25:00Z"
+      }
+     ],
+     "status": "verified"
+    }
+   },
+   {
+    "evidenceRefs": [
+     "E3"
+    ],
+    "statement": "p95 latency for search-api up 37%: latency_p95_ms averaged 540ms (max 702ms) between 2026-06-01T10:00:00Z and 2026-06-01T12:00:00Z, versus 395ms in the preceding window",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T10:00Z appears in E3",
+       "evidenceRef": "E3",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T10:00:00Z"
+      },
+      {
+       "detail": "2026-06-01T12:00Z appears in E3",
+       "evidenceRef": "E3",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T12:00:00Z"
+      },
+      {
+       "detail": "E3 holds 37%",
+       "evidenceRef": "E3",
+       "kind": "number",
+       "status": "exact",
+       "text": "37%"
+      },
+      {
+       "detail": "E3 holds 540 ms",
+       "evidenceRef": "E3",
+       "kind": "number",
+       "status": "exact",
+       "text": "540ms"
+      },
+      {
+       "detail": "E3 holds 702 ms",
+       "evidenceRef": "E3",
+       "kind": "number",
+       "status": "exact",
+       "text": "702ms"
+      },
+      {
+       "detail": "E3 holds 395 ms",
+       "evidenceRef": "E3",
+       "kind": "number",
+       "status": "exact",
+       "text": "395ms"
+      }
+     ],
+     "status": "verified"
+    }
+   },
+   {
+    "evidenceRefs": [
+     "E4"
+    ],
+    "statement": "Error rate for search-api up 33%: error_rate averaged 0.4% (max 0.52%) between 2026-06-01T10:00:00Z and 2026-06-01T12:00:00Z, versus 0.3% in the preceding window",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T10:00Z appears in E4",
+       "evidenceRef": "E4",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T10:00:00Z"
+      },
+      {
+       "detail": "2026-06-01T12:00Z appears in E4",
+       "evidenceRef": "E4",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T12:00:00Z"
+      },
+      {
+       "detail": "E4 holds 33%",
+       "evidenceRef": "E4",
+       "kind": "number",
+       "status": "exact",
+       "text": "33%"
+      },
+      {
+       "detail": "E4 holds 0.4%",
+       "evidenceRef": "E4",
+       "kind": "number",
+       "status": "exact",
+       "text": "0.4%"
+      },
+      {
+       "detail": "E4 holds 0.52%",
+       "evidenceRef": "E4",
+       "kind": "number",
+       "status": "exact",
+       "text": "0.52%"
+      },
+      {
+       "detail": "E4 holds 0.3%",
+       "evidenceRef": "E4",
+       "kind": "number",
+       "status": "exact",
+       "text": "0.3%"
+      }
+     ],
+     "status": "verified"
+    }
+   }
+  ],
+  "hypotheses": [],
+  "integrity": {
+   "checked": 20,
+   "flagged": [],
+   "supported": 20
+  },
+  "nextSteps": [
+   "Open the log explorer filtered to pattern f61 and follow a trace id across services.",
+   "Re-run the investigation with a wider time window or with the affected service named explicitly."
+  ],
+  "observations": [
+   {
+    "evidenceRefs": [
+     "E4"
+    ],
+    "statement": "Noticed, but not evidence of a fault on its own: Error rate for search-api up 33%.",
+    "verification": {
+     "checks": [
+      {
+       "detail": "E4 holds 33%",
+       "evidenceRef": "E4",
+       "kind": "number",
+       "status": "exact",
+       "text": "33%"
+      }
+     ],
+     "status": "verified"
+    }
+   }
+  ],
+  "outcome": "DEGRADED",
+  "recommendedActions": [],
+  "rootCauseConfirmed": false,
+  "summary": "Rule-based analysis (no language model wrote these conclusions). There are measurable anomalies but no clear failure: 6\u00d7 ERROR in search-api (new pattern); p95 latency for search-api up 37%. Nothing in the evidence explains them.",
+  "timeline": [
+   {
+    "description": "6\u00d7 ERROR in search-api (new pattern)",
+    "evidenceRefs": [
+     "E1"
+    ],
+    "timestamp": "2026-06-01T11:25:00Z"
+   }
+  ],
+  "uncertainties": [
+   "This analysis used rule-based correlation without a language model; it cannot read code diffs or reason about mechanisms beyond keyword overlap.",
+   "No code changes were found for the services in scope (no repository linked, or none in the window).",
+   "The knowledge base returned nothing relevant.",
+   "The anomalies are below the level of a clear failure, and no cause is established for them."
+  ]
+ },
+ "deployment_rollback_target": {
+  "analysisMode": "heuristic",
+  "assessment": {
+   "confidence": 0.89,
+   "missingTelemetry": [
+    "The trace store returned no traces for the window (none recorded, or no trace store is connected)."
+   ],
+   "outcome": "INCIDENT",
+   "rationale": "A failure is evident (640\u00d7 ERROR in checkout-api (new pattern); Error rate for checkout-api up 5900%; p95 latency for checkout-api up 2082%) and at least one explanation is supported by evidence.",
+   "signals": [
+    {
+     "evidenceRefs": [
+      "E1"
+     ],
+     "kind": "logs",
+     "level": "strong",
+     "text": "640\u00d7 ERROR in checkout-api (new pattern)"
+    },
+    {
+     "evidenceRefs": [
+      "E10"
+     ],
+     "kind": "metric",
+     "level": "strong",
+     "text": "Error rate for checkout-api up 5900%"
+    },
+    {
+     "evidenceRefs": [
+      "E11"
+     ],
+     "kind": "metric",
+     "level": "strong",
+     "text": "p95 latency for checkout-api up 2082%"
+    },
+    {
+     "evidenceRefs": [
+      "E12"
+     ],
+     "kind": "health",
+     "level": "moderate",
+     "text": "checkout-api is recorded as DEGRADED"
+    }
+   ],
+   "supportingRefs": [
+    "E1",
+    "E10",
+    "E11"
+   ]
+  },
+  "assumptions": [
+   "Temporal proximity is treated as a signal of causation; it has not been verified."
+  ],
+  "confidence": 0.71,
+  "facts": [
+   {
+    "evidenceRefs": [
+     "E1"
+    ],
+    "statement": "The most frequent error pattern is \"timeout acquiring connection from pool after <n>ms (pool size 10, <n> waiting)\" in checkout-api, seen 640 times since 2026-06-01T11:41:00Z.",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T11:41Z appears in E1",
+       "evidenceRef": "E1",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T11:41:00Z"
+      },
+      {
+       "detail": "E1 holds 10",
+       "evidenceRef": "E1",
+       "kind": "number",
+       "status": "exact",
+       "text": "10"
+      },
+      {
+       "detail": "E1 holds 640 \u00d7",
+       "evidenceRef": "E1",
+       "kind": "number",
+       "status": "exact",
+       "text": "640 times"
+      }
+     ],
+     "status": "verified"
+    }
+   },
+   {
+    "evidenceRefs": [
+     "E1"
+    ],
+    "statement": "The earliest anomalous error pattern first appeared at 2026-06-01T11:41:00Z.",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T11:41Z appears in E1",
+       "evidenceRef": "E1",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T11:41:00Z"
+      }
+     ],
+     "status": "verified"
+    }
+   },
+   {
+    "evidenceRefs": [
+     "E10"
+    ],
+    "statement": "Error rate for checkout-api up 5900%: error_rate averaged 18% (max 23.4%) between 2026-06-01T10:00:00Z and 2026-06-01T12:00:00Z, versus 0.3% in the preceding window",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T10:00Z appears in E10",
+       "evidenceRef": "E10",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T10:00:00Z"
+      },
+      {
+       "detail": "2026-06-01T12:00Z appears in E10",
+       "evidenceRef": "E10",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T12:00:00Z"
+      },
+      {
+       "detail": "E10 holds 5900%",
+       "evidenceRef": "E10",
+       "kind": "number",
+       "status": "exact",
+       "text": "5900%"
+      },
+      {
+       "detail": "E10 holds 18%",
+       "evidenceRef": "E10",
+       "kind": "number",
+       "status": "exact",
+       "text": "18%"
+      },
+      {
+       "detail": "E10 holds 23.4%",
+       "evidenceRef": "E10",
+       "kind": "number",
+       "status": "exact",
+       "text": "23.4%"
+      },
+      {
+       "detail": "E10 holds 0.3%",
+       "evidenceRef": "E10",
+       "kind": "number",
+       "status": "exact",
+       "text": "0.3%"
+      }
+     ],
+     "status": "verified"
+    }
+   },
+   {
+    "evidenceRefs": [
+     "E11"
+    ],
+    "statement": "p95 latency for checkout-api up 2082%: latency_p95_ms averaged 4800ms (max 6240ms) between 2026-06-01T10:00:00Z and 2026-06-01T12:00:00Z, versus 220ms in the preceding window",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T10:00Z appears in E11",
+       "evidenceRef": "E11",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T10:00:00Z"
+      },
+      {
+       "detail": "2026-06-01T12:00Z appears in E11",
+       "evidenceRef": "E11",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T12:00:00Z"
+      },
+      {
+       "detail": "E11 holds 2082%",
+       "evidenceRef": "E11",
+       "kind": "number",
+       "status": "exact",
+       "text": "2082%"
+      },
+      {
+       "detail": "E11 holds 4800 ms",
+       "evidenceRef": "E11",
+       "kind": "number",
+       "status": "exact",
+       "text": "4800ms"
+      },
+      {
+       "detail": "E11 holds 6240 ms",
+       "evidenceRef": "E11",
+       "kind": "number",
+       "status": "exact",
+       "text": "6240ms"
+      },
+      {
+       "detail": "E11 holds 220 ms",
+       "evidenceRef": "E11",
+       "kind": "number",
+       "status": "exact",
+       "text": "220ms"
+      }
+     ],
+     "status": "verified"
+    }
+   }
+  ],
+  "hypotheses": [
+   {
+    "assumptions": [
+     "Temporal proximity is treated as a signal of causation; it has not been verified."
+    ],
+    "confidence": 0.71,
+    "contradictingEvidenceRefs": [],
+    "contradictions": [],
+    "description": "The error signal began about 5 minutes after this deployment. The shipped change touches connection, pool, matching the failure mode in the logs.",
+    "evidenceRefs": [
+     "E3",
+     "E1",
+     "E6",
+     "E7",
+     "E10",
+     "E11"
+    ],
+    "facts": [
+     "Deployment of checkout-api v2.8.0 (succeeded) happened at 2026-06-01T11:36:00Z, 5 minutes before the first anomalous error (E3).",
+     "The dominant error pattern is in the same service as the change (E1).",
+     "The code shipped by this change mentions connection, pool, which also appear in the error messages (E6, E7).",
+     "Metrics for the service shifted sharply in the window: Error rate for checkout-api up 5900% (E10); p95 latency for checkout-api up 2082% (E11)."
+    ],
+    "gaps": [
+     "Confirm by comparing error rate per version, or by rolling back in a controlled way.",
+     "Review the diff of the linked change for the suspected mechanism."
+    ],
+    "status": "likely",
+    "title": "Regression introduced by Deployment of checkout-api v2.8.0 (succeeded)"
+   }
+  ],
+  "integrity": {
+   "checked": 36,
+   "flagged": [],
+   "supported": 36
+  },
+  "nextSteps": [
+   "Confirm by comparing error rate per version, or by rolling back in a controlled way.",
+   "Review the diff of the linked change for the suspected mechanism.",
+   "Open the log explorer filtered to pattern f11 and follow a trace id across services."
+  ],
+  "observations": [
+   {
+    "evidenceRefs": [
+     "E3"
+    ],
+    "statement": "Most recent deployment on record: Deployment of checkout-api v2.8.0 (succeeded), at 2026-06-01T11:36:00Z.",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T11:36Z appears in E3",
+       "evidenceRef": "E3",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T11:36:00Z"
+      },
+      {
+       "detail": "appears in E3",
+       "evidenceRef": "E3",
+       "kind": "version",
+       "status": "exact",
+       "text": "v2.8.0"
+      }
+     ],
+     "status": "verified"
+    }
+   }
+  ],
+  "outcome": "INCIDENT",
+  "recommendedActions": [
+   {
+    "description": "Roll back checkout-api from v2.8.0 to the previous successful version v2.7.4, then watch error rate and latency for 15 minutes.",
+    "effect": "state_changing",
+    "effectReasons": [
+     "rollback_deployment changes production by definition"
+    ],
+    "evidenceRefs": [
+     "E3",
+     "E5",
+     "E1"
+    ],
+    "parameters": {
+     "deploymentId": "d11",
+     "fromVersion": "v2.8.0",
+     "toVersion": "v2.7.4"
+    },
+    "rationale": "Errors began shortly after v2.8.0 was deployed; v2.7.4 was running before the errors started. This is a hypothesis based on timing and content overlap, not a confirmed cause.",
+    "risk": "MEDIUM",
+    "serviceSlug": "checkout-api",
+    "title": "Roll back checkout-api to v2.7.4",
+    "type": "rollback_deployment"
+   }
+  ],
+  "rootCauseConfirmed": false,
+  "summary": "Rule-based analysis (no language model wrote these conclusions). The most frequent error pattern is \"timeout acquiring connection from pool after <n>ms (pool size 10, <n> waiting)\" in checkout-api, seen 640 times since 2026-06-01T11:41:00Z. The leading hypothesis is: Regression introduced by Deployment of checkout-api v2.8.0 (succeeded) (71% confidence, likely). The error signal began about 5 minutes after this deployment. The shipped change touches connection, pool, matching the failure mode in the logs. No alternative hypotheses met the evidence bar. The cause has not been verified.",
+  "timeline": [
+   {
+    "description": "PR #412 in acme/checkout-api: Reduce DB pool size to cut idle connections",
+    "evidenceRefs": [
+     "E6"
+    ],
+    "timestamp": "2026-06-01T09:00:00Z"
+   },
+   {
+    "description": "Deployment of checkout-api v2.8.0 (succeeded)",
+    "evidenceRefs": [
+     "E3"
+    ],
+    "timestamp": "2026-06-01T11:36:00Z"
+   },
+   {
+    "description": "scaling on checkout-api: Scaled checkout-api from 6 to 8 replicas",
+    "evidenceRefs": [
+     "E9"
+    ],
+    "timestamp": "2026-06-01T11:39:00Z"
+   },
+   {
+    "description": "640\u00d7 ERROR in checkout-api (new pattern)",
+    "evidenceRefs": [
+     "E1"
+    ],
+    "timestamp": "2026-06-01T11:41:00Z"
+   }
+  ],
+  "uncertainties": [
+   "This analysis used rule-based correlation without a language model; it cannot read code diffs or reason about mechanisms beyond keyword overlap.",
+   "The knowledge base returned nothing relevant."
+  ]
+ },
+ "healthy_clean": {
+  "analysisMode": "heuristic",
+  "assessment": {
+   "confidence": 0.85,
+   "missingTelemetry": [
+    "The trace store returned no traces for the window (none recorded, or no trace store is connected)."
+   ],
+   "outcome": "HEALTHY",
+   "rationale": "No material evidence of a fault in the window examined: metrics held steady against the preceding window; no error pattern of any size appeared in the logs; the service catalogue records it as healthy with no alert firing.",
+   "signals": [],
+   "supportingRefs": [
+    "E1",
+    "E2"
+   ]
+  },
+  "assumptions": [],
+  "confidence": 0.0,
+  "facts": [],
+  "hypotheses": [],
+  "integrity": {
+   "checked": 0,
+   "flagged": [],
+   "supported": 0
+  },
+  "nextSteps": [
+   "Re-run the investigation with a wider time window or with the affected service named explicitly."
+  ],
+  "observations": [],
+  "outcome": "HEALTHY",
+  "recommendedActions": [],
+  "rootCauseConfirmed": false,
+  "summary": "Rule-based analysis (no language model wrote these conclusions). No significant problem signal was found in the window examined: no high-volume error pattern, no sharp metric shift and no firing alert. Nothing links the observations to a recent change.",
+  "timeline": [],
+  "uncertainties": [
+   "This analysis used rule-based correlation without a language model; it cannot read code diffs or reason about mechanisms beyond keyword overlap.",
+   "No error or warning logs were found in the window, so the time the problem started is uncertain.",
+   "No code changes were found for the services in scope (no repository linked, or none in the window).",
+   "No notable metric changes were found, or no metrics exist for the services in scope.",
+   "The knowledge base returned nothing relevant.",
+   "With no clear error signal, the question may concern a different time window or service than the ones examined."
+  ]
+ },
+ "healthy_irrelevant_warnings": {
+  "analysisMode": "heuristic",
+  "assessment": {
+   "confidence": 0.79,
+   "missingTelemetry": [
+    "The trace store returned no traces for the window (none recorded, or no trace store is connected)."
+   ],
+   "outcome": "HEALTHY",
+   "rationale": "No material evidence of a fault in the window examined: metrics held steady against the preceding window; the logs contain no error pattern of material size; the service catalogue records it as healthy with no alert firing.",
+   "signals": [
+    {
+     "evidenceRefs": [
+      "E1"
+     ],
+     "kind": "logs",
+     "level": "weak",
+     "text": "14\u00d7 WARN in notifications-api (9.0x above baseline)"
+    },
+    {
+     "evidenceRefs": [
+      "E2"
+     ],
+     "kind": "logs",
+     "level": "weak",
+     "text": "3\u00d7 WARN in notifications-api (9.0x above baseline)"
+    }
+   ],
+   "supportingRefs": [
+    "E4",
+    "E5"
+   ]
+  },
+  "assumptions": [],
+  "confidence": 0.0,
+  "facts": [
+   {
+    "evidenceRefs": [
+     "E1"
+    ],
+    "statement": "The most frequent error pattern is \"provider rate limit at <n>% of quota\" in notifications-api, seen 14 times since 2026-06-01T10:10:00Z.",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T10:10Z appears in E1",
+       "evidenceRef": "E1",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T10:10:00Z"
+      },
+      {
+       "detail": "E1 holds 14 \u00d7",
+       "evidenceRef": "E1",
+       "kind": "number",
+       "status": "exact",
+       "text": "14 times"
+      }
+     ],
+     "status": "verified"
+    }
+   }
+  ],
+  "hypotheses": [],
+  "integrity": {
+   "checked": 14,
+   "flagged": [],
+   "supported": 14
+  },
+  "nextSteps": [
+   "Open the log explorer filtered to pattern f41 and follow a trace id across services.",
+   "Re-run the investigation with a wider time window or with the affected service named explicitly."
+  ],
+  "observations": [
+   {
+    "evidenceRefs": [
+     "E1"
+    ],
+    "statement": "Noticed, but not evidence of a fault on its own: 14\u00d7 WARN in notifications-api (9.0x above baseline).",
+    "verification": {
+     "checks": [
+      {
+       "detail": "E1 holds 14 \u00d7",
+       "evidenceRef": "E1",
+       "kind": "number",
+       "status": "exact",
+       "text": "14\u00d7"
+      },
+      {
+       "detail": "E1 holds 9x",
+       "evidenceRef": "E1",
+       "kind": "number",
+       "status": "exact",
+       "text": "9.0x"
+      }
+     ],
+     "status": "verified"
+    }
+   },
+   {
+    "evidenceRefs": [
+     "E2"
+    ],
+    "statement": "Noticed, but not evidence of a fault on its own: 3\u00d7 WARN in notifications-api (9.0x above baseline).",
+    "verification": {
+     "checks": [
+      {
+       "detail": "E2 holds 3 \u00d7",
+       "evidenceRef": "E2",
+       "kind": "number",
+       "status": "exact",
+       "text": "3\u00d7"
+      },
+      {
+       "detail": "E2 holds 9x",
+       "evidenceRef": "E2",
+       "kind": "number",
+       "status": "exact",
+       "text": "9.0x"
+      }
+     ],
+     "status": "verified"
+    }
+   }
+  ],
+  "outcome": "HEALTHY",
+  "recommendedActions": [],
+  "rootCauseConfirmed": false,
+  "summary": "Rule-based analysis (no language model wrote these conclusions). No significant problem signal was found in the window examined: no high-volume error pattern, no sharp metric shift and no firing alert. The most frequent error pattern is \"provider rate limit at <n>% of quota\" in notifications-api, seen 14 times since 2026-06-01T10:10:00Z. Nothing links the observations to a recent change.",
+  "timeline": [
+   {
+    "description": "14\u00d7 WARN in notifications-api (9.0x above baseline)",
+    "evidenceRefs": [
+     "E1"
+    ],
+    "timestamp": "2026-06-01T10:10:00Z"
+   },
+   {
+    "description": "3\u00d7 WARN in notifications-api (9.0x above baseline)",
+    "evidenceRefs": [
+     "E2"
+    ],
+    "timestamp": "2026-06-01T10:20:00Z"
+   }
+  ],
+  "uncertainties": [
+   "This analysis used rule-based correlation without a language model; it cannot read code diffs or reason about mechanisms beyond keyword overlap.",
+   "No code changes were found for the services in scope (no repository linked, or none in the window).",
+   "No notable metric changes were found, or no metrics exist for the services in scope.",
+   "The knowledge base returned nothing relevant.",
+   "With no clear error signal, the question may concern a different time window or service than the ones examined."
+  ]
+ },
+ "healthy_misleading_signals": {
+  "analysisMode": "heuristic",
+  "assessment": {
+   "confidence": 0.82,
+   "missingTelemetry": [
+    "The trace store returned no traces for the window (none recorded, or no trace store is connected)."
+   ],
+   "outcome": "HEALTHY",
+   "rationale": "No material evidence of a fault in the window examined: metrics held steady against the preceding window; the logs contain no error pattern of material size; the service catalogue records it as healthy with no alert firing.",
+   "signals": [
+    {
+     "evidenceRefs": [
+      "E1"
+     ],
+     "kind": "logs",
+     "level": "weak",
+     "text": "8\u00d7 WARN in reports-api (new pattern)"
+    }
+   ],
+   "supportingRefs": [
+    "E6",
+    "E7"
+   ]
+  },
+  "assumptions": [],
+  "confidence": 0.0,
+  "facts": [
+   {
+    "evidenceRefs": [
+     "E1"
+    ],
+    "statement": "The most frequent error pattern is \"slow query took <n>ms: monthly_summary\" in reports-api, seen 8 times since 2026-06-01T11:51:00Z.",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T11:51Z appears in E1",
+       "evidenceRef": "E1",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T11:51:00Z"
+      },
+      {
+       "detail": "E1 holds 8 \u00d7",
+       "evidenceRef": "E1",
+       "kind": "number",
+       "status": "exact",
+       "text": "8 times"
+      }
+     ],
+     "status": "verified"
+    }
+   }
+  ],
+  "hypotheses": [],
+  "integrity": {
+   "checked": 12,
+   "flagged": [],
+   "supported": 12
+  },
+  "nextSteps": [
+   "Open the log explorer filtered to pattern f51 and follow a trace id across services.",
+   "Re-run the investigation with a wider time window or with the affected service named explicitly."
+  ],
+  "observations": [
+   {
+    "evidenceRefs": [
+     "E1"
+    ],
+    "statement": "Noticed, but not evidence of a fault on its own: 8\u00d7 WARN in reports-api (new pattern).",
+    "verification": {
+     "checks": [
+      {
+       "detail": "E1 holds 8 \u00d7",
+       "evidenceRef": "E1",
+       "kind": "number",
+       "status": "exact",
+       "text": "8\u00d7"
+      }
+     ],
+     "status": "verified"
+    }
+   },
+   {
+    "evidenceRefs": [
+     "E3"
+    ],
+    "statement": "Most recent deployment on record: Deployment of reports-api v6.3.0 (succeeded), at 2026-06-01T11:48:00Z.",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T11:48Z appears in E3",
+       "evidenceRef": "E3",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T11:48:00Z"
+      },
+      {
+       "detail": "appears in E3",
+       "evidenceRef": "E3",
+       "kind": "version",
+       "status": "exact",
+       "text": "v6.3.0"
+      }
+     ],
+     "status": "verified"
+    }
+   }
+  ],
+  "outcome": "HEALTHY",
+  "recommendedActions": [],
+  "rootCauseConfirmed": false,
+  "summary": "Rule-based analysis (no language model wrote these conclusions). No significant problem signal was found in the window examined: no high-volume error pattern, no sharp metric shift and no firing alert. The most frequent error pattern is \"slow query took <n>ms: monthly_summary\" in reports-api, seen 8 times since 2026-06-01T11:51:00Z. Nothing links the observations to a recent change.",
+  "timeline": [
+   {
+    "description": "Deployment of reports-api v6.3.0 (succeeded)",
+    "evidenceRefs": [
+     "E3"
+    ],
+    "timestamp": "2026-06-01T11:48:00Z"
+   },
+   {
+    "description": "feature flag on reports-api: Flag csv_export enabled",
+    "evidenceRefs": [
+     "E5"
+    ],
+    "timestamp": "2026-06-01T11:50:00Z"
+   },
+   {
+    "description": "8\u00d7 WARN in reports-api (new pattern)",
+    "evidenceRefs": [
+     "E1"
+    ],
+    "timestamp": "2026-06-01T11:51:00Z"
+   }
+  ],
+  "uncertainties": [
+   "This analysis used rule-based correlation without a language model; it cannot read code diffs or reason about mechanisms beyond keyword overlap.",
+   "No code changes were found for the services in scope (no repository linked, or none in the window).",
+   "No notable metric changes were found, or no metrics exist for the services in scope.",
+   "The knowledge base returned nothing relevant.",
+   "With no clear error signal, the question may concern a different time window or service than the ones examined."
+  ]
+ },
+ "healthy_no_signal": {
+  "analysisMode": "heuristic",
+  "assessment": {
+   "confidence": 0.82,
+   "missingTelemetry": [
+    "The trace store returned no traces for the window (none recorded, or no trace store is connected)."
+   ],
+   "outcome": "HEALTHY",
+   "rationale": "No material evidence of a fault in the window examined: metrics held steady against the preceding window; the logs contain no error pattern of material size; the service catalogue records it as healthy with no alert firing.",
+   "signals": [
+    {
+     "evidenceRefs": [
+      "E1"
+     ],
+     "kind": "logs",
+     "level": "weak",
+     "text": "6\u00d7 WARN in billing-service (new pattern)"
+    }
+   ],
+   "supportingRefs": [
+    "E4",
+    "E5"
+   ]
+  },
+  "assumptions": [],
+  "confidence": 0.0,
+  "facts": [
+   {
+    "evidenceRefs": [
+     "E1"
+    ],
+    "statement": "The most frequent error pattern is \"invoice email retry scheduled attempt=<n>\" in billing-service, seen 6 times since 2026-06-01T10:30:00Z.",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T10:30Z appears in E1",
+       "evidenceRef": "E1",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T10:30:00Z"
+      },
+      {
+       "detail": "E1 holds 6 \u00d7",
+       "evidenceRef": "E1",
+       "kind": "number",
+       "status": "exact",
+       "text": "6 times"
+      }
+     ],
+     "status": "verified"
+    }
+   }
+  ],
+  "hypotheses": [],
+  "integrity": {
+   "checked": 9,
+   "flagged": [],
+   "supported": 9
+  },
+  "nextSteps": [
+   "Open the log explorer filtered to pattern f3 and follow a trace id across services.",
+   "Re-run the investigation with a wider time window or with the affected service named explicitly."
+  ],
+  "observations": [
+   {
+    "evidenceRefs": [
+     "E1"
+    ],
+    "statement": "Noticed, but not evidence of a fault on its own: 6\u00d7 WARN in billing-service (new pattern).",
+    "verification": {
+     "checks": [
+      {
+       "detail": "E1 holds 6 \u00d7",
+       "evidenceRef": "E1",
+       "kind": "number",
+       "status": "exact",
+       "text": "6\u00d7"
+      }
+     ],
+     "status": "verified"
+    }
+   },
+   {
+    "evidenceRefs": [
+     "E3"
+    ],
+    "statement": "Most recent deployment on record: Deployment of billing-service v2.0.0 (succeeded), at 2026-05-25T12:00:00Z.",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-05-25T12:00Z appears in E3",
+       "evidenceRef": "E3",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-05-25T12:00:00Z"
+      },
+      {
+       "detail": "appears in E3",
+       "evidenceRef": "E3",
+       "kind": "version",
+       "status": "exact",
+       "text": "v2.0.0"
+      }
+     ],
+     "status": "verified"
+    }
+   }
+  ],
+  "outcome": "HEALTHY",
+  "recommendedActions": [],
+  "rootCauseConfirmed": false,
+  "summary": "Rule-based analysis (no language model wrote these conclusions). No significant problem signal was found in the window examined: no high-volume error pattern, no sharp metric shift and no firing alert. The most frequent error pattern is \"invoice email retry scheduled attempt=<n>\" in billing-service, seen 6 times since 2026-06-01T10:30:00Z. Nothing links the observations to a recent change.",
+  "timeline": [
+   {
+    "description": "6\u00d7 WARN in billing-service (new pattern)",
+    "evidenceRefs": [
+     "E1"
+    ],
+    "timestamp": "2026-06-01T10:30:00Z"
+   }
+  ],
+  "uncertainties": [
+   "This analysis used rule-based correlation without a language model; it cannot read code diffs or reason about mechanisms beyond keyword overlap.",
+   "No code changes were found for the services in scope (no repository linked, or none in the window).",
+   "No notable metric changes were found, or no metrics exist for the services in scope.",
+   "The knowledge base returned nothing relevant.",
+   "With no clear error signal, the question may concern a different time window or service than the ones examined."
+  ]
+ },
+ "healthy_old_deployment": {
+  "analysisMode": "heuristic",
+  "assessment": {
+   "confidence": 0.85,
+   "missingTelemetry": [
+    "The trace store returned no traces for the window (none recorded, or no trace store is connected)."
+   ],
+   "outcome": "HEALTHY",
+   "rationale": "No material evidence of a fault in the window examined: metrics held steady against the preceding window; no error pattern of any size appeared in the logs; the service catalogue records it as healthy with no alert firing.",
+   "signals": [],
+   "supportingRefs": [
+    "E3",
+    "E4"
+   ]
+  },
+  "assumptions": [],
+  "confidence": 0.0,
+  "facts": [],
+  "hypotheses": [],
+  "integrity": {
+   "checked": 2,
+   "flagged": [],
+   "supported": 2
+  },
+  "nextSteps": [
+   "Re-run the investigation with a wider time window or with the affected service named explicitly."
+  ],
+  "observations": [
+   {
+    "evidenceRefs": [
+     "E1"
+    ],
+    "statement": "Most recent deployment on record: Deployment of catalog-api v8.4.0 (succeeded), at 2026-05-20T12:00:00Z.",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-05-20T12:00Z appears in E1",
+       "evidenceRef": "E1",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-05-20T12:00:00Z"
+      },
+      {
+       "detail": "appears in E1",
+       "evidenceRef": "E1",
+       "kind": "version",
+       "status": "exact",
+       "text": "v8.4.0"
+      }
+     ],
+     "status": "verified"
+    }
+   }
+  ],
+  "outcome": "HEALTHY",
+  "recommendedActions": [],
+  "rootCauseConfirmed": false,
+  "summary": "Rule-based analysis (no language model wrote these conclusions). No significant problem signal was found in the window examined: no high-volume error pattern, no sharp metric shift and no firing alert. Nothing links the observations to a recent change.",
+  "timeline": [],
+  "uncertainties": [
+   "This analysis used rule-based correlation without a language model; it cannot read code diffs or reason about mechanisms beyond keyword overlap.",
+   "No error or warning logs were found in the window, so the time the problem started is uncertain.",
+   "No code changes were found for the services in scope (no repository linked, or none in the window).",
+   "No notable metric changes were found, or no metrics exist for the services in scope.",
+   "The knowledge base returned nothing relevant.",
+   "With no clear error signal, the question may concern a different time window or service than the ones examined."
+  ]
+ },
+ "red_herring_closer_in_time": {
+  "analysisMode": "heuristic",
+  "assessment": {
+   "confidence": 0.89,
+   "missingTelemetry": [
+    "The trace store returned no traces for the window (none recorded, or no trace store is connected)."
+   ],
+   "outcome": "INCIDENT",
+   "rationale": "A failure is evident (510\u00d7 ERROR in payments-api (new pattern); 380\u00d7 ERROR in api-gateway (new pattern); Error rate for api-gateway up 1400%) and at least one explanation is supported by evidence.",
+   "signals": [
+    {
+     "evidenceRefs": [
+      "E1"
+     ],
+     "kind": "logs",
+     "level": "strong",
+     "text": "510\u00d7 ERROR in payments-api (new pattern)"
+    },
+    {
+     "evidenceRefs": [
+      "E2"
+     ],
+     "kind": "logs",
+     "level": "strong",
+     "text": "380\u00d7 ERROR in api-gateway (new pattern)"
+    },
+    {
+     "evidenceRefs": [
+      "E10"
+     ],
+     "kind": "metric",
+     "level": "strong",
+     "text": "Error rate for api-gateway up 1400%"
+    },
+    {
+     "evidenceRefs": [
+      "E11"
+     ],
+     "kind": "metric",
+     "level": "strong",
+     "text": "Error rate for payments-api up 7233%"
+    },
+    {
+     "evidenceRefs": [
+      "E12"
+     ],
+     "kind": "health",
+     "level": "moderate",
+     "text": "api-gateway is recorded as DEGRADED"
+    },
+    {
+     "evidenceRefs": [
+      "E13"
+     ],
+     "kind": "health",
+     "level": "moderate",
+     "text": "payments-api is recorded as DEGRADED"
+    }
+   ],
+   "supportingRefs": [
+    "E1",
+    "E2",
+    "E10",
+    "E11"
+   ]
+  },
+  "assumptions": [
+   "Temporal proximity is treated as a signal of causation; it has not been verified."
+  ],
+  "confidence": 0.64,
+  "facts": [
+   {
+    "evidenceRefs": [
+     "E1"
+    ],
+    "statement": "The most frequent error pattern is \"tls handshake failed: certificate signed by unknown authority\" in payments-api, seen 510 times since 2026-06-01T11:20:00Z.",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T11:20Z appears in E1",
+       "evidenceRef": "E1",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T11:20:00Z"
+      },
+      {
+       "detail": "E1 holds 510 \u00d7",
+       "evidenceRef": "E1",
+       "kind": "number",
+       "status": "exact",
+       "text": "510 times"
+      }
+     ],
+     "status": "verified"
+    }
+   },
+   {
+    "evidenceRefs": [
+     "E1"
+    ],
+    "statement": "The earliest anomalous error pattern first appeared at 2026-06-01T11:20:00Z.",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T11:20Z appears in E1",
+       "evidenceRef": "E1",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T11:20:00Z"
+      }
+     ],
+     "status": "verified"
+    }
+   },
+   {
+    "evidenceRefs": [
+     "E11"
+    ],
+    "statement": "Error rate for payments-api up 7233%: error_rate averaged 22% (max 28.6%) between 2026-06-01T10:00:00Z and 2026-06-01T12:00:00Z, versus 0.3% in the preceding window",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T10:00Z appears in E11",
+       "evidenceRef": "E11",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T10:00:00Z"
+      },
+      {
+       "detail": "2026-06-01T12:00Z appears in E11",
+       "evidenceRef": "E11",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T12:00:00Z"
+      },
+      {
+       "detail": "E11 holds 7233%",
+       "evidenceRef": "E11",
+       "kind": "number",
+       "status": "exact",
+       "text": "7233%"
+      },
+      {
+       "detail": "E11 holds 22%",
+       "evidenceRef": "E11",
+       "kind": "number",
+       "status": "exact",
+       "text": "22%"
+      },
+      {
+       "detail": "E11 holds 28.6%",
+       "evidenceRef": "E11",
+       "kind": "number",
+       "status": "exact",
+       "text": "28.6%"
+      },
+      {
+       "detail": "E11 holds 0.3%",
+       "evidenceRef": "E11",
+       "kind": "number",
+       "status": "exact",
+       "text": "0.3%"
+      }
+     ],
+     "status": "verified"
+    }
+   },
+   {
+    "evidenceRefs": [
+     "E10"
+    ],
+    "statement": "Error rate for api-gateway up 1400%: error_rate averaged 6% (max 7.8%) between 2026-06-01T10:00:00Z and 2026-06-01T12:00:00Z, versus 0.4% in the preceding window",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T10:00Z appears in E10",
+       "evidenceRef": "E10",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T10:00:00Z"
+      },
+      {
+       "detail": "2026-06-01T12:00Z appears in E10",
+       "evidenceRef": "E10",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T12:00:00Z"
+      },
+      {
+       "detail": "E10 holds 1400%",
+       "evidenceRef": "E10",
+       "kind": "number",
+       "status": "exact",
+       "text": "1400%"
+      },
+      {
+       "detail": "E10 holds 6%",
+       "evidenceRef": "E10",
+       "kind": "number",
+       "status": "exact",
+       "text": "6%"
+      },
+      {
+       "detail": "E10 holds 7.8%",
+       "evidenceRef": "E10",
+       "kind": "number",
+       "status": "exact",
+       "text": "7.8%"
+      },
+      {
+       "detail": "E10 holds 0.4%",
+       "evidenceRef": "E10",
+       "kind": "number",
+       "status": "exact",
+       "text": "0.4%"
+      }
+     ],
+     "status": "verified"
+    }
+   }
+  ],
+  "hypotheses": [
+   {
+    "assumptions": [
+     "Temporal proximity is treated as a signal of causation; it has not been verified."
+    ],
+    "confidence": 0.64,
+    "contradictingEvidenceRefs": [],
+    "contradictions": [],
+    "description": "The error signal began about 12 minutes after this deployment. The shipped change touches certificate, matching the failure mode in the logs.",
+    "evidenceRefs": [
+     "E4",
+     "E1",
+     "E6",
+     "E7",
+     "E11"
+    ],
+    "facts": [
+     "Deployment of payments-api v3.1.0 (succeeded) happened at 2026-06-01T11:08:00Z, 12 minutes before the first anomalous error (E4).",
+     "The dominant error pattern is in the same service as the change (E1).",
+     "The code shipped by this change mentions certificate, which also appear in the error messages (E6, E7).",
+     "Metrics for the service shifted sharply in the window: Error rate for payments-api up 7233% (E11)."
+    ],
+    "gaps": [
+     "Confirm by comparing error rate per version, or by rolling back in a controlled way.",
+     "Review the diff of the linked change for the suspected mechanism."
+    ],
+    "status": "likely",
+    "title": "Regression introduced by Deployment of payments-api v3.1.0 (succeeded)"
+   },
+   {
+    "assumptions": [
+     "Temporal proximity is treated as a signal of causation; it has not been verified."
+    ],
+    "confidence": 0.64,
+    "contradictingEvidenceRefs": [],
+    "contradictions": [],
+    "description": "The error signal began about 4 minutes after this change. The shipped change touches certificate, matching the failure mode in the logs.",
+    "evidenceRefs": [
+     "E9",
+     "E1",
+     "E6",
+     "E7",
+     "E11"
+    ],
+    "facts": [
+     "feature flag on payments-api: Flag new_receipt_email enabled happened at 2026-06-01T11:16:00Z, 4 minutes before the first anomalous error (E9).",
+     "The dominant error pattern is in the same service as the change (E1).",
+     "The code shipped by this change mentions certificate, which also appear in the error messages (E6, E7).",
+     "Metrics for the service shifted sharply in the window: Error rate for payments-api up 7233% (E11)."
+    ],
+    "gaps": [
+     "Confirm by comparing error rate per version, or by rolling back in a controlled way.",
+     "Review the diff of the linked change for the suspected mechanism."
+    ],
+    "status": "likely",
+    "title": "Regression introduced by feature flag on payments-api: Flag new_receipt_email enabled"
+   }
+  ],
+  "integrity": {
+   "checked": 36,
+   "flagged": [],
+   "supported": 36
+  },
+  "nextSteps": [
+   "Confirm by comparing error rate per version, or by rolling back in a controlled way.",
+   "Review the diff of the linked change for the suspected mechanism.",
+   "Open the log explorer filtered to pattern f4 and follow a trace id across services."
+  ],
+  "observations": [
+   {
+    "evidenceRefs": [
+     "E4"
+    ],
+    "statement": "Most recent deployment on record: Deployment of payments-api v3.1.0 (succeeded), at 2026-06-01T11:08:00Z.",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T11:08Z appears in E4",
+       "evidenceRef": "E4",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T11:08:00Z"
+      },
+      {
+       "detail": "appears in E4",
+       "evidenceRef": "E4",
+       "kind": "version",
+       "status": "exact",
+       "text": "v3.1.0"
+      }
+     ],
+     "status": "verified"
+    }
+   }
+  ],
+  "outcome": "INCIDENT",
+  "recommendedActions": [
+   {
+    "description": "Roll back payments-api from v3.1.0 to the previous successful version v3.0.4, then watch error rate and latency for 15 minutes.",
+    "effect": "state_changing",
+    "effectReasons": [
+     "rollback_deployment changes production by definition"
+    ],
+    "evidenceRefs": [
+     "E4",
+     "E5",
+     "E1"
+    ],
+    "parameters": {
+     "deploymentId": "d7",
+     "fromVersion": "v3.1.0",
+     "toVersion": "v3.0.4"
+    },
+    "rationale": "Errors began shortly after v3.1.0 was deployed; v3.0.4 was running before the errors started. This is a hypothesis based on timing and content overlap, not a confirmed cause.",
+    "risk": "MEDIUM",
+    "serviceSlug": "payments-api",
+    "title": "Roll back payments-api to v3.0.4",
+    "type": "rollback_deployment"
+   }
+  ],
+  "rootCauseConfirmed": false,
+  "summary": "Rule-based analysis (no language model wrote these conclusions). The most frequent error pattern is \"tls handshake failed: certificate signed by unknown authority\" in payments-api, seen 510 times since 2026-06-01T11:20:00Z. The leading hypothesis is: Regression introduced by Deployment of payments-api v3.1.0 (succeeded) (64% confidence, likely). The error signal began about 12 minutes after this deployment. The shipped change touches certificate, matching the failure mode in the logs. 1 alternative hypothesis was considered. The cause has not been verified.",
+  "timeline": [
+   {
+    "description": "PR #301 in acme/payments-api: Rotate mTLS certificate bundle",
+    "evidenceRefs": [
+     "E6"
+    ],
+    "timestamp": "2026-06-01T10:50:00Z"
+   },
+   {
+    "description": "Deployment of payments-api v3.1.0 (succeeded)",
+    "evidenceRefs": [
+     "E4"
+    ],
+    "timestamp": "2026-06-01T11:08:00Z"
+   },
+   {
+    "description": "feature flag on payments-api: Flag new_receipt_email enabled",
+    "evidenceRefs": [
+     "E9"
+    ],
+    "timestamp": "2026-06-01T11:16:00Z"
+   },
+   {
+    "description": "510\u00d7 ERROR in payments-api (new pattern)",
+    "evidenceRefs": [
+     "E1"
+    ],
+    "timestamp": "2026-06-01T11:20:00Z"
+   },
+   {
+    "description": "380\u00d7 ERROR in api-gateway (new pattern)",
+    "evidenceRefs": [
+     "E2"
+    ],
+    "timestamp": "2026-06-01T11:21:00Z"
+   }
+  ],
+  "uncertainties": [
+   "This analysis used rule-based correlation without a language model; it cannot read code diffs or reason about mechanisms beyond keyword overlap.",
+   "The knowledge base returned nothing relevant."
+  ]
+ },
+ "tool_failures_degrade_gracefully": {
+  "analysisMode": "heuristic",
+  "assessment": {
+   "confidence": 0.89,
+   "missingTelemetry": [
+    "A data source could not be queried: list_deployments: list_deployments failed (503): backend unavailable",
+    "A data source could not be queried: get_code_changes: get_code_changes failed (503): backend unavailable",
+    "The trace store returned no traces for the window (none recorded, or no trace store is connected)."
+   ],
+   "outcome": "DEGRADED",
+   "rationale": "A failure is evident (420\u00d7 ERROR in orders-api (new pattern); Error rate for orders-api up 2900%), but the available evidence does not establish what caused it.",
+   "signals": [
+    {
+     "evidenceRefs": [
+      "E1"
+     ],
+     "kind": "logs",
+     "level": "strong",
+     "text": "420\u00d7 ERROR in orders-api (new pattern)"
+    },
+    {
+     "evidenceRefs": [
+      "E3"
+     ],
+     "kind": "metric",
+     "level": "strong",
+     "text": "Error rate for orders-api up 2900%"
+    },
+    {
+     "evidenceRefs": [
+      "E4"
+     ],
+     "kind": "health",
+     "level": "moderate",
+     "text": "orders-api is recorded as DEGRADED"
+    }
+   ],
+   "supportingRefs": [
+    "E1",
+    "E3"
+   ]
+  },
+  "assumptions": [],
+  "confidence": 0.0,
+  "facts": [
+   {
+    "evidenceRefs": [
+     "E1"
+    ],
+    "statement": "The most frequent error pattern is \"failed to deserialize cache entry for key order:<n>: unexpected schema version\" in orders-api, seen 420 times since 2026-06-01T11:30:00Z.",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T11:30Z appears in E1",
+       "evidenceRef": "E1",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T11:30:00Z"
+      },
+      {
+       "detail": "E1 holds 420 \u00d7",
+       "evidenceRef": "E1",
+       "kind": "number",
+       "status": "exact",
+       "text": "420 times"
+      }
+     ],
+     "status": "verified"
+    }
+   },
+   {
+    "evidenceRefs": [
+     "E1"
+    ],
+    "statement": "The earliest anomalous error pattern first appeared at 2026-06-01T11:30:00Z.",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T11:30Z appears in E1",
+       "evidenceRef": "E1",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T11:30:00Z"
+      }
+     ],
+     "status": "verified"
+    }
+   },
+   {
+    "evidenceRefs": [
+     "E3"
+    ],
+    "statement": "Error rate for orders-api up 2900%: error_rate averaged 12% (max 15.6%) between 2026-06-01T10:00:00Z and 2026-06-01T12:00:00Z, versus 0.4% in the preceding window",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T10:00Z appears in E3",
+       "evidenceRef": "E3",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T10:00:00Z"
+      },
+      {
+       "detail": "2026-06-01T12:00Z appears in E3",
+       "evidenceRef": "E3",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T12:00:00Z"
+      },
+      {
+       "detail": "E3 holds 2900%",
+       "evidenceRef": "E3",
+       "kind": "number",
+       "status": "exact",
+       "text": "2900%"
+      },
+      {
+       "detail": "E3 holds 12%",
+       "evidenceRef": "E3",
+       "kind": "number",
+       "status": "exact",
+       "text": "12%"
+      },
+      {
+       "detail": "E3 holds 15.6%",
+       "evidenceRef": "E3",
+       "kind": "number",
+       "status": "exact",
+       "text": "15.6%"
+      },
+      {
+       "detail": "E3 holds 0.4%",
+       "evidenceRef": "E3",
+       "kind": "number",
+       "status": "exact",
+       "text": "0.4%"
+      }
+     ],
+     "status": "verified"
+    }
+   }
+  ],
+  "hypotheses": [],
+  "integrity": {
+   "checked": 11,
+   "flagged": [],
+   "supported": 11
+  },
+  "nextSteps": [
+   "Open the log explorer filtered to pattern f1 and follow a trace id across services.",
+   "Re-run the investigation with a wider time window or with the affected service named explicitly."
+  ],
+  "observations": [],
+  "outcome": "DEGRADED",
+  "recommendedActions": [],
+  "rootCauseConfirmed": false,
+  "summary": "Rule-based analysis (no language model wrote these conclusions). The collected evidence does not point to a specific cause: error patterns were found but no deployment, configuration change, dependency problem or similar past incident could be linked to them.",
+  "timeline": [
+   {
+    "description": "420\u00d7 ERROR in orders-api (new pattern)",
+    "evidenceRefs": [
+     "E1"
+    ],
+    "timestamp": "2026-06-01T11:30:00Z"
+   }
+  ],
+  "uncertainties": [
+   "This analysis used rule-based correlation without a language model; it cannot read code diffs or reason about mechanisms beyond keyword overlap.",
+   "No code changes were found for the services in scope (no repository linked, or none in the window).",
+   "The knowledge base returned nothing relevant.",
+   "A data source could not be queried: list_deployments: list_deployments failed (503): backend unavailable",
+   "A data source could not be queried: get_code_changes: get_code_changes failed (503): backend unavailable",
+   "No hypothesis met the minimum evidence bar; widen the time window or name the affected service."
+  ]
+ },
+ "upstream_dependency_down": {
+  "analysisMode": "heuristic",
+  "assessment": {
+   "confidence": 0.9,
+   "missingTelemetry": [
+    "The trace store returned no traces for the window (none recorded, or no trace store is connected)."
+   ],
+   "outcome": "INCIDENT",
+   "rationale": "A failure is evident (300\u00d7 ERROR in web-app (new pattern); Error rate for web-app up 1700%; Upstream dependency auth-service is DOWN) and at least one explanation is supported by evidence.",
+   "signals": [
+    {
+     "evidenceRefs": [
+      "E1"
+     ],
+     "kind": "logs",
+     "level": "strong",
+     "text": "300\u00d7 ERROR in web-app (new pattern)"
+    },
+    {
+     "evidenceRefs": [
+      "E3"
+     ],
+     "kind": "metric",
+     "level": "strong",
+     "text": "Error rate for web-app up 1700%"
+    },
+    {
+     "evidenceRefs": [
+      "E5"
+     ],
+     "kind": "dependency",
+     "level": "strong",
+     "text": "Upstream dependency auth-service is DOWN"
+    },
+    {
+     "evidenceRefs": [
+      "E4"
+     ],
+     "kind": "health",
+     "level": "moderate",
+     "text": "web-app is recorded as DEGRADED"
+    }
+   ],
+   "supportingRefs": [
+    "E1",
+    "E3",
+    "E5"
+   ]
+  },
+  "assumptions": [
+   "The dependency's degradation is assumed to be a cause rather than a consequence of the same incident."
+  ],
+  "confidence": 0.45,
+  "facts": [
+   {
+    "evidenceRefs": [
+     "E1"
+    ],
+    "statement": "The most frequent error pattern is \"upstream auth-service request failed: connection refused\" in web-app, seen 300 times since 2026-06-01T11:35:00Z.",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T11:35Z appears in E1",
+       "evidenceRef": "E1",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T11:35:00Z"
+      },
+      {
+       "detail": "E1 holds 300 \u00d7",
+       "evidenceRef": "E1",
+       "kind": "number",
+       "status": "exact",
+       "text": "300 times"
+      }
+     ],
+     "status": "verified"
+    }
+   },
+   {
+    "evidenceRefs": [
+     "E1"
+    ],
+    "statement": "The earliest anomalous error pattern first appeared at 2026-06-01T11:35:00Z.",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T11:35Z appears in E1",
+       "evidenceRef": "E1",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T11:35:00Z"
+      }
+     ],
+     "status": "verified"
+    }
+   },
+   {
+    "evidenceRefs": [
+     "E3"
+    ],
+    "statement": "Error rate for web-app up 1700%: error_rate averaged 9% (max 11.7%) between 2026-06-01T10:00:00Z and 2026-06-01T12:00:00Z, versus 0.5% in the preceding window",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T10:00Z appears in E3",
+       "evidenceRef": "E3",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T10:00:00Z"
+      },
+      {
+       "detail": "2026-06-01T12:00Z appears in E3",
+       "evidenceRef": "E3",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T12:00:00Z"
+      },
+      {
+       "detail": "E3 holds 1700%",
+       "evidenceRef": "E3",
+       "kind": "number",
+       "status": "exact",
+       "text": "1700%"
+      },
+      {
+       "detail": "E3 holds 9%",
+       "evidenceRef": "E3",
+       "kind": "number",
+       "status": "exact",
+       "text": "9%"
+      },
+      {
+       "detail": "E3 holds 11.7%",
+       "evidenceRef": "E3",
+       "kind": "number",
+       "status": "exact",
+       "text": "11.7%"
+      },
+      {
+       "detail": "E3 holds 0.5%",
+       "evidenceRef": "E3",
+       "kind": "number",
+       "status": "exact",
+       "text": "0.5%"
+      }
+     ],
+     "status": "verified"
+    }
+   }
+  ],
+  "hypotheses": [
+   {
+    "assumptions": [
+     "The dependency's degradation is assumed to be a cause rather than a consequence of the same incident."
+    ],
+    "confidence": 0.45,
+    "contradictingEvidenceRefs": [],
+    "contradictions": [],
+    "description": "web-app depends on Auth Service (sync), which is DOWN: Critical alert firing: Auth error rate Failures there could surface as errors in the services that call it. Nothing it depends on is recorded as unhealthy, so the chain of failures appears to start here.",
+    "evidenceRefs": [
+     "E5"
+    ],
+    "facts": [
+     "Upstream dependency auth-service is DOWN (E5)."
+    ],
+    "gaps": [
+     "Check whether auth-service errors started before or after the errors in its callers.",
+     "Check auth-service itself: is it running, reachable and within its limits?"
+    ],
+    "status": "possible",
+    "title": "Failure of upstream dependency auth-service"
+   }
+  ],
+  "integrity": {
+   "checked": 13,
+   "flagged": [],
+   "supported": 13
+  },
+  "nextSteps": [
+   "Check whether auth-service errors started before or after the errors in its callers.",
+   "Check auth-service itself: is it running, reachable and within its limits?",
+   "Open the log explorer filtered to pattern f2 and follow a trace id across services."
+  ],
+  "observations": [],
+  "outcome": "INCIDENT",
+  "recommendedActions": [],
+  "rootCauseConfirmed": false,
+  "summary": "Rule-based analysis (no language model wrote these conclusions). The most frequent error pattern is \"upstream auth-service request failed: connection refused\" in web-app, seen 300 times since 2026-06-01T11:35:00Z. The leading hypothesis is: Failure of upstream dependency auth-service (45% confidence, possible). web-app depends on Auth Service (sync), which is DOWN: Critical alert firing: Auth error rate Failures there could surface as errors in the services that call it. Nothing it depends on is recorded as unhealthy, so the chain of failures appears to start here. No alternative hypotheses met the evidence bar. The cause has not been verified.",
+  "timeline": [
+   {
+    "description": "300\u00d7 ERROR in web-app (new pattern)",
+    "evidenceRefs": [
+     "E1"
+    ],
+    "timestamp": "2026-06-01T11:35:00Z"
+   }
+  ],
+  "uncertainties": [
+   "This analysis used rule-based correlation without a language model; it cannot read code diffs or reason about mechanisms beyond keyword overlap.",
+   "No code changes were found for the services in scope (no repository linked, or none in the window).",
+   "The knowledge base returned nothing relevant."
+  ]
+ },
+ "x_dependency_chain_with_traces": {
+  "analysisMode": "heuristic",
+  "assessment": {
+   "confidence": 0.9,
+   "missingTelemetry": [],
+   "outcome": "INCIDENT",
+   "rationale": "A failure is evident (240\u00d7 ERROR in shop-gateway (new pattern); Error rate for shop-gateway up from zero; Upstream dependency shop-redis is DOWN) and at least one explanation is supported by evidence.",
+   "signals": [
+    {
+     "evidenceRefs": [
+      "E1"
+     ],
+     "kind": "logs",
+     "level": "strong",
+     "text": "240\u00d7 ERROR in shop-gateway (new pattern)"
+    },
+    {
+     "evidenceRefs": [
+      "E3"
+     ],
+     "kind": "metric",
+     "level": "strong",
+     "text": "Error rate for shop-gateway up from zero"
+    },
+    {
+     "evidenceRefs": [
+      "E9"
+     ],
+     "kind": "dependency",
+     "level": "strong",
+     "text": "Upstream dependency shop-redis is DOWN"
+    },
+    {
+     "evidenceRefs": [
+      "E11",
+      "E12",
+      "E13",
+      "E14"
+     ],
+     "kind": "traces",
+     "level": "strong",
+     "text": "4 sampled trace(s) contain failed spans"
+    },
+    {
+     "evidenceRefs": [
+      "E5"
+     ],
+     "kind": "dependency",
+     "level": "moderate",
+     "text": "Upstream dependency shop-orders is DEGRADED"
+    },
+    {
+     "evidenceRefs": [
+      "E7"
+     ],
+     "kind": "dependency",
+     "level": "moderate",
+     "text": "Upstream dependency shop-payments is DEGRADED"
+    },
+    {
+     "evidenceRefs": [
+      "E4"
+     ],
+     "kind": "health",
+     "level": "moderate",
+     "text": "shop-gateway is recorded as DEGRADED"
+    }
+   ],
+   "supportingRefs": [
+    "E1",
+    "E3",
+    "E9",
+    "E11",
+    "E12",
+    "E13",
+    "E14"
+   ]
+  },
+  "assumptions": [
+   "The dependency's degradation is assumed to be a cause rather than a consequence of the same incident.",
+   "The sampled traces are assumed to be representative of the failing requests."
+  ],
+  "confidence": 0.57,
+  "facts": [
+   {
+    "evidenceRefs": [
+     "E1"
+    ],
+    "statement": "The most frequent error pattern is \"upstream shop-orders returned 502\" in shop-gateway, seen 240 times since 2026-06-01T11:54:00Z.",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T11:54Z appears in E1",
+       "evidenceRef": "E1",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T11:54:00Z"
+      },
+      {
+       "detail": "E1 holds 502",
+       "evidenceRef": "E1",
+       "kind": "number",
+       "status": "exact",
+       "text": "502"
+      },
+      {
+       "detail": "E1 holds 240 \u00d7",
+       "evidenceRef": "E1",
+       "kind": "number",
+       "status": "exact",
+       "text": "240 times"
+      }
+     ],
+     "status": "verified"
+    }
+   },
+   {
+    "evidenceRefs": [
+     "E1"
+    ],
+    "statement": "The earliest anomalous error pattern first appeared at 2026-06-01T11:54:00Z.",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T11:54Z appears in E1",
+       "evidenceRef": "E1",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T11:54:00Z"
+      }
+     ],
+     "status": "verified"
+    }
+   },
+   {
+    "evidenceRefs": [
+     "E3"
+    ],
+    "statement": "Error rate for shop-gateway up from zero: error_rate averaged 28% (max 36.4%) between 2026-06-01T10:00:00Z and 2026-06-01T12:00:00Z, versus 0% in the preceding window",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T10:00Z appears in E3",
+       "evidenceRef": "E3",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T10:00:00Z"
+      },
+      {
+       "detail": "2026-06-01T12:00Z appears in E3",
+       "evidenceRef": "E3",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T12:00:00Z"
+      },
+      {
+       "detail": "E3 holds 28%",
+       "evidenceRef": "E3",
+       "kind": "number",
+       "status": "exact",
+       "text": "28%"
+      },
+      {
+       "detail": "E3 holds 36.4%",
+       "evidenceRef": "E3",
+       "kind": "number",
+       "status": "exact",
+       "text": "36.4%"
+      },
+      {
+       "detail": "E3 holds 0%",
+       "evidenceRef": "E3",
+       "kind": "number",
+       "status": "exact",
+       "text": "0%"
+      }
+     ],
+     "status": "verified"
+    }
+   }
+  ],
+  "hypotheses": [
+   {
+    "assumptions": [
+     "The dependency's degradation is assumed to be a cause rather than a consequence of the same incident."
+    ],
+    "confidence": 0.57,
+    "contradictingEvidenceRefs": [],
+    "contradictions": [],
+    "description": "shop-payments depends on shop-redis (sync), which is DOWN: alert firing on shop-redis Failures there could surface as errors in the services that call it. Nothing it depends on is recorded as unhealthy, so the chain of failures appears to start here. The path from the service in question is shop-gateway \u2192 shop-orders \u2192 shop-payments \u2192 shop-redis. Sampled traces agree: requests fail in shop-payments, which calls shop-redis directly.",
+    "evidenceRefs": [
+     "E9",
+     "E11",
+     "E12",
+     "E13"
+    ],
+    "facts": [
+     "Upstream dependency shop-redis is DOWN (E9).",
+     "In 4 sampled traces the failure starts in shop-payments, which depends directly on shop-redis (E11, E12, E13)."
+    ],
+    "gaps": [
+     "Check whether shop-redis errors started before or after the errors in its callers.",
+     "Check shop-redis itself: is it running, reachable and within its limits?"
+    ],
+    "status": "likely",
+    "title": "Failure of upstream dependency shop-redis"
+   },
+   {
+    "assumptions": [
+     "The sampled traces are assumed to be representative of the failing requests."
+    ],
+    "confidence": 0.5,
+    "contradictingEvidenceRefs": [],
+    "contradictions": [],
+    "description": "In 4 sampled traces the failure starts in shop-payments: \"idempotency store unavailable, refusing to charge\". The services above it in the trace only pass the error on. This locates the failure; the reason for it is not in the traces.",
+    "evidenceRefs": [
+     "E11",
+     "E12",
+     "E13",
+     "E14",
+     "E3"
+    ],
+    "facts": [
+     "Failed trace through shop-gateway: 20ms: POST /checkout took 20ms across 6 spans in shop-gateway, shop-orders, shop-payments. Spans with errors: shop-gateway POST /checkout (HTTP 502); shop-payments request handler - /pay (idempotency store unavailable, refusing to charge). (E11)",
+     "Failed trace through shop-gateway: 20ms: POST /checkout took 20ms across 6 spans in shop-gateway, shop-orders, shop-payments. Spans with errors: shop-gateway POST /checkout (HTTP 502); shop-payments request handler - /pay (idempotency store unavailable, refusing to charge). (E12)"
+    ],
+    "gaps": [
+     "Check shop-payments directly: is it reachable and healthy?",
+     "Read the error logs of the same trace ids."
+    ],
+    "status": "possible",
+    "title": "Requests are failing in shop-payments"
+   },
+   {
+    "assumptions": [
+     "The dependency's degradation is assumed to be a cause rather than a consequence of the same incident."
+    ],
+    "confidence": 0.2,
+    "contradictingEvidenceRefs": [],
+    "contradictions": [],
+    "description": "shop-gateway depends on shop-orders (sync), which is DEGRADED: alert firing on shop-orders Failures there could surface as errors in the services that call it. It depends in turn on shop-payments, which is also unhealthy, so its trouble may be a consequence rather than the cause.",
+    "evidenceRefs": [
+     "E5"
+    ],
+    "facts": [
+     "Upstream dependency shop-orders is DEGRADED (E5)."
+    ],
+    "gaps": [
+     "Check whether shop-orders errors started before or after the errors in its callers.",
+     "Check shop-orders itself: is it running, reachable and within its limits?"
+    ],
+    "status": "unlikely",
+    "title": "Degradation of upstream dependency shop-orders"
+   },
+   {
+    "assumptions": [
+     "The dependency's degradation is assumed to be a cause rather than a consequence of the same incident."
+    ],
+    "confidence": 0.2,
+    "contradictingEvidenceRefs": [],
+    "contradictions": [],
+    "description": "shop-orders depends on shop-payments (sync), which is DEGRADED: alert firing on shop-payments Failures there could surface as errors in the services that call it. It depends in turn on shop-redis, which is also unhealthy, so its trouble may be a consequence rather than the cause. The path from the service in question is shop-gateway \u2192 shop-orders \u2192 shop-payments.",
+    "evidenceRefs": [
+     "E7"
+    ],
+    "facts": [
+     "Upstream dependency shop-payments is DEGRADED (E7)."
+    ],
+    "gaps": [
+     "Check whether shop-payments errors started before or after the errors in its callers.",
+     "Check shop-payments itself: is it running, reachable and within its limits?"
+    ],
+    "status": "unlikely",
+    "title": "Degradation of upstream dependency shop-payments"
+   }
+  ],
+  "integrity": {
+   "checked": 14,
+   "flagged": [],
+   "supported": 14
+  },
+  "nextSteps": [
+   "Check whether shop-redis errors started before or after the errors in its callers.",
+   "Check shop-redis itself: is it running, reachable and within its limits?",
+   "Open the log explorer filtered to pattern g1 and follow a trace id across services."
+  ],
+  "observations": [],
+  "outcome": "INCIDENT",
+  "recommendedActions": [],
+  "rootCauseConfirmed": false,
+  "summary": "Rule-based analysis (no language model wrote these conclusions). The most frequent error pattern is \"upstream shop-orders returned 502\" in shop-gateway, seen 240 times since 2026-06-01T11:54:00Z. The leading hypothesis is: Failure of upstream dependency shop-redis (57% confidence, likely). shop-payments depends on shop-redis (sync), which is DOWN: alert firing on shop-redis Failures there could surface as errors in the services that call it. Nothing it depends on is recorded as unhealthy, so the chain of failures appears to start here. The path from the service in question is shop-gateway \u2192 shop-orders \u2192 shop-payments \u2192 shop-redis. Sampled traces agree: requests fail in shop-payments, which calls shop-redis directly. 3 alternative hypotheses were considered. The cause has not been verified.",
+  "timeline": [
+   {
+    "description": "240\u00d7 ERROR in shop-gateway (new pattern)",
+    "evidenceRefs": [
+     "E1"
+    ],
+    "timestamp": "2026-06-01T11:54:00Z"
+   }
+  ],
+  "uncertainties": [
+   "This analysis used rule-based correlation without a language model; it cannot read code diffs or reason about mechanisms beyond keyword overlap.",
+   "No code changes were found for the services in scope (no repository linked, or none in the window).",
+   "The knowledge base returned nothing relevant."
+  ]
+ },
+ "x_no_telemetry": {
+  "analysisMode": "heuristic",
+  "assessment": {
+   "confidence": 0.0,
+   "missingTelemetry": [
+    "No log lines of any level were received from the services in question in the window.",
+    "No metric samples exist in the window for: ledger-api.",
+    "The trace store returned no traces for the window (none recorded, or no trace store is connected)."
+   ],
+   "outcome": "UNDETERMINED",
+   "rationale": "No telemetry could be examined for the services in question: they sent no metric samples and no log lines in the window, so neither a fault nor good health can be concluded.",
+   "signals": [],
+   "supportingRefs": []
+  },
+  "assumptions": [],
+  "confidence": 0.0,
+  "facts": [],
+  "hypotheses": [],
+  "integrity": {
+   "checked": 0,
+   "flagged": [],
+   "supported": 0
+  },
+  "nextSteps": [
+   "Re-run the investigation with a wider time window or with the affected service named explicitly."
+  ],
+  "observations": [],
+  "outcome": "UNDETERMINED",
+  "recommendedActions": [],
+  "rootCauseConfirmed": false,
+  "summary": "Rule-based analysis (no language model wrote these conclusions). No significant problem signal was found in the window examined: no high-volume error pattern, no sharp metric shift and no firing alert. Nothing links the observations to a recent change.",
+  "timeline": [],
+  "uncertainties": [
+   "This analysis used rule-based correlation without a language model; it cannot read code diffs or reason about mechanisms beyond keyword overlap.",
+   "No error or warning logs were found in the window, so the time the problem started is uncertain.",
+   "No code changes were found for the services in scope (no repository linked, or none in the window).",
+   "No notable metric changes were found, or no metrics exist for the services in scope.",
+   "The knowledge base returned nothing relevant.",
+   "With no clear error signal, the question may concern a different time window or service than the ones examined."
+  ]
+ },
+ "x_recurrence_of_past_incident": {
+  "analysisMode": "heuristic",
+  "assessment": {
+   "confidence": 0.89,
+   "missingTelemetry": [
+    "The trace store returned no traces for the window (none recorded, or no trace store is connected)."
+   ],
+   "outcome": "INCIDENT",
+   "rationale": "A failure is evident (420\u00d7 ERROR in orders-api (new pattern); Error rate for orders-api up 2900%) and at least one explanation is supported by evidence.",
+   "signals": [
+    {
+     "evidenceRefs": [
+      "E1"
+     ],
+     "kind": "logs",
+     "level": "strong",
+     "text": "420\u00d7 ERROR in orders-api (new pattern)"
+    },
+    {
+     "evidenceRefs": [
+      "E3"
+     ],
+     "kind": "metric",
+     "level": "strong",
+     "text": "Error rate for orders-api up 2900%"
+    },
+    {
+     "evidenceRefs": [
+      "E4"
+     ],
+     "kind": "health",
+     "level": "moderate",
+     "text": "orders-api is recorded as DEGRADED"
+    }
+   ],
+   "supportingRefs": [
+    "E1",
+    "E3"
+   ]
+  },
+  "assumptions": [
+   "Similar wording is assumed to indicate a similar mechanism."
+  ],
+  "confidence": 0.5,
+  "facts": [
+   {
+    "evidenceRefs": [
+     "E1"
+    ],
+    "statement": "The most frequent error pattern is \"timeout acquiring connection from database pool\" in orders-api, seen 420 times since 2026-06-01T11:30:00Z.",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T11:30Z appears in E1",
+       "evidenceRef": "E1",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T11:30:00Z"
+      },
+      {
+       "detail": "E1 holds 420 \u00d7",
+       "evidenceRef": "E1",
+       "kind": "number",
+       "status": "exact",
+       "text": "420 times"
+      }
+     ],
+     "status": "verified"
+    }
+   },
+   {
+    "evidenceRefs": [
+     "E1"
+    ],
+    "statement": "The earliest anomalous error pattern first appeared at 2026-06-01T11:30:00Z.",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T11:30Z appears in E1",
+       "evidenceRef": "E1",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T11:30:00Z"
+      }
+     ],
+     "status": "verified"
+    }
+   },
+   {
+    "evidenceRefs": [
+     "E3"
+    ],
+    "statement": "Error rate for orders-api up 2900%: error_rate averaged 12% (max 15.6%) between 2026-06-01T10:00:00Z and 2026-06-01T12:00:00Z, versus 0.4% in the preceding window",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T10:00Z appears in E3",
+       "evidenceRef": "E3",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T10:00:00Z"
+      },
+      {
+       "detail": "2026-06-01T12:00Z appears in E3",
+       "evidenceRef": "E3",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T12:00:00Z"
+      },
+      {
+       "detail": "E3 holds 2900%",
+       "evidenceRef": "E3",
+       "kind": "number",
+       "status": "exact",
+       "text": "2900%"
+      },
+      {
+       "detail": "E3 holds 12%",
+       "evidenceRef": "E3",
+       "kind": "number",
+       "status": "exact",
+       "text": "12%"
+      },
+      {
+       "detail": "E3 holds 15.6%",
+       "evidenceRef": "E3",
+       "kind": "number",
+       "status": "exact",
+       "text": "15.6%"
+      },
+      {
+       "detail": "E3 holds 0.4%",
+       "evidenceRef": "E3",
+       "kind": "number",
+       "status": "exact",
+       "text": "0.4%"
+      }
+     ],
+     "status": "verified"
+    }
+   }
+  ],
+  "hypotheses": [
+   {
+    "assumptions": [
+     "Similar wording is assumed to indicate a similar mechanism."
+    ],
+    "confidence": 0.5,
+    "contradictingEvidenceRefs": [],
+    "contradictions": [],
+    "description": "A past incident had a similar signature (connection, database, pool, timeout). Its recorded root cause: Database pool size lowered; connections timed out",
+    "evidenceRefs": [
+     "E5",
+     "E1"
+    ],
+    "facts": [
+     "Past incident INC-7: Orders API connection pool exhausted shares the terms connection, database, pool, timeout with the current errors (E5)."
+    ],
+    "gaps": [
+     "Check whether the trigger of the past incident (see its root cause) is present now."
+    ],
+    "status": "possible",
+    "title": "Recurrence of the failure mode from INC-7"
+   }
+  ],
+  "integrity": {
+   "checked": 15,
+   "flagged": [],
+   "supported": 15
+  },
+  "nextSteps": [
+   "Check whether the trigger of the past incident (see its root cause) is present now.",
+   "Open the log explorer filtered to pattern f1 and follow a trace id across services."
+  ],
+  "observations": [],
+  "outcome": "INCIDENT",
+  "recommendedActions": [],
+  "rootCauseConfirmed": false,
+  "summary": "Rule-based analysis (no language model wrote these conclusions). The most frequent error pattern is \"timeout acquiring connection from database pool\" in orders-api, seen 420 times since 2026-06-01T11:30:00Z. The leading hypothesis is: Recurrence of the failure mode from INC-7 (50% confidence, possible). A past incident had a similar signature (connection, database, pool, timeout). Its recorded root cause: Database pool size lowered; connections timed out No alternative hypotheses met the evidence bar. The cause has not been verified.",
+  "timeline": [
+   {
+    "description": "420\u00d7 ERROR in orders-api (new pattern)",
+    "evidenceRefs": [
+     "E1"
+    ],
+    "timestamp": "2026-06-01T11:30:00Z"
+   }
+  ],
+  "uncertainties": [
+   "This analysis used rule-based correlation without a language model; it cannot read code diffs or reason about mechanisms beyond keyword overlap.",
+   "No code changes were found for the services in scope (no repository linked, or none in the window).",
+   "The knowledge base returned nothing relevant."
+  ]
+ },
+ "x_slow_database_after_rollback": {
+  "analysisMode": "heuristic",
+  "assessment": {
+   "confidence": 0.82,
+   "missingTelemetry": [],
+   "outcome": "INCIDENT",
+   "rationale": "A failure is evident (p95 latency for shop-orders up 2500%) and at least one explanation is supported by evidence.",
+   "signals": [
+    {
+     "evidenceRefs": [
+      "E5"
+     ],
+     "kind": "metric",
+     "level": "strong",
+     "text": "p95 latency for shop-orders up 2500%"
+    },
+    {
+     "evidenceRefs": [
+      "E7"
+     ],
+     "kind": "health",
+     "level": "moderate",
+     "text": "shop-orders is recorded as DEGRADED"
+    }
+   ],
+   "supportingRefs": [
+    "E5"
+   ]
+  },
+  "assumptions": [
+   "The sampled traces are assumed to be representative of the slow requests.",
+   "Temporal proximity is treated as a signal of causation; it has not been verified.",
+   "No commits or pull requests could be linked to this deployment, so what it changed is unknown."
+  ],
+  "confidence": 0.5,
+  "facts": [
+   {
+    "evidenceRefs": [
+     "E5"
+    ],
+    "statement": "p95 latency for shop-orders up 2500%: latency_p95_ms averaged 780ms (max 1014ms) between 2026-06-01T10:00:00Z and 2026-06-01T12:00:00Z, versus 30ms in the preceding window",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T10:00Z appears in E5",
+       "evidenceRef": "E5",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T10:00:00Z"
+      },
+      {
+       "detail": "2026-06-01T12:00Z appears in E5",
+       "evidenceRef": "E5",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T12:00:00Z"
+      },
+      {
+       "detail": "E5 holds 2500%",
+       "evidenceRef": "E5",
+       "kind": "number",
+       "status": "exact",
+       "text": "2500%"
+      },
+      {
+       "detail": "E5 holds 780 ms",
+       "evidenceRef": "E5",
+       "kind": "number",
+       "status": "exact",
+       "text": "780ms"
+      },
+      {
+       "detail": "E5 holds 1014 ms",
+       "evidenceRef": "E5",
+       "kind": "number",
+       "status": "exact",
+       "text": "1014ms"
+      },
+      {
+       "detail": "E5 holds 30 ms",
+       "evidenceRef": "E5",
+       "kind": "number",
+       "status": "exact",
+       "text": "30ms"
+      }
+     ],
+     "status": "verified"
+    }
+   }
+  ],
+  "hypotheses": [
+   {
+    "assumptions": [
+     "The sampled traces are assumed to be representative of the slow requests."
+    ],
+    "confidence": 0.5,
+    "contradictingEvidenceRefs": [],
+    "contradictions": [],
+    "description": "In 5 sampled traces, a single span in shop-orders (pg.query:SELECT) accounts for most of the request time: 403 to 403 ms of requests lasting 846 to 850 ms. This locates the delay; it does not say why demo-postgres is slow.",
+    "evidenceRefs": [
+     "E8",
+     "E9",
+     "E10",
+     "E11",
+     "E5"
+    ],
+    "facts": [
+     "Slow trace through shop-orders: 850ms: POST /checkout took 850ms across 6 spans in shop-gateway, shop-orders, shop-payments. Most of the time was spent in shop-orders pg.query:SELECT (405ms). (E8)",
+     "Slow trace through shop-orders: 849ms: POST /checkout took 849ms across 6 spans in shop-gateway, shop-orders, shop-payments. Most of the time was spent in shop-orders pg.query:SELECT (405ms). (E9)"
+    ],
+    "gaps": [
+     "Check the load, locks and health of demo-postgres at the same time.",
+     "Compare with a trace from before the slowdown."
+    ],
+    "status": "possible",
+    "title": "Time is being lost in shop-orders's calls to demo-postgres"
+   },
+   {
+    "assumptions": [
+     "Temporal proximity is treated as a signal of causation; it has not been verified.",
+     "No commits or pull requests could be linked to this deployment, so what it changed is unknown."
+    ],
+    "confidence": 0.07,
+    "contradictingEvidenceRefs": [
+     "E4"
+    ],
+    "contradictions": [
+     "This deployment returned the service to a version that ran before, which makes a new regression unlikely.",
+     "Error logs fell after this deployment, from 6.0/min to 0.0/min (E4)."
+    ],
+    "description": "This deployment was made shortly before the window examined. No error onset could be determined, so there is no timing to compare with. The link is based on timing.",
+    "evidenceRefs": [
+     "E1",
+     "E5"
+    ],
+    "facts": [
+     "Rollback of shop-orders v1.4.0 (succeeded) happened at 2026-06-01T09:54:00Z (E1).",
+     "Metrics for the service shifted sharply in the window: p95 latency for shop-orders up 2500% (E5)."
+    ],
+    "gaps": [
+     "Confirm by comparing error rate per version, or by rolling back in a controlled way.",
+     "Review the diff of the linked change for the suspected mechanism."
+    ],
+    "status": "unlikely",
+    "title": "Regression introduced by Rollback of shop-orders v1.4.0 (succeeded)"
+   },
+   {
+    "assumptions": [
+     "Temporal proximity is treated as a signal of causation; it has not been verified.",
+     "No commits or pull requests could be linked to this deployment, so what it changed is unknown."
+    ],
+    "confidence": 0.05,
+    "contradictingEvidenceRefs": [],
+    "contradictions": [
+     "This deployment has already been rolled back, so its code is no longer running.",
+     "A later deployment of shop-orders (Rollback of shop-orders v1.4.0 (succeeded), E1) replaced it before the problem began."
+    ],
+    "description": "This deployment was made shortly before the window examined. No error onset could be determined, so there is no timing to compare with. The link is based on timing.",
+    "evidenceRefs": [
+     "E2",
+     "E5"
+    ],
+    "facts": [
+     "Deployment of shop-orders v1.5.0 (rolled_back) happened at 2026-06-01T09:51:00Z (E2).",
+     "Metrics for the service shifted sharply in the window: p95 latency for shop-orders up 2500% (E5)."
+    ],
+    "gaps": [
+     "Confirm by comparing error rate per version, or by rolling back in a controlled way.",
+     "Review the diff of the linked change for the suspected mechanism."
+    ],
+    "status": "unlikely",
+    "title": "Regression introduced by Deployment of shop-orders v1.5.0 (rolled_back)"
+   }
+  ],
+  "integrity": {
+   "checked": 28,
+   "flagged": [
+    {
+     "detail": "E12 holds 846 ms, but this statement does not cite it",
+     "status": "uncited",
+     "text": "846",
+     "where": "hypothesis 1"
+    }
+   ],
+   "supported": 27
+  },
+  "nextSteps": [
+   "Check the load, locks and health of demo-postgres at the same time.",
+   "Compare with a trace from before the slowdown."
+  ],
+  "observations": [
+   {
+    "evidenceRefs": [
+     "E1"
+    ],
+    "statement": "Most recent deployment on record: Rollback of shop-orders v1.4.0 (succeeded), at 2026-06-01T09:54:00Z.",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T09:54Z appears in E1",
+       "evidenceRef": "E1",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T09:54:00Z"
+      },
+      {
+       "detail": "appears in E1",
+       "evidenceRef": "E1",
+       "kind": "version",
+       "status": "exact",
+       "text": "v1.4.0"
+      }
+     ],
+     "status": "verified"
+    }
+   }
+  ],
+  "outcome": "INCIDENT",
+  "recommendedActions": [],
+  "rootCauseConfirmed": false,
+  "summary": "Rule-based analysis (no language model wrote these conclusions). p95 latency for shop-orders up 2500%: latency_p95_ms averaged 780ms (max 1014ms) between 2026-06-01T10:00:00Z and 2026-06-01T12:00:00Z, versus 30ms in the preceding window The leading hypothesis is: Time is being lost in shop-orders's calls to demo-postgres (50% confidence, possible). In 5 sampled traces, a single span in shop-orders (pg.query:SELECT) accounts for most of the request time: 403 to 403 ms of requests lasting 846 to 850 ms. This locates the delay; it does not say why demo-postgres is slow. 2 alternative hypotheses were considered. The cause has not been verified.",
+  "timeline": [
+   {
+    "description": "Deployment of shop-orders v1.5.0 (rolled_back)",
+    "evidenceRefs": [
+     "E2"
+    ],
+    "timestamp": "2026-06-01T09:51:00Z"
+   },
+   {
+    "description": "Rollback of shop-orders v1.4.0 (succeeded)",
+    "evidenceRefs": [
+     "E1"
+    ],
+    "timestamp": "2026-06-01T09:54:00Z"
+   }
+  ],
+  "uncertainties": [
+   "This analysis used rule-based correlation without a language model; it cannot read code diffs or reason about mechanisms beyond keyword overlap.",
+   "No error or warning logs were found in the window, so the time the problem started is uncertain.",
+   "No code changes were found for the services in scope (no repository linked, or none in the window).",
+   "The knowledge base returned nothing relevant."
+  ]
+ },
+ "x_two_deployments_before_errors": {
+  "analysisMode": "heuristic",
+  "assessment": {
+   "confidence": 0.89,
+   "missingTelemetry": [
+    "The trace store returned no traces for the window (none recorded, or no trace store is connected)."
+   ],
+   "outcome": "INCIDENT",
+   "rationale": "A failure is evident (300\u00d7 ERROR in shop-orders (new pattern); Error rate for shop-orders up from zero) and at least one explanation is supported by evidence.",
+   "signals": [
+    {
+     "evidenceRefs": [
+      "E1"
+     ],
+     "kind": "logs",
+     "level": "strong",
+     "text": "300\u00d7 ERROR in shop-orders (new pattern)"
+    },
+    {
+     "evidenceRefs": [
+      "E7"
+     ],
+     "kind": "metric",
+     "level": "strong",
+     "text": "Error rate for shop-orders up from zero"
+    }
+   ],
+   "supportingRefs": [
+    "E1",
+    "E7"
+   ]
+  },
+  "assumptions": [
+   "Temporal proximity is treated as a signal of causation; it has not been verified.",
+   "No commits or pull requests could be linked to this deployment, so what it changed is unknown."
+  ],
+  "confidence": 0.57,
+  "facts": [
+   {
+    "evidenceRefs": [
+     "E1"
+    ],
+    "statement": "The most frequent error pattern is \"failed to compute order total: Cannot read properties of null\" in shop-orders, seen 300 times since 2026-06-01T11:58:00Z.",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T11:58Z appears in E1",
+       "evidenceRef": "E1",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T11:58:00Z"
+      },
+      {
+       "detail": "E1 holds 300 \u00d7",
+       "evidenceRef": "E1",
+       "kind": "number",
+       "status": "exact",
+       "text": "300 times"
+      }
+     ],
+     "status": "verified"
+    }
+   },
+   {
+    "evidenceRefs": [
+     "E1"
+    ],
+    "statement": "The earliest anomalous error pattern first appeared at 2026-06-01T11:58:00Z.",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T11:58Z appears in E1",
+       "evidenceRef": "E1",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T11:58:00Z"
+      }
+     ],
+     "status": "verified"
+    }
+   },
+   {
+    "evidenceRefs": [
+     "E7"
+    ],
+    "statement": "Error rate for shop-orders up from zero: error_rate averaged 55% (max 71.5%) between 2026-06-01T10:00:00Z and 2026-06-01T12:00:00Z, versus 0% in the preceding window",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T10:00Z appears in E7",
+       "evidenceRef": "E7",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T10:00:00Z"
+      },
+      {
+       "detail": "2026-06-01T12:00Z appears in E7",
+       "evidenceRef": "E7",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T12:00:00Z"
+      },
+      {
+       "detail": "E7 holds 55%",
+       "evidenceRef": "E7",
+       "kind": "number",
+       "status": "exact",
+       "text": "55%"
+      },
+      {
+       "detail": "E7 holds 71.5%",
+       "evidenceRef": "E7",
+       "kind": "number",
+       "status": "exact",
+       "text": "71.5%"
+      },
+      {
+       "detail": "E7 holds 0%",
+       "evidenceRef": "E7",
+       "kind": "number",
+       "status": "exact",
+       "text": "0%"
+      }
+     ],
+     "status": "verified"
+    }
+   }
+  ],
+  "hypotheses": [
+   {
+    "assumptions": [
+     "Temporal proximity is treated as a signal of causation; it has not been verified.",
+     "No commits or pull requests could be linked to this deployment, so what it changed is unknown."
+    ],
+    "confidence": 0.57,
+    "contradictingEvidenceRefs": [],
+    "contradictions": [],
+    "description": "The error signal began about 1 minutes after this deployment. The link is based on timing and service match.",
+    "evidenceRefs": [
+     "E3",
+     "E1",
+     "E7"
+    ],
+    "facts": [
+     "Deployment of shop-orders v1.5.0 (succeeded) happened at 2026-06-01T11:57:00Z, 1 minutes before the first anomalous error (E3).",
+     "The dominant error pattern is in the same service as the change (E1).",
+     "Metrics for the service shifted sharply in the window: Error rate for shop-orders up from zero (E7)."
+    ],
+    "gaps": [
+     "Confirm by comparing error rate per version, or by rolling back in a controlled way.",
+     "Review the diff of the linked change for the suspected mechanism."
+    ],
+    "status": "likely",
+    "title": "Regression introduced by Deployment of shop-orders v1.5.0 (succeeded)"
+   },
+   {
+    "assumptions": [
+     "Temporal proximity is treated as a signal of causation; it has not been verified.",
+     "No commits or pull requests could be linked to this deployment, so what it changed is unknown."
+    ],
+    "confidence": 0.37,
+    "contradictingEvidenceRefs": [],
+    "contradictions": [
+     "A later deployment of shop-orders (Deployment of shop-orders v1.5.0 (succeeded), E3) replaced it before the problem began."
+    ],
+    "description": "The error signal began about 25 minutes after this deployment. The link is based on timing and service match.",
+    "evidenceRefs": [
+     "E4",
+     "E1",
+     "E7"
+    ],
+    "facts": [
+     "Deployment of shop-orders v1.4.0 (succeeded) happened at 2026-06-01T11:33:00Z, 25 minutes before the first anomalous error (E4).",
+     "The dominant error pattern is in the same service as the change (E1).",
+     "Metrics for the service shifted sharply in the window: Error rate for shop-orders up from zero (E7)."
+    ],
+    "gaps": [
+     "Confirm by comparing error rate per version, or by rolling back in a controlled way.",
+     "Review the diff of the linked change for the suspected mechanism."
+    ],
+    "status": "possible",
+    "title": "Regression introduced by Deployment of shop-orders v1.4.0 (succeeded)"
+   }
+  ],
+  "integrity": {
+   "checked": 27,
+   "flagged": [],
+   "supported": 27
+  },
+  "nextSteps": [
+   "Confirm by comparing error rate per version, or by rolling back in a controlled way.",
+   "Review the diff of the linked change for the suspected mechanism.",
+   "Open the log explorer filtered to pattern o1 and follow a trace id across services."
+  ],
+  "observations": [
+   {
+    "evidenceRefs": [
+     "E3"
+    ],
+    "statement": "Most recent deployment on record: Deployment of shop-orders v1.5.0 (succeeded), at 2026-06-01T11:57:00Z.",
+    "verification": {
+     "checks": [
+      {
+       "detail": "2026-06-01T11:57Z appears in E3",
+       "evidenceRef": "E3",
+       "kind": "timestamp",
+       "status": "exact",
+       "text": "2026-06-01T11:57:00Z"
+      },
+      {
+       "detail": "appears in E3",
+       "evidenceRef": "E3",
+       "kind": "version",
+       "status": "exact",
+       "text": "v1.5.0"
+      }
+     ],
+     "status": "verified"
+    }
+   }
+  ],
+  "outcome": "INCIDENT",
+  "recommendedActions": [
+   {
+    "description": "Roll back shop-orders from v1.5.0 to the previous successful version v1.4.0, then watch error rate and latency for 15 minutes.",
+    "effect": "state_changing",
+    "effectReasons": [
+     "rollback_deployment changes production by definition"
+    ],
+    "evidenceRefs": [
+     "E3",
+     "E4",
+     "E1"
+    ],
+    "parameters": {
+     "deploymentId": "new",
+     "fromVersion": "v1.5.0",
+     "toVersion": "v1.4.0"
+    },
+    "rationale": "Errors began shortly after v1.5.0 was deployed; v1.4.0 was running before the errors started. This is a hypothesis based on timing and content overlap, not a confirmed cause.",
+    "risk": "MEDIUM",
+    "serviceSlug": "shop-orders",
+    "title": "Roll back shop-orders to v1.4.0",
+    "type": "rollback_deployment"
+   }
+  ],
+  "rootCauseConfirmed": false,
+  "summary": "Rule-based analysis (no language model wrote these conclusions). The most frequent error pattern is \"failed to compute order total: Cannot read properties of null\" in shop-orders, seen 300 times since 2026-06-01T11:58:00Z. The leading hypothesis is: Regression introduced by Deployment of shop-orders v1.5.0 (succeeded) (57% confidence, likely). The error signal began about 1 minutes after this deployment. The link is based on timing and service match. 1 alternative hypothesis was considered. The cause has not been verified.",
+  "timeline": [
+   {
+    "description": "Deployment of shop-orders v1.4.0 (succeeded)",
+    "evidenceRefs": [
+     "E4"
+    ],
+    "timestamp": "2026-06-01T11:33:00Z"
+   },
+   {
+    "description": "Deployment of shop-orders v1.5.0 (succeeded)",
+    "evidenceRefs": [
+     "E3"
+    ],
+    "timestamp": "2026-06-01T11:57:00Z"
+   },
+   {
+    "description": "300\u00d7 ERROR in shop-orders (new pattern)",
+    "evidenceRefs": [
+     "E1"
+    ],
+    "timestamp": "2026-06-01T11:58:00Z"
+   }
+  ],
+  "uncertainties": [
+   "This analysis used rule-based correlation without a language model; it cannot read code diffs or reason about mechanisms beyond keyword overlap.",
+   "No code changes were found for the services in scope (no repository linked, or none in the window).",
+   "The knowledge base returned nothing relevant."
+  ]
+ }
+}
