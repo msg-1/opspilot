@@ -24,6 +24,38 @@
 | PostgreSQL 16 | pgvector, pg_trgm | All data, vector search, trigram and full-text search. |
 | Redis 7 | | Job queues and schedules. |
 
+## Code structure
+
+The runtime architecture above did not change in Milestone 5; what changed is how the code inside each component is divided, and how the components are kept in agreement.
+
+**One definition for what crosses a boundary** (`contracts/`, described in [contracts/README.md](../contracts/README.md)):
+
+| What must agree | Defined once in | Each side gets it by |
+|---|---|---|
+| Closed value sets, guardrail limits, action-effect rules | `contracts/*.json` | Generated TypeScript and Python (`npm run contracts`) |
+| Investigation report | `services/ai/app/schemas.py`, exported to `contracts/report.schema.json` | The API's Zod schema is tested against the export |
+| Agent tools (path, parameters, fields read) | `services/ai/app/tools.py`, exported to `contracts/tools.json` | The API is tested by calling every tool as the export describes |
+| API responses the web app uses | `apps/api/src/contracts/api.ts` | Generated web types; real responses are tested against the schemas |
+
+CI regenerates all of it and fails when a committed file would change.
+
+**The API's two largest features are directories, one file per responsibility:**
+
+| `modules/investigations/` | | `modules/remediation/` | |
+|---|---|---|---|
+| `routes.ts` | HTTP | `routes.ts` | HTTP |
+| `validation.ts` | Request bodies and queries | `proposals.ts` | Request bodies, creating a proposal |
+| `limits.ts` | Daily, concurrent and cost limits | `content.ts` | The hash approvals are bound to |
+| `runner.ts` | Orchestrating one queued run | `effect.ts` | Effect, minimum risk, approvals required |
+| `stream.ts` | Consuming the AI service's event stream | `approvals.ts` | Submit, approve, reject, supersede |
+| `guardrails.ts` | The API's independent guardrail pass | `execution.ts` | Webhook or manual execution |
+| `persistence.ts` | Storing steps, evidence and the final report | `recording.ts` | Recording the outcome and its effects |
+| `schema.ts` | The report schema | `presenter.ts` | Loading and shaping responses |
+
+Each directory's `index.ts` exports what the rest of the API used before, so nothing outside them changed.
+
+**The rule-based engine is one function per rule** (`services/ai/app/rules.py`): recent change, unhealthy dependency, traces, past incident, the signal floor, and the builders for facts, timeline, uncertainties, summary and next steps. `heuristics.py` runs them in order. Each rule is tested alone; a snapshot of all sixteen evaluation reports guards the whole.
+
 ## Boundaries and why they are where they are
 
 **The API owns the data.** The AI service cannot reach the database. Everything the agent learns comes through `GET /api/v1/tools/*`, authenticated with a JWT that is scoped to one organisation, valid for 30 minutes, and accepted only by that router. A prompt-injected or misbehaving model can therefore read one organisation's operational data and nothing else, and can write nothing.
@@ -129,5 +161,5 @@ The local demonstration environment (`demo/`) connects all of these to three ins
 
 - **Logs:** structured JSON (pino in Node, JSON lines in Python).
 - **Metrics:** Prometheus at `/metrics` on the API and AI service: HTTP duration by route, logs ingested, job counts and durations, investigations by outcome and provider, LLM tokens.
-- **Traces:** OpenTelemetry auto-instrumentation in the API and worker and FastAPI instrumentation in the AI service, exported over OTLP when `OTEL_ENABLED=true`.
+- **Traces:** when `OTEL_ENABLED=true`, one investigation is one OpenTelemetry trace across the API, the queue, the worker, the AI service and every tool call. Spans are scrubbed before export. `npm run tracing:up` and `npm run trace -- <investigation id>` show it locally: see [tracing.md](tracing.md).
 - **Health:** `/health` (liveness) and `/ready` (database and Redis).

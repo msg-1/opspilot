@@ -55,6 +55,12 @@ jobs:
       - run: npm run db:generate -w @opspilot/api
       - run: npm run lint -w @opspilot/api
       - run: npm run typecheck -w @opspilot/api
+      # The web app's API types are generated from the API's response contracts. A contract
+      # changed without regenerating them fails here, so the two cannot drift apart unnoticed.
+      - name: Generated frontend API types are up to date
+        run: |
+          npm run contracts:api -w @opspilot/api
+          git diff --exit-code -- contracts/api.schema.json apps/web/src/lib/generated/api.ts
 
   database:
     name: Database integration tests (PostgreSQL + pgvector)
@@ -98,6 +104,14 @@ jobs:
         with: { enable-cache: true }
       - run: uv sync --frozen
       - run: uv run ruff check .
+      # contracts/ is the one definition of what the services share. Everything generated from
+      # it, and everything this service exports into it, must be committed and current.
+      - name: Shared contracts are up to date
+        working-directory: .
+        run: |
+          node scripts/contracts.mjs
+          (cd services/ai && uv run python -m app.contracts)
+          git diff --exit-code -- contracts apps/api/src/generated apps/web/src/lib/generated services/ai/app/generated
       - run: uv run pytest -q
       # Regression gate for the investigation engine: every ground-truth scenario must pass.
       - run: uv run python -m app.evals.run --heuristic

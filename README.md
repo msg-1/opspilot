@@ -54,6 +54,8 @@ npm run dev                   # API :4000, worker, web :3000, AI service :8000
 |---|---|
 | `npm test` | API integration tests (real Postgres) and web unit tests |
 | `npm run test:ai` | AI service tests |
+| `npm run contracts` | Regenerate the shared contracts and the web app's API types (`contracts:check` fails if stale) |
+| `npm run tracing:up`, `npm run trace -- <id>` | Trace the platform itself, locally: one trace per investigation ([docs/tracing.md](docs/tracing.md)) |
 | `npm run evals` | Scores the investigation agent on ground-truth scenarios |
 | `npm run test:e2e` | Playwright tests against the running, freshly seeded stack |
 | `npm run obs:up` | Prometheus (:9090) and Grafana (:3001) |

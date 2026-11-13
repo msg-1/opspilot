@@ -75,7 +75,7 @@ OPSILUME executes nothing itself. "Carry out" means: a person does it, or the or
 
 ## 3. Which actions are offered
 
-The guardrails (`services/ai/app/guardrails.py`, applied again in `apps/api/src/modules/investigations.ts`) remove an action from the proposals, and list it under next steps with the reason, when:
+The guardrails (`services/ai/app/guardrails.py`, applied again in `apps/api/src/modules/investigations/guardrails.ts`) remove an action from the proposals, and list it under next steps with the reason, when:
 
 - it would change production and the outcome is not `INCIDENT`;
 - it would change production and rests only on a hypothesis rated unlikely;
@@ -96,7 +96,7 @@ Each is stated as a contradiction on the hypothesis. This was added after a run 
 
 ## 4. Approval and execution
 
-`apps/api/src/modules/remediation.ts`. Only signed-in people can approve, execute, edit or retry; API keys and the AI's tool token are refused on those routes.
+`apps/api/src/modules/remediation/`. Only signed-in people can approve, execute, edit or retry; API keys and the AI's tool token are refused on those routes.
 
 - **Read-only diagnostics** need no approval. A person records that it was done and what was found. They are never sent to the webhook, so a misjudged text cannot change anything. The effect is recomputed at that moment; if the text now reads as a change, the action is reclassified and refused.
 - **State-changing actions** need at least one approval, whatever the organisation's settings say, from someone other than the proposer and the requester (unless self-approval is switched on), and are at least medium risk.

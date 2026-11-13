@@ -17,12 +17,16 @@
     "db:seed": "tsx --env-file-if-exists=../../.env prisma/seed.ts",
     "db:studio": "dotenv -e ../../.env -- prisma studio",
     "db:migrate:new": "dotenv -e ../../.env -- prisma migrate dev --create-only",
-    "simulate": "tsx --env-file-if-exists=../../.env scripts/simulate.ts"
+    "simulate": "tsx --env-file-if-exists=../../.env scripts/simulate.ts",
+    "contracts:api": "tsx scripts/export-api-contract.ts"
   },
   "dependencies": {
+    "@opentelemetry/api": "^1.10.0",
     "@opentelemetry/auto-instrumentations-node": "^0.83.0",
+    "@opentelemetry/core": "^3.1.1",
     "@opentelemetry/exporter-trace-otlp-http": "^0.301.1",
     "@opentelemetry/sdk-node": "^0.301.1",
+    "@opentelemetry/sdk-trace": "^3.1.1",
     "@prisma/client": "6.19.3",
     "bcryptjs": "^3.0.3",
     "bullmq": "^5.81.5",

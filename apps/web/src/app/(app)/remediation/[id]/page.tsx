@@ -11,7 +11,7 @@ import { api, useApi } from '@/lib/api';
 import { dateTime, timeAgo, titleCase } from '@/lib/format';
 import { useAction } from '@/lib/hooks';
 import { useSession } from '@/lib/session';
-import type { Remediation } from '@/lib/types';
+import type { RemediationDetail } from '@/lib/types';
 
 const STAGES = ['Proposed', 'Awaiting approval', 'Approved', 'Executed'];
 const STAGE_INDEX: Record<string, number> = { PROPOSED: 0, PENDING_APPROVAL: 1, APPROVED: 2, EXECUTING: 2, FAILED: 2, EXECUTED: 3 };
@@ -42,7 +42,7 @@ function Progress({ status }: { status: string }) {
 export default function RemediationDetailPage() {
   const { id } = useParams<{ id: string }>();
   const session = useSession();
-  const { data: a, error, isLoading } = useApi<Remediation>(`/remediations/${id}`, { refetchInterval: 10_000 });
+  const { data: a, error, isLoading } = useApi<RemediationDetail>(`/remediations/${id}`, { refetchInterval: 10_000 });
   const { run, busy, error: actionError } = useAction();
   const [dialog, setDialog] = useState<null | 'approve' | 'reject' | 'execute' | 'retry'>(null);
   const [comment, setComment] = useState('');

@@ -72,7 +72,7 @@ async function approved(org: Org, body: Record<string, unknown> = FLUSH) {
 
 describe('action effects', () => {
   it('agrees with the AI service on what every kind of action does', () => {
-    const cases = JSON.parse(readFileSync(join(__dirname, '../../../services/ai/tests/fixtures/action-effects.json'), 'utf8')) as { type: string; title: string; description: string; effect: string }[];
+    const cases = JSON.parse(readFileSync(join(__dirname, '../../../contracts/fixtures/action-effects.json'), 'utf8')) as { type: string; title: string; description: string; effect: string }[];
     const wrong = cases.filter((c) => actionEffect(c.type, c.title, c.description).effect !== c.effect).map((c) => `${c.title} → ${actionEffect(c.type, c.title, c.description).effect}`);
     expect(wrong).toEqual([]);
     expect(cases.length).toBeGreaterThan(20);

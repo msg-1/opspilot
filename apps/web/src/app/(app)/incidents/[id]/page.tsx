@@ -11,15 +11,7 @@ import { api, useApi } from '@/lib/api';
 import { dateTime, duration, timeAgo, titleCase } from '@/lib/format';
 import { useAction } from '@/lib/hooks';
 import { useSession } from '@/lib/session';
-import type { Deployment, Incident, InvestigationSummary, Member, RemediationSummary, TimelineEvent } from '@/lib/types';
-
-interface Detail extends Incident {
-  timeline: TimelineEvent[];
-  investigations: InvestigationSummary[];
-  remediations: RemediationSummary[];
-  alerts: { id: string; message: string; status: string; startedAt: string }[];
-  postmortem: { id: string; title: string } | null;
-}
+import type { Deployment, IncidentDetail, Member } from '@/lib/types';
 
 interface Context {
   window: { from: string; to: string };
@@ -37,7 +29,7 @@ const EVENT_ICON: Record<string, React.ReactNode> = {
   remediation: <ShieldCheck className="size-3.5" aria-hidden />,
 };
 
-function Timeline({ incident, canWrite }: { incident: Detail; canWrite: boolean }) {
+function Timeline({ incident, canWrite }: { incident: IncidentDetail; canWrite: boolean }) {
   const [message, setMessage] = useState('');
   const { run, busy, error } = useAction();
   return (
@@ -57,8 +49,8 @@ function Timeline({ incident, canWrite }: { incident: Detail; canWrite: boolean 
             ) : (
               <p className="mt-0.5 text-sm text-ink">
                 {e.message}
-                {e.metadata?.investigationId && <Link href={`/investigations/${e.metadata.investigationId}`} className="ml-2 text-[13px] font-medium text-accent hover:underline">View investigation</Link>}
-                {e.metadata?.actionId && <Link href={`/remediation/${e.metadata.actionId}`} className="ml-2 text-[13px] font-medium text-accent hover:underline">View action</Link>}
+                {typeof e.metadata?.investigationId === 'string' && <Link href={`/investigations/${e.metadata.investigationId}`} className="ml-2 text-[13px] font-medium text-accent hover:underline">View investigation</Link>}
+                {typeof e.metadata?.actionId === 'string' && <Link href={`/remediation/${e.metadata.actionId}`} className="ml-2 text-[13px] font-medium text-accent hover:underline">View action</Link>}
               </p>
             )}
           </li>
@@ -156,7 +148,7 @@ function ContextView({ id }: { id: string }) {
   );
 }
 
-function Findings({ incident, canWrite }: { incident: Detail; canWrite: boolean }) {
+function Findings({ incident, canWrite }: { incident: IncidentDetail; canWrite: boolean }) {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({ rootCause: incident.rootCause ?? '', resolution: incident.resolution ?? '', customerImpact: incident.customerImpact ?? '' });
   const { run, busy, error } = useAction();
@@ -198,7 +190,7 @@ export default function IncidentPage() {
   const router = useRouter();
   const session = useSession();
   const canWrite = session.can('incident:write');
-  const { data: incident, error, isLoading, refetch } = useApi<Detail>(`/incidents/${id}`, { refetchInterval: 15_000 });
+  const { data: incident, error, isLoading, refetch } = useApi<IncidentDetail>(`/incidents/${id}`, { refetchInterval: 15_000 });
   const members = useApi<{ data: Member[] }>(canWrite ? '/members' : null);
   const { run, busy, error: actionError } = useAction();
   const [tab, setTab] = useState<'timeline' | 'context' | 'findings'>('timeline');

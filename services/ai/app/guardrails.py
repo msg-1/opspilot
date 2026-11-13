@@ -13,10 +13,12 @@ from . import assessment as assessing
 from . import claims
 from .effects import action_effect
 from .evidence import EvidenceStore
+from .generated.contracts import GUARDRAIL_LIMITS as LIMITS
 from .schemas import InvestigationReport
 
-MAX_LLM_CONFIDENCE = 0.9
-UNSUPPORTED_CONFIDENCE_CAP = 0.3
+# Limits are defined once, in contracts/guardrails.json, and generated for the API as well.
+MAX_LLM_CONFIDENCE: float = LIMITS["maxConfidence"]["llm"]
+UNSUPPORTED_CONFIDENCE_CAP: float = LIMITS["unsupportedHypothesisCap"]
 
 _INJECTION = re.compile(
     r"ignore (all |any )?(previous|prior|above) (instructions|prompts)|disregard (the )?(system|previous) (prompt|instructions)|"
@@ -41,7 +43,7 @@ def wrap_untrusted(label: str, content: str) -> str:
 
 
 #: Highest confidence a fault hypothesis may carry when the evidence shows no fault
-NO_FAULT_HYPOTHESIS_CAP = 0.2
+NO_FAULT_HYPOTHESIS_CAP: float = LIMITS["noFaultHypothesisCap"]
 
 
 def _valid_rollback(action, store: EvidenceStore) -> str | None:
@@ -76,7 +78,7 @@ def enforce(report: InvestigationReport, store: EvidenceStore, *, scope: list[st
     """Mutates the report so that it only claims what the evidence supports. Returns notes on what changed."""
     known = store.refs()
     notes: list[str] = []
-    cap = {"llm": MAX_LLM_CONFIDENCE, "mock": 0.1}.get(report.analysis_mode, 0.75)
+    cap = LIMITS["maxConfidence"].get(report.analysis_mode, LIMITS["maxConfidence"]["heuristic"])
 
     def keep(refs: list[str], where: str) -> list[str]:
         normalised = [r.strip().strip("[]()").upper() for r in refs]
@@ -96,7 +98,7 @@ def enforce(report: InvestigationReport, store: EvidenceStore, *, scope: list[st
         if h.confidence > cap:
             notes.append(f'Confidence of "{h.title[:60]}" reduced to {cap}: a root cause is never treated as certain before a human verifies it.')
             h.confidence = cap
-        if h.status == "likely" and h.confidence < 0.5:
+        if h.status == "likely" and h.confidence < LIMITS["likelyMinimumConfidence"]:
             h.status = "possible"
     report.hypotheses.sort(key=lambda h: h.confidence, reverse=True)
 
@@ -125,7 +127,7 @@ def enforce(report: InvestigationReport, store: EvidenceStore, *, scope: list[st
         type: relabelling a rollback as "manual" would leave the same change on the table. It is
         kept where a human can still see it, with the reason."""
         notes.append(f'Action "{action.title[:60]}" is not offered for approval: {reason}. It is listed under next steps.')
-        report.next_steps.append(f"Considered and not recommended ({reason}): {action.title}"[:500])
+        report.next_steps.append(LIMITS["nextStepPrefixes"]["withdrawn"].format(reason=reason, title=action.title)[:500])
         withdrawn.append(action)
 
     deployment_refs = {e.ref for e in store.by_kind("deployment")}
@@ -160,16 +162,16 @@ def enforce(report: InvestigationReport, store: EvidenceStore, *, scope: list[st
         subject = by_source.get(a.parameters.deployment_id) if a.type == "rollback_deployment" and a.parameters and a.parameters.deployment_id else None
         rests_on = {subject} if subject else set(a.evidence_refs)
         if rests_on & doubted:
-            withdraw(a, "it would change production on the strength of a hypothesis rated unlikely")
+            withdraw(a, LIMITS["withdrawalReasons"]["unlikelyHypothesis"])
     report.recommended_actions = [a for a in report.recommended_actions if a not in withdrawn]
     # A high-risk option is not put forward next to a safer one that addresses the problem: it
     # moves to the next steps, where a human can still weigh it.
     if any(a.risk != "HIGH" for a in report.recommended_actions):
         for a in [a for a in report.recommended_actions if a.risk == "HIGH"]:
             notes.append(f'High-risk action "{a.title[:60]}" moved to next steps: a lower-risk action is proposed.')
-            report.next_steps.append(f"Higher-risk alternative, only if the lower-risk action is not possible: {a.title}. {a.description}"[:600])
+            report.next_steps.append(LIMITS["nextStepPrefixes"]["highRisk"].format(title=a.title, description=a.description)[:600])
             report.recommended_actions.remove(a)
-    report.recommended_actions = report.recommended_actions[:4]
+    report.recommended_actions = report.recommended_actions[: LIMITS["maxRecommendedActions"]]
 
     # ── Does the evidence show a fault at all? The answer is computed, not taken from the author. ──
     claimed = report.outcome
@@ -184,11 +186,11 @@ def enforce(report: InvestigationReport, store: EvidenceStore, *, scope: list[st
                 notes.append(f'Hypothesis "{h.title[:60]}" limited to {NO_FAULT_HYPOTHESIS_CAP} and marked unlikely: the evidence shows no material fault for it to explain.')
                 h.confidence = min(h.confidence, NO_FAULT_HYPOTHESIS_CAP)
                 h.status = "unlikely"
-    if verdict.outcome != "INCIDENT":
+    if verdict.outcome != LIMITS["outcomeAllowingProductionChanges"]:
         # Without an evident failure and a supported cause, nothing justifies changing production.
         withdrawn.clear()
         for a in [a for a in report.recommended_actions if a.effect == "state_changing"]:
-            withdraw(a, f"it would change production, and the evidence supports {verdict.outcome}, not an incident with an established cause")
+            withdraw(a, LIMITS["withdrawalReasons"]["noIncident"].format(outcome=verdict.outcome))
         report.recommended_actions = [a for a in report.recommended_actions if a not in withdrawn]
     if not report.observations:
         report.observations = assessing.observations(store, verdict.signals)

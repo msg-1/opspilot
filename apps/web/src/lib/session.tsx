@@ -3,14 +3,9 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { createContext, useCallback, useContext, useMemo } from 'react';
 import { api, useApi } from './api';
+import type { Session } from './types';
 
-export interface Session {
-  user: { id: string; email: string; name: string; title: string | null };
-  organization: { id: string; name: string; slug: string };
-  role: 'OWNER' | 'ADMIN' | 'ENGINEER' | 'VIEWER';
-  permissions: string[];
-  organizations: { id: string; name: string; slug: string; role: string }[];
-}
+export type { Session };
 
 interface SessionContext extends Session {
   can: (permission: string) => boolean;

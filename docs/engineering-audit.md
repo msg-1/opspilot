@@ -117,6 +117,8 @@ The product logic held up well: tenant isolation, SQL handling, webhook verifica
 | M19 | CSRF protection rests on `SameSite=Lax` alone | No `Origin` check; other sites on the same registrable domain are not excluded | Reject cookie-authenticated writes whose `Origin` is not the web origin |
 | M20 | Rate limits are per process | In-memory store | Use the Redis store when running more than one API instance |
 
+**Status after Milestone 5 (architecture hardening).** M10 is addressed: the contracts have one definition under `contracts/`, both guardrail passes are tested with the same cases, and the web types are generated and checked in CI. M11: the BullMQ path, page-level web tests and the wider evaluation set now exist (the browser suite is still not in CI). M14: `investigations.ts` and `remediation.ts` are split by responsibility; the other modules are unchanged. The remaining rows are as they were unless an earlier milestone's notes say otherwise.
+
 ## Low
 
 | # | Problem | Recommendation |

@@ -33,7 +33,12 @@
     "demo:setup": "node demo/scripts/setup.mjs",
     "demo:scenario": "node demo/scripts/ctl.mjs",
     "demo:e2e": "node demo/scripts/e2e.mjs",
-    "demo:down": "node demo/scripts/down.mjs"
+    "demo:down": "node demo/scripts/down.mjs",
+    "contracts": "node scripts/contracts.mjs && npm run contracts:api -w @opspilot/api && (cd services/ai && uv run python -m app.contracts)",
+    "contracts:check": "npm run contracts && git diff --exit-code -- contracts apps/api/src/generated apps/web/src/lib/generated services/ai/app/generated",
+    "tracing:up": "OTEL_ENABLED=true docker compose --profile app --profile tracing up -d --build",
+    "tracing:down": "docker compose --profile tracing rm -sf tracing && docker compose --profile app up -d",
+    "trace": "node scripts/trace.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

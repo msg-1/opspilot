@@ -31,7 +31,7 @@ from app.schemas import (
 from app.tools import ToolClient
 
 BY_NAME = {s.name: s for s in SCENARIOS}
-FIXTURES = Path(__file__).parent / "fixtures"
+FIXTURES = Path(__file__).resolve().parents[3] / "contracts" / "fixtures"
 
 
 async def investigate(scenario: Scenario) -> tuple[InvestigationReport, EvidenceStore, list[str]]:

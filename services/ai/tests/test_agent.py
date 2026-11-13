@@ -307,7 +307,7 @@ def test_report_wire_format_carries_only_parameters_that_were_set():
     assert second["parameters"] is None and second["serviceSlug"] is None and second["rationale"] is None
 
 
-CONTRACT = __import__("pathlib").Path(__file__).parent / "fixtures" / "report.contract.json"
+CONTRACT = __import__("pathlib").Path(__file__).resolve().parents[3] / "contracts" / "fixtures" / "report.contract.json"
 
 
 def _shape(value, prefix=""):

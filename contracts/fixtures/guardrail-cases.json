@@ -1,0 +1,687 @@
+{
+  "$comment": "Guardrail behaviour that the AI service and the API must both show. Each case is run by services/ai/tests/test_contracts.py and apps/api/tests/contract.test.ts against that side's own implementation. Authoritative: a rule both sides enforce gets a case here.",
+  "cases": [
+    {
+      "name": "citations of evidence that does not exist are removed, and an unsupported hypothesis cannot stay likely",
+      "evidence": [
+        {
+          "ref": "E1",
+          "kind": "deployment",
+          "title": "Deployment of orders v1.5.0 (succeeded)",
+          "summary": "Deployment of orders v1.5.0 (succeeded)",
+          "sourceType": "deployment",
+          "sourceId": "d-new",
+          "service": "orders",
+          "occurredAt": "2026-06-01T11:27:00Z",
+          "data": {
+            "version": "v1.5.0",
+            "status": "SUCCEEDED",
+            "isRollback": false
+          }
+        },
+        {
+          "ref": "E2",
+          "kind": "deployment",
+          "title": "Deployment of orders v1.4.0 (succeeded)",
+          "summary": "Deployment of orders v1.4.0 (succeeded)",
+          "sourceType": "deployment",
+          "sourceId": "d-prev",
+          "service": "orders",
+          "occurredAt": "2026-06-01T11:00:00Z",
+          "data": {
+            "version": "v1.4.0",
+            "status": "SUCCEEDED",
+            "isRollback": false
+          }
+        },
+        {
+          "ref": "E3",
+          "kind": "log_pattern",
+          "title": "300\u00d7 ERROR in orders (new pattern)",
+          "summary": "300\u00d7 ERROR in orders (new pattern)",
+          "sourceType": "log_pattern",
+          "sourceId": "fp:orders",
+          "service": "orders",
+          "occurredAt": "2026-06-01T11:30:00Z",
+          "data": {
+            "level": "ERROR",
+            "count": 300,
+            "kind": "new",
+            "firstSeen": "2026-06-01T11:30:00Z"
+          }
+        }
+      ],
+      "report": {
+        "summary": "Errors began after a deployment.",
+        "confidence": 0.95,
+        "analysisMode": "llm",
+        "outcome": "INCIDENT",
+        "assessment": {
+          "outcome": "INCIDENT",
+          "confidence": 0.9,
+          "rationale": "r",
+          "supportingRefs": [],
+          "signals": [],
+          "missingTelemetry": []
+        },
+        "observations": [],
+        "timeline": [],
+        "facts": [
+          {
+            "statement": "v1.5.0 was deployed before the errors.",
+            "evidenceRefs": [
+              "E1"
+            ]
+          },
+          {
+            "statement": "Aliens were involved.",
+            "evidenceRefs": [
+              "E88"
+            ]
+          }
+        ],
+        "assumptions": [],
+        "uncertainties": [
+          "Diff not reviewed."
+        ],
+        "hypotheses": [
+          {
+            "title": "Cosmic rays",
+            "description": "d",
+            "confidence": 0.95,
+            "status": "likely",
+            "evidenceRefs": [
+              "E77",
+              "E404"
+            ],
+            "contradictingEvidenceRefs": [],
+            "contradictions": [],
+            "facts": [],
+            "assumptions": [],
+            "gaps": []
+          },
+          {
+            "title": "Regression introduced by v1.5.0",
+            "description": "d",
+            "confidence": 0.6,
+            "status": "likely",
+            "evidenceRefs": [
+              "E1",
+              "E3",
+              "E99"
+            ],
+            "contradictingEvidenceRefs": [],
+            "contradictions": [],
+            "facts": [],
+            "assumptions": [],
+            "gaps": []
+          }
+        ],
+        "nextSteps": [
+          "Review the diff"
+        ],
+        "recommendedActions": []
+      },
+      "expect": {
+        "hypotheses": [
+          {
+            "title": "Regression introduced by v1.5.0",
+            "status": "likely",
+            "evidenceRefs": [
+              "E1",
+              "E3"
+            ],
+            "maxConfidence": 0.6
+          },
+          {
+            "title": "Cosmic rays",
+            "notStatus": "likely",
+            "evidenceRefs": [],
+            "maxConfidence": 0.3
+          }
+        ],
+        "maxConfidence": 0.6,
+        "facts": [
+          "v1.5.0 was deployed before the errors."
+        ],
+        "assumptionsContain": [
+          "Aliens were involved."
+        ],
+        "actions": []
+      }
+    },
+    {
+      "name": "a production change resting on a hypothesis rated unlikely is withdrawn; the justified rollback stays",
+      "evidence": [
+        {
+          "ref": "E1",
+          "kind": "deployment",
+          "title": "Deployment of orders v1.5.0 (succeeded)",
+          "summary": "Deployment of orders v1.5.0 (succeeded)",
+          "sourceType": "deployment",
+          "sourceId": "d-new",
+          "service": "orders",
+          "occurredAt": "2026-06-01T11:27:00Z",
+          "data": {
+            "version": "v1.5.0",
+            "status": "SUCCEEDED",
+            "isRollback": false
+          }
+        },
+        {
+          "ref": "E2",
+          "kind": "deployment",
+          "title": "Deployment of orders v1.4.0 (succeeded)",
+          "summary": "Deployment of orders v1.4.0 (succeeded)",
+          "sourceType": "deployment",
+          "sourceId": "d-prev",
+          "service": "orders",
+          "occurredAt": "2026-06-01T11:00:00Z",
+          "data": {
+            "version": "v1.4.0",
+            "status": "SUCCEEDED",
+            "isRollback": false
+          }
+        },
+        {
+          "ref": "E3",
+          "kind": "log_pattern",
+          "title": "300\u00d7 ERROR in orders (new pattern)",
+          "summary": "300\u00d7 ERROR in orders (new pattern)",
+          "sourceType": "log_pattern",
+          "sourceId": "fp:orders",
+          "service": "orders",
+          "occurredAt": "2026-06-01T11:30:00Z",
+          "data": {
+            "level": "ERROR",
+            "count": 300,
+            "kind": "new",
+            "firstSeen": "2026-06-01T11:30:00Z"
+          }
+        },
+        {
+          "ref": "E4",
+          "kind": "service_event",
+          "title": "Flag new_receipt_email enabled",
+          "summary": "Flag new_receipt_email enabled",
+          "sourceType": "service_event",
+          "sourceId": "e1",
+          "service": "orders",
+          "occurredAt": "2026-06-01T11:28:00Z",
+          "data": {
+            "type": "feature_flag"
+          }
+        }
+      ],
+      "report": {
+        "summary": "Errors began after a deployment.",
+        "confidence": 0.6,
+        "analysisMode": "llm",
+        "outcome": "INCIDENT",
+        "assessment": {
+          "outcome": "INCIDENT",
+          "confidence": 0.9,
+          "rationale": "r",
+          "supportingRefs": [],
+          "signals": [],
+          "missingTelemetry": []
+        },
+        "observations": [],
+        "timeline": [],
+        "facts": [],
+        "assumptions": [],
+        "uncertainties": [
+          "Diff not reviewed."
+        ],
+        "hypotheses": [
+          {
+            "title": "Regression introduced by v1.5.0",
+            "description": "d",
+            "confidence": 0.6,
+            "status": "likely",
+            "evidenceRefs": [
+              "E1",
+              "E3"
+            ],
+            "contradictingEvidenceRefs": [],
+            "contradictions": [],
+            "facts": [],
+            "assumptions": [],
+            "gaps": []
+          },
+          {
+            "title": "The feature flag",
+            "description": "d",
+            "confidence": 0.1,
+            "status": "unlikely",
+            "evidenceRefs": [
+              "E4"
+            ],
+            "contradictingEvidenceRefs": [
+              "E1"
+            ],
+            "contradictions": [],
+            "facts": [],
+            "assumptions": [],
+            "gaps": []
+          }
+        ],
+        "nextSteps": [
+          "Review the diff"
+        ],
+        "recommendedActions": [
+          {
+            "type": "rollback_deployment",
+            "title": "Roll back orders to v1.4.0",
+            "description": "Return to the previous version.",
+            "rationale": null,
+            "risk": "MEDIUM",
+            "serviceSlug": "orders",
+            "evidenceRefs": [
+              "E1",
+              "E2",
+              "E3"
+            ],
+            "parameters": {
+              "deploymentId": "d-new",
+              "toVersion": "v1.4.0"
+            }
+          },
+          {
+            "type": "toggle_feature_flag",
+            "title": "Pause the flag as a precaution",
+            "description": "Turn new_receipt_email off.",
+            "rationale": null,
+            "risk": "LOW",
+            "serviceSlug": "orders",
+            "evidenceRefs": [
+              "E4",
+              "E3"
+            ],
+            "parameters": {
+              "featureFlag": "new_receipt_email"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "actions": [
+          [
+            "rollback_deployment",
+            "Roll back orders to v1.4.0"
+          ]
+        ],
+        "nextStepsContain": [
+          "Considered and not recommended (it would change production on the strength of a hypothesis rated unlikely): Pause the flag as a precaution"
+        ]
+      }
+    },
+    {
+      "name": "a rollback is judged by the deployment it rolls back, not by the previous version it cites",
+      "evidence": [
+        {
+          "ref": "E1",
+          "kind": "deployment",
+          "title": "Deployment of orders v1.5.0 (succeeded)",
+          "summary": "Deployment of orders v1.5.0 (succeeded)",
+          "sourceType": "deployment",
+          "sourceId": "d-new",
+          "service": "orders",
+          "occurredAt": "2026-06-01T11:27:00Z",
+          "data": {
+            "version": "v1.5.0",
+            "status": "SUCCEEDED",
+            "isRollback": false
+          }
+        },
+        {
+          "ref": "E2",
+          "kind": "deployment",
+          "title": "Deployment of orders v1.4.0 (succeeded)",
+          "summary": "Deployment of orders v1.4.0 (succeeded)",
+          "sourceType": "deployment",
+          "sourceId": "d-prev",
+          "service": "orders",
+          "occurredAt": "2026-06-01T11:00:00Z",
+          "data": {
+            "version": "v1.4.0",
+            "status": "SUCCEEDED",
+            "isRollback": false
+          }
+        },
+        {
+          "ref": "E3",
+          "kind": "log_pattern",
+          "title": "300\u00d7 ERROR in orders (new pattern)",
+          "summary": "300\u00d7 ERROR in orders (new pattern)",
+          "sourceType": "log_pattern",
+          "sourceId": "fp:orders",
+          "service": "orders",
+          "occurredAt": "2026-06-01T11:30:00Z",
+          "data": {
+            "level": "ERROR",
+            "count": 300,
+            "kind": "new",
+            "firstSeen": "2026-06-01T11:30:00Z"
+          }
+        }
+      ],
+      "report": {
+        "summary": "Errors began after a deployment.",
+        "confidence": 0.6,
+        "analysisMode": "llm",
+        "outcome": "INCIDENT",
+        "assessment": {
+          "outcome": "INCIDENT",
+          "confidence": 0.9,
+          "rationale": "r",
+          "supportingRefs": [],
+          "signals": [],
+          "missingTelemetry": []
+        },
+        "observations": [],
+        "timeline": [],
+        "facts": [],
+        "assumptions": [],
+        "uncertainties": [
+          "Diff not reviewed."
+        ],
+        "hypotheses": [
+          {
+            "title": "Regression introduced by v1.5.0",
+            "description": "d",
+            "confidence": 0.6,
+            "status": "likely",
+            "evidenceRefs": [
+              "E1",
+              "E3"
+            ],
+            "contradictingEvidenceRefs": [],
+            "contradictions": [],
+            "facts": [],
+            "assumptions": [],
+            "gaps": []
+          },
+          {
+            "title": "Regression introduced by the earlier v1.4.0 deployment",
+            "description": "d",
+            "confidence": 0.2,
+            "status": "unlikely",
+            "evidenceRefs": [
+              "E2"
+            ],
+            "contradictingEvidenceRefs": [],
+            "contradictions": [],
+            "facts": [],
+            "assumptions": [],
+            "gaps": []
+          }
+        ],
+        "nextSteps": [
+          "Review the diff"
+        ],
+        "recommendedActions": [
+          {
+            "type": "rollback_deployment",
+            "title": "Roll back orders to v1.4.0",
+            "description": "Return to the previous version.",
+            "rationale": null,
+            "risk": "MEDIUM",
+            "serviceSlug": "orders",
+            "evidenceRefs": [
+              "E1",
+              "E2",
+              "E3"
+            ],
+            "parameters": {
+              "deploymentId": "d-new",
+              "toVersion": "v1.4.0"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "actions": [
+          [
+            "rollback_deployment",
+            "Roll back orders to v1.4.0"
+          ]
+        ],
+        "nextStepsNotContain": [
+          "Considered and not recommended"
+        ]
+      }
+    },
+    {
+      "name": "a high-risk action is moved to next steps when a lower-risk action is proposed",
+      "evidence": [
+        {
+          "ref": "E1",
+          "kind": "deployment",
+          "title": "Deployment of orders v1.5.0 (succeeded)",
+          "summary": "Deployment of orders v1.5.0 (succeeded)",
+          "sourceType": "deployment",
+          "sourceId": "d-new",
+          "service": "orders",
+          "occurredAt": "2026-06-01T11:27:00Z",
+          "data": {
+            "version": "v1.5.0",
+            "status": "SUCCEEDED",
+            "isRollback": false
+          }
+        },
+        {
+          "ref": "E2",
+          "kind": "deployment",
+          "title": "Deployment of orders v1.4.0 (succeeded)",
+          "summary": "Deployment of orders v1.4.0 (succeeded)",
+          "sourceType": "deployment",
+          "sourceId": "d-prev",
+          "service": "orders",
+          "occurredAt": "2026-06-01T11:00:00Z",
+          "data": {
+            "version": "v1.4.0",
+            "status": "SUCCEEDED",
+            "isRollback": false
+          }
+        },
+        {
+          "ref": "E3",
+          "kind": "log_pattern",
+          "title": "300\u00d7 ERROR in orders (new pattern)",
+          "summary": "300\u00d7 ERROR in orders (new pattern)",
+          "sourceType": "log_pattern",
+          "sourceId": "fp:orders",
+          "service": "orders",
+          "occurredAt": "2026-06-01T11:30:00Z",
+          "data": {
+            "level": "ERROR",
+            "count": 300,
+            "kind": "new",
+            "firstSeen": "2026-06-01T11:30:00Z"
+          }
+        },
+        {
+          "ref": "E5",
+          "kind": "document",
+          "title": "Runbook: cache",
+          "summary": "Runbook: cache",
+          "sourceType": "knowledge_chunk",
+          "sourceId": "k1",
+          "service": "orders",
+          "occurredAt": null,
+          "data": {
+            "documentId": "doc1"
+          }
+        }
+      ],
+      "report": {
+        "summary": "Errors began after a deployment.",
+        "confidence": 0.6,
+        "analysisMode": "llm",
+        "outcome": "INCIDENT",
+        "assessment": {
+          "outcome": "INCIDENT",
+          "confidence": 0.9,
+          "rationale": "r",
+          "supportingRefs": [],
+          "signals": [],
+          "missingTelemetry": []
+        },
+        "observations": [],
+        "timeline": [],
+        "facts": [],
+        "assumptions": [],
+        "uncertainties": [
+          "Diff not reviewed."
+        ],
+        "hypotheses": [
+          {
+            "title": "Regression introduced by v1.5.0",
+            "description": "d",
+            "confidence": 0.6,
+            "status": "likely",
+            "evidenceRefs": [
+              "E1",
+              "E3",
+              "E5"
+            ],
+            "contradictingEvidenceRefs": [],
+            "contradictions": [],
+            "facts": [],
+            "assumptions": [],
+            "gaps": []
+          }
+        ],
+        "nextSteps": [
+          "Review the diff"
+        ],
+        "recommendedActions": [
+          {
+            "type": "rollback_deployment",
+            "title": "Roll back orders to v1.4.0",
+            "description": "Return to the previous version.",
+            "rationale": null,
+            "risk": "MEDIUM",
+            "serviceSlug": "orders",
+            "evidenceRefs": [
+              "E1",
+              "E2",
+              "E3"
+            ],
+            "parameters": {
+              "deploymentId": "d-new",
+              "toVersion": "v1.4.0"
+            }
+          },
+          {
+            "type": "run_runbook",
+            "title": "Flush the orders cache",
+            "description": "Flush every order key.",
+            "rationale": null,
+            "risk": "HIGH",
+            "serviceSlug": "orders",
+            "evidenceRefs": [
+              "E5",
+              "E3"
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "actions": [
+          [
+            "rollback_deployment",
+            "Roll back orders to v1.4.0"
+          ]
+        ],
+        "nextStepsContain": [
+          "Higher-risk alternative, only if the lower-risk action is not possible: Flush the orders cache. Flush every order key."
+        ]
+      }
+    },
+    {
+      "name": "without an incident nothing that changes production is offered; a read-only check stays",
+      "evidence": [
+        {
+          "ref": "E2",
+          "kind": "deployment",
+          "title": "Deployment of orders v1.4.0 (succeeded)",
+          "summary": "Deployment of orders v1.4.0 (succeeded)",
+          "sourceType": "deployment",
+          "sourceId": "d-prev",
+          "service": "orders",
+          "occurredAt": "2026-06-01T11:00:00Z",
+          "data": {
+            "version": "v1.4.0",
+            "status": "SUCCEEDED",
+            "isRollback": false
+          }
+        }
+      ],
+      "report": {
+        "summary": "Errors began after a deployment.",
+        "confidence": 0.0,
+        "analysisMode": "heuristic",
+        "outcome": "UNDETERMINED",
+        "assessment": {
+          "outcome": "UNDETERMINED",
+          "confidence": 0.9,
+          "rationale": "r",
+          "supportingRefs": [],
+          "signals": [],
+          "missingTelemetry": []
+        },
+        "observations": [],
+        "timeline": [],
+        "facts": [],
+        "assumptions": [],
+        "uncertainties": [
+          "Diff not reviewed."
+        ],
+        "hypotheses": [],
+        "nextSteps": [
+          "Review the diff"
+        ],
+        "recommendedActions": [
+          {
+            "type": "restart_service",
+            "title": "Restart orders",
+            "description": "Restart the pods.",
+            "rationale": null,
+            "risk": "LOW",
+            "serviceSlug": "orders",
+            "evidenceRefs": [
+              "E2"
+            ]
+          },
+          {
+            "type": "manual",
+            "title": "Read the warning lines",
+            "description": "Check what the retries say.",
+            "rationale": null,
+            "risk": "LOW",
+            "serviceSlug": "orders",
+            "evidenceRefs": [
+              "E2"
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "actions": [
+          [
+            "manual",
+            "Read the warning lines"
+          ]
+        ],
+        "nextStepsContain": [
+          "Considered and not recommended (it would change production, and the evidence supports UNDETERMINED, not an incident with an established cause): Restart orders"
+        ],
+        "effects": {
+          "Read the warning lines": "read_only"
+        }
+      }
+    }
+  ]
+}
