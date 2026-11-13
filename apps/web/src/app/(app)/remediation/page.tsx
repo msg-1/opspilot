@@ -9,7 +9,7 @@ import { Button, Card, EmptyState, ErrorState, Notice, PageHeader, Pagination, S
 import { qs, useApi } from '@/lib/api';
 import { timeAgo, titleCase } from '@/lib/format';
 import { useSession } from '@/lib/session';
-import type { Paged, Remediation, Service } from '@/lib/types';
+import type { Paged, RemediationList, Service } from '@/lib/types';
 
 type View = 'pending' | 'ready' | 'proposed' | 'history';
 const FILTER: Record<View, string> = { pending: 'PENDING_APPROVAL', ready: 'APPROVED,EXECUTING,FAILED', proposed: 'PROPOSED', history: 'EXECUTED,REJECTED,CANCELLED' };
@@ -19,7 +19,7 @@ export default function RemediationPage() {
   const [view, setView] = useState<View>('pending');
   const [page, setPage] = useState(1);
   const [proposing, setProposing] = useState(false);
-  const { data, error, isLoading, refetch } = useApi<Paged<Remediation> & { statusCounts: Record<string, number>; executionMode: string }>(`/remediations${qs({ status: FILTER[view], page, pageSize: 20 })}`, { refetchInterval: 20_000, placeholderData: (p) => p });
+  const { data, error, isLoading, refetch } = useApi<RemediationList>(`/remediations${qs({ status: FILTER[view], page, pageSize: 20 })}`, { refetchInterval: 20_000, placeholderData: (p) => p });
   const services = useApi<Paged<Service>>(proposing ? '/services?pageSize=200' : null);
   const c = data?.statusCounts ?? {};
   const sum = (keys: string) => keys.split(',').reduce((a, k) => a + (c[k] ?? 0), 0);

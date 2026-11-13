@@ -1,252 +1,42 @@
-export interface Paged<T> {
-  data: T[];
-  meta: { page: number; pageSize: number; total: number; totalPages: number };
-}
+// The shapes the API returns. They are generated from the API's response contracts
+// (apps/api/src/contracts/api.ts) by `npm run contracts`; CI fails when the generated file is
+// stale, and the API's own tests check real responses against the same contracts. Nothing
+// here is written by hand except a few names for parts of the generated types.
+import type { Assessment, Verification } from './generated/api';
 
-export interface Ref {
-  id: string;
-  name: string;
-}
-export interface ServiceRef extends Ref {
-  slug: string;
-}
+export type {
+  Approval,
+  Assessment,
+  Deployment,
+  Evidence,
+  ExecutionResult,
+  Hypothesis,
+  Incident,
+  IncidentDetail,
+  IncidentList,
+  Integrity,
+  InvestigationDetail,
+  InvestigationSummary,
+  LogEntry,
+  Member,
+  PageMeta,
+  Paged,
+  Ref,
+  Remediation,
+  RemediationDetail,
+  RemediationList,
+  RemediationSummary,
+  Report,
+  Service,
+  ServiceRef,
+  Session,
+  Statement,
+  Step,
+  TimelineEvent,
+  Verification,
+} from './generated/api';
 
-export interface Incident {
-  id: string;
-  key: string;
-  number: number;
-  title: string;
-  description: string | null;
-  severity: string;
-  status: string;
-  environment: string;
-  source: string;
-  customerImpact: string | null;
-  rootCause: string | null;
-  resolution: string | null;
-  startedAt: string;
-  acknowledgedAt: string | null;
-  mitigatedAt: string | null;
-  resolvedAt: string | null;
-  durationMinutes: number;
-  services: ServiceRef[];
-  assignee: Ref | null;
-  commander: Ref | null;
-  createdBy: Ref | null;
-}
-
-export interface TimelineEvent {
-  id: string;
-  type: string;
-  message: string;
-  actorType: string;
-  actorLabel: string | null;
-  metadata: Record<string, string> | null;
-  createdAt: string;
-}
-
-export interface InvestigationSummary {
-  id: string;
-  question: string;
-  status: string;
-  provider: string | null;
-  model: string | null;
-  /** Which engine wrote the report: a real model, the scripted mock, or the rule-based engine */
-  analysisMode?: 'llm' | 'mock' | 'heuristic' | null;
-  attemptedProvider?: string | null;
-  estimatedCostUsd?: number | null;
-  summary: string | null;
-  confidence: number | null;
-  /** Whether the evidence shows a fault at all */
-  outcome?: Outcome | null;
-  error?: string | null;
-  createdAt: string;
-  startedAt?: string | null;
-  completedAt: string | null;
-  incident?: { id: string; number: number; title: string; severity: string } | null;
-  _count?: { evidence: number; hypotheses: number; steps: number };
-}
-
-export interface Evidence {
-  id: string;
-  ref: string;
-  kind: string;
-  title: string;
-  summary: string;
-  sourceType: string | null;
-  sourceId: string | null;
-  occurredAt: string | null;
-  relevance: number | null;
-  data: Record<string, unknown> | null;
-}
-
-export interface Hypothesis {
-  id: string;
-  rank: number;
-  title: string;
-  description: string;
-  confidence: number;
-  status: string;
-  evidenceRefs: string[];
-  contradictingRefs: string[];
-  contradictions: string[];
-  facts: string[];
-  assumptions: string[];
-  gaps: string[];
-}
-
-export interface Step {
-  id: string;
-  index: number;
-  type: string;
-  title: string;
-  detail: string | null;
-  toolName: string | null;
-  input: unknown;
-  output: unknown;
-  status: string;
-  durationMs: number | null;
-  createdAt: string;
-}
-
-export type Outcome = 'HEALTHY' | 'DEGRADED' | 'INCIDENT' | 'UNDETERMINED';
-
-export interface ClaimCheck {
-  text: string;
-  kind: string;
-  status: 'exact' | 'rounded' | 'calculated' | 'estimate' | 'uncited' | 'unsupported';
-  detail: string;
-  evidenceRef?: string | null;
-}
-
-/** Whether the figures in a statement were found in the evidence it cites. */
-export interface Verification {
-  status: 'verified' | 'partly' | 'unsupported' | 'no_claims';
-  checks: ClaimCheck[];
-}
-
-export interface Statement {
-  statement: string;
-  evidenceRefs: string[];
-  verification?: Verification | null;
-}
-
-/** Whether the evidence shows a fault at all, with what the verdict rests on. */
-export interface Assessment {
-  outcome: Outcome;
-  confidence: number;
-  rationale: string;
-  supportingRefs: string[];
-  signals: { level: 'strong' | 'moderate' | 'weak'; kind: string; text: string; evidenceRefs: string[] }[];
-  missingTelemetry: string[];
-}
-
-export interface Integrity {
-  checked: number;
-  supported: number;
-  flagged: { where: string; text: string; status: ClaimCheck['status']; detail: string }[];
-}
-
-export interface Report {
-  summary: string;
-  confidence: number;
-  analysisMode: 'llm' | 'heuristic' | 'mock';
-  outcome?: Outcome | null;
-  assessment?: Assessment | null;
-  observations?: Statement[];
-  integrity?: Integrity | null;
-  timeline: { timestamp: string; description: string; evidenceRefs: string[] }[];
-  facts: Statement[];
-  assumptions: string[];
-  uncertainties: string[];
-  nextSteps: string[];
-}
-
-export interface RemediationSummary {
-  id: string;
-  title: string;
-  type: string;
-  risk: string;
-  status: string;
-  /** What carrying it out would do: only look, or change something */
-  effect?: 'read_only' | 'state_changing';
-  proposedByType?: string;
-  createdAt?: string;
-}
-
-export interface Remediation extends RemediationSummary {
-  description: string;
-  rationale: string | null;
-  parameters: Record<string, unknown> | null;
-  requiredApprovals: number;
-  approvalsGranted: number;
-  proposedByType: string;
-  proposedBy: { id: string | null; name: string } | null;
-  requestedBy: Ref | null;
-  requestedAt: string | null;
-  executedBy: Ref | null;
-  executedAt: string | null;
-  executionResult: { mode: string; success: boolean; outcome?: 'applied' | 'not_applied' | 'unknown'; summary: string; detail?: Record<string, unknown>; contentHash?: string; attempt?: number } | null;
-  effectReasons?: string[] | null;
-  /** Hash of exactly what an approver is shown; sent back with the approval */
-  currentHash?: string;
-  attempts?: number;
-  service: ServiceRef | null;
-  incident: { id: string; number: number; title: string; severity: string; status: string } | null;
-  investigation: { id: string; question: string; summary: string | null } | null;
-  approvals: { id: string; decision: string; comment: string | null; createdAt: string; approver: Ref | null; counts?: boolean; supersededAt?: string | null }[];
-  createdAt: string;
-  executionMode?: 'webhook' | 'manual';
-  allowSelfApproval?: boolean;
-}
-
-export interface Deployment {
-  id: string;
-  version: string;
-  environment: string;
-  status: string;
-  commitSha: string | null;
-  branch: string | null;
-  deployedBy: string | null;
-  description: string | null;
-  source: string;
-  isRollback: boolean;
-  startedAt: string;
-  finishedAt: string | null;
-  service: ServiceRef;
-}
-
-export interface Service extends ServiceRef {
-  description: string | null;
-  tier: string;
-  lifecycle: string;
-  language: string | null;
-  repoUrl: string | null;
-  runbookUrl: string | null;
-  health: string;
-  healthNote: string | null;
-  tags: string[];
-  ownerTeam: Ref | null;
-  ownerTeamId: string | null;
-}
-
-export interface LogEntry {
-  id: string;
-  timestamp: string;
-  level: string;
-  message: string;
-  environment: string;
-  host: string | null;
-  traceId: string | null;
-  fingerprint: string;
-  attributes: Record<string, unknown> | null;
-  service: ServiceRef | null;
-}
-
-export interface Member {
-  id: string;
-  role: string;
-  joinedAt: string;
-  user: { id: string; name: string; email: string; title: string | null; lastLoginAt: string | null };
-  teams: { id: string; name: string; isLead: boolean; onCall: boolean }[];
-}
+/** Whether the evidence shows a fault at all. */
+export type Outcome = Assessment['outcome'];
+/** One figure in a statement, and whether the cited evidence holds it. */
+export type ClaimCheck = Verification['checks'][number];

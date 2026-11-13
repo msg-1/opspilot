@@ -17,7 +17,8 @@
     "db:seed": "tsx --env-file-if-exists=../../.env prisma/seed.ts",
     "db:studio": "dotenv -e ../../.env -- prisma studio",
     "db:migrate:new": "dotenv -e ../../.env -- prisma migrate dev --create-only",
-    "simulate": "tsx --env-file-if-exists=../../.env scripts/simulate.ts"
+    "simulate": "tsx --env-file-if-exists=../../.env scripts/simulate.ts",
+    "contracts:api": "tsx scripts/export-api-contract.ts"
   },
   "dependencies": {
     "@opentelemetry/auto-instrumentations-node": "^0.83.0",

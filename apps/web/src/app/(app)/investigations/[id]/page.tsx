@@ -12,22 +12,9 @@ import { api, useApi } from '@/lib/api';
 import { clock, dateTime, timeAgo, titleCase } from '@/lib/format';
 import { useAction } from '@/lib/hooks';
 import { useSession } from '@/lib/session';
-import type { Evidence, Hypothesis, InvestigationSummary, RemediationSummary, Report, Step } from '@/lib/types';
+import type { Evidence, Hypothesis, InvestigationDetail, Step } from '@/lib/types';
 
-interface Detail extends InvestigationSummary {
-  plan: { objective: string; services: string[]; windowFrom: string; windowTo: string; steps: { description: string; tool: string }[] } | null;
-  report: Report | null;
-  steps: Step[];
-  evidence: Evidence[];
-  hypotheses: Hypothesis[];
-  remediations: RemediationSummary[];
-  createdBy: { id: string; name: string } | null;
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number;
-  llmCalls: number;
-  llmLatencyMs: number;
-}
+type Detail = InvestigationDetail;
 
 const KIND: Record<string, { icon: React.ElementType; label: string }> = {
   log_pattern: { icon: ScrollText, label: 'Log pattern' },

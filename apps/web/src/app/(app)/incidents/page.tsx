@@ -10,7 +10,7 @@ import { api, qs, useApi } from '@/lib/api';
 import { duration, timeAgo } from '@/lib/format';
 import { useAction, useDebounced } from '@/lib/hooks';
 import { useSession } from '@/lib/session';
-import type { Incident, Paged, Service } from '@/lib/types';
+import type { Incident, IncidentList, Paged, Service } from '@/lib/types';
 
 type View = 'active' | 'resolved' | 'all';
 
@@ -75,7 +75,7 @@ function IncidentsPage() {
   const q = useDebounced(search);
   const creating = params.get('new') === '1';
 
-  const { data, error, isLoading, refetch } = useApi<Paged<Incident> & { statusCounts: Record<string, number> }>(
+  const { data, error, isLoading, refetch } = useApi<IncidentList>(
     `/incidents${qs({ q, severity, page, pageSize: 20, active: view === 'all' ? undefined : view === 'active' ? 'true' : 'false', sort: view === 'active' ? 'severity' : 'startedAt' })}`,
     { refetchInterval: 30_000, placeholderData: (prev) => prev },
   );

@@ -21,6 +21,7 @@ const listSelect = {
   provider: true,
   model: true,
   analysisMode: true,
+  attemptedProvider: true,
   estimatedCostUsd: true,
   summary: true,
   confidence: true,

@@ -25,14 +25,27 @@ const hypothesisSchema = z.object({
 
 const claimStatus = z.enum(CLAIM_STATUSES);
 // Set by the AI service's claim checker (services/ai/app/claims.py); carried through unchanged.
-const verificationSchema = z
-  .object({
-    status: z.enum(VERIFICATION_STATUSES),
-    checks: z.array(z.object({ text: z.string(), kind: z.enum(CLAIM_KINDS), status: claimStatus, detail: z.string(), evidenceRef: z.string().nullable().optional() })).default([]),
-  })
-  .nullable()
-  .optional();
-const statementSchema = z.object({ statement: z.string(), evidenceRefs: refs, verification: verificationSchema });
+export const verificationObject = z.object({
+  status: z.enum(VERIFICATION_STATUSES),
+  checks: z.array(z.object({ text: z.string(), kind: z.enum(CLAIM_KINDS), status: claimStatus, detail: z.string(), evidenceRef: z.string().nullable().optional() })).default([]),
+});
+const verificationSchema = verificationObject.nullable().optional();
+export const statementSchema = z.object({ statement: z.string(), evidenceRefs: refs, verification: verificationSchema });
+
+export const assessmentObject = z.object({
+  outcome: z.enum(OUTCOMES),
+  confidence: z.number().min(0).max(1),
+  rationale: z.string().max(4000),
+  supportingRefs: refs,
+  signals: z.array(z.object({ level: z.enum(SIGNAL_LEVELS), kind: z.string(), text: z.string(), evidenceRefs: refs })).default([]),
+  missingTelemetry: z.array(z.string()).default([]),
+});
+
+export const integrityObject = z.object({
+  checked: z.number().int().min(0),
+  supported: z.number().int().min(0),
+  flagged: z.array(z.object({ where: z.string(), text: z.string(), status: claimStatus, detail: z.string() })).default([]),
+});
 
 export const reportSchema = z.object({
   summary: z.string().min(1).max(6000),
@@ -40,26 +53,9 @@ export const reportSchema = z.object({
   analysisMode: z.enum(ANALYSIS_MODES),
   // Whether the evidence shows a fault at all. Computed by the AI service from the evidence.
   outcome: z.enum(OUTCOMES).nullable().optional(),
-  assessment: z
-    .object({
-      outcome: z.enum(OUTCOMES),
-      confidence: z.number().min(0).max(1),
-      rationale: z.string().max(4000),
-      supportingRefs: refs,
-      signals: z.array(z.object({ level: z.enum(SIGNAL_LEVELS), kind: z.string(), text: z.string(), evidenceRefs: refs })).default([]),
-      missingTelemetry: z.array(z.string()).default([]),
-    })
-    .nullable()
-    .optional(),
+  assessment: assessmentObject.nullable().optional(),
   observations: z.array(statementSchema).default([]),
-  integrity: z
-    .object({
-      checked: z.number().int().min(0),
-      supported: z.number().int().min(0),
-      flagged: z.array(z.object({ where: z.string(), text: z.string(), status: claimStatus, detail: z.string() })).default([]),
-    })
-    .nullable()
-    .optional(),
+  integrity: integrityObject.nullable().optional(),
   // The agent never confirms a root cause; a human does that on the incident.
   rootCauseConfirmed: z.literal(false).default(false),
   timeline: z.array(z.object({ timestamp: z.string(), description: z.string(), evidenceRefs: refs })).default([]),

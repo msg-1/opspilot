@@ -55,6 +55,12 @@ jobs:
       - run: npm run db:generate -w @opspilot/api
       - run: npm run lint -w @opspilot/api
       - run: npm run typecheck -w @opspilot/api
+      # The web app's API types are generated from the API's response contracts. A contract
+      # changed without regenerating them fails here, so the two cannot drift apart unnoticed.
+      - name: Generated frontend API types are up to date
+        run: |
+          npm run contracts:api -w @opspilot/api
+          git diff --exit-code -- contracts/api.schema.json apps/web/src/lib/generated/api.ts
 
   database:
     name: Database integration tests (PostgreSQL + pgvector)
