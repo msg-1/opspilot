@@ -44,6 +44,14 @@ const schema = z.object({
   QUEUE_PREFIX: z.string().regex(/^[A-Za-z0-9:_-]+$/).default('bull'),
   // Base delay for exponential retry backoff of failed jobs
   QUEUE_BACKOFF_MS: z.coerce.number().int().min(1).default(5000),
+  // How long a worker's claim on a job lasts without renewal, and how often claims are checked.
+  // A job whose worker died is handed to another worker after roughly their sum.
+  QUEUE_LOCK_MS: z.coerce.number().int().min(100).default(30_000),
+  QUEUE_STALLED_INTERVAL_MS: z.coerce.number().int().min(100).default(30_000),
+  // The longest one investigation may take, from the request to the AI service to its last event
+  INVESTIGATION_TIMEOUT_MS: z.coerce.number().int().min(100).default(15 * 60_000),
+  // On shutdown the worker lets running jobs finish for this long, then stops them and records them as interrupted
+  WORKER_SHUTDOWN_GRACE_MS: z.coerce.number().int().min(0).default(10_000),
   BCRYPT_ROUNDS: z.coerce.number().int().min(4).max(15).default(12),
 });
 

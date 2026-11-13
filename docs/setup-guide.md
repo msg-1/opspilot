@@ -33,7 +33,7 @@ docker compose --profile app up -d --build
 | URL | Service |
 |---|---|
 | http://localhost:3000 | Web app |
-| http://localhost:4000 | API (`/health`, `/ready`, `/metrics`) |
+| http://localhost:4000 | API (`/health`, `/ready`, `/metrics`). The worker has the same three on port 9464 inside its container |
 | http://localhost:8000 | AI service (`/health`, `/metrics`) |
 
 The `migrate` container applies migrations and seeds demo data if the database is empty (set `SEED_DEMO_DATA=false` to skip the demo data). Stop with `docker compose --profile app down` (add `-v` to also delete the database volume).
@@ -141,14 +141,29 @@ Sign in as `shop-demo@example.com` / `OpsPilot-demo-1`. No model is called and n
 ## 10. Tests
 
 ```bash
-npm test                 # API: 90 integration tests on database opspilot_test (6 of them use Redis and skip without it) · web: 47 tests
-npm run test:ai          # 170 tests, all against mocked model APIs or hand-written evidence
+npm test                 # API: 120 integration tests on database opspilot_test (25 of them use Redis and skip without it) · web: 47 tests
+npm run test:ai          # 171 tests, all against mocked model APIs or hand-written evidence
 npm run contracts:check  # shared contracts and generated frontend API types are up to date
 npm run evals -- --heuristic          # 11 scenarios on the rule-based engine
 npm run db:seed && npm run test:e2e   # 9 browser tests; needs the stack running on the deterministic engine:
                                       #   AI_PROVIDER=deterministic docker compose --profile app up -d ai
                                       # (they skip themselves if a paid model is active)
 ```
+
+### Browser tests and failure drills on a throwaway stack
+
+The browser tests need a freshly seeded organisation, and the failure drills kill and restart services. Neither belongs on a stack you are using, so both have their own:
+
+```bash
+npm run isolated:up      # a second copy of the application: web :13000, API :14000, AI :18000, Postgres :15432, Redis :16379
+npm run isolated:e2e     # 11 browser tests, including two that stop the AI service and Redis and check what the page shows
+npm run drills           # 11 drills: worker killed and stopped mid-run, AI service, Redis and PostgreSQL stopped and started, full restart, …
+npm run isolated:down    # removes it, including its database volume
+```
+
+It is a separate Compose project (`opspilot-isolated`) with its own containers, network and volume, started from a generated `.env.isolated` with fresh secrets, `AI_PROVIDER=deterministic` and no provider key. It does not read `.env`, and nothing it does can reach the default project or its data. Run the browser tests before the drills, on a fresh stack (`isolated:down`, then `isolated:up`): they assume the seeded state. This is what the `End-to-end` workflow runs on every pull request. Results and limits: [reliability-readiness-report.md](reliability-readiness-report.md).
+
+The API tests that simulate outages (`apps/api/tests/reliability.test.ts`, `outage.test.ts`) need nothing extra: they reach Redis and PostgreSQL through a proxy inside the test and cut that, never the server.
 
 `opspilot_test` is created by `infra/postgres/init.sql` the first time the Postgres volume is created. If your volume predates that: `docker exec opspilot-postgres-1 psql -U opspilot -d opspilot -c 'CREATE DATABASE opspilot_test'`.
 

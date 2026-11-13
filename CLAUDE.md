@@ -21,6 +21,8 @@ npm run test:ai             # pytest
 npm run evals -- --heuristic
 npm run demo:up && npm run demo:e2e   # local microservices demo, rule-based engine only (about 25 minutes)
 npm run test:e2e            # needs the stack running and a fresh `npm run db:seed`
+npm run isolated:up && npm run isolated:e2e && npm run drills   # throwaway stack on its own ports: browser tests, then failure drills (what CI's e2e.yml runs)
+npm run isolated:down       # removes that stack and its volume; never touches the default project
 npm run lint && npm run typecheck
 npm run contracts            # regenerate shared contracts and frontend API types (contracts:check fails if stale)
 npm run tracing:up && npm run trace -- --latest   # local traces of the platform itself (docs/tracing.md)
@@ -45,6 +47,8 @@ cd services/ai && uv run ruff check .
 - **Frontend API types are generated.** `apps/web/src/lib/types.ts` only re-exports `lib/generated/api.ts`, which comes from `apps/api/src/contracts/api.ts`. To use a new response field in the web app, add it to the contract, run `npm run contracts`, and let `apps/api/tests/api-contract.test.ts` prove the API returns it.
 - **Rule-based engine.** Each rule in `services/ai/app/rules.py` has its own tests (`tests/test_rules.py`); `tests/test_heuristics_golden.py` pins every report the engine produces. Regenerate the snapshot (`OPSPILOT_WRITE_GOLDEN=1`) only for an intended change, and say so in the commit.
 - **Spans carry ids and counts only.** No question text, tool arguments, log lines, prompts, error messages, credentials or anything identifying a person. Both services scrub every span on export; the cases are in `contracts/fixtures/span-scrubbing.json`. See `docs/tracing.md`.
+- **An investigation runs at most once and reaches exactly one end.** Starting a run is a conditional update (`runner.ts`); everything that follows from a report happens only if `persistFinal` stored it; a run whose worker is gone is recorded as interrupted (`markInterrupted`), never restarted. Do not add queue retries to `investigation`, and do not write a terminal state unconditionally. The cases are in `apps/api/tests/reliability.test.ts` and `outage.test.ts`.
+- **Failure experiments use the isolated stack or the test proxies.** `scripts/isolated-stack.mjs` is a separate Compose project (`opspilot-isolated`) with its own volume, ports and generated secrets; `apps/api/tests/faults.ts` cuts Redis and PostgreSQL with a TCP proxy and never stops a server. Never stop, kill or reset containers of the default project for a test.
 - **Next.js page files** may only export the page component. Shared components go in `src/components`.
 - **Audit:** mutating routes call `audit(req, action, resourceType, id, metadata)`. Never put secrets in metadata.
 - **Pinned majors:** TypeScript 5.9, Prisma 6, Next 15, Zod 3, Vitest 3 (see docs/decisions.md). Do not bump majors casually.

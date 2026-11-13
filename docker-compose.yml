@@ -7,6 +7,9 @@
 #   Observability add-on:           docker compose --profile observability up -d
 #   Traces of OPSILUME itself:      npm run tracing:up, then npm run trace -- <investigation id> (docs/tracing.md)
 #   Demo microservices (real telemetry and failures to investigate): npm run demo:up, see demo/README.md
+#   A second, throwaway copy for browser tests and failure drills: npm run isolated:up (docs/reliability-readiness-report.md)
+# The published ports can be moved with HOST_PORT_WEB, HOST_PORT_API, HOST_PORT_AI, HOST_PORT_POSTGRES and
+# HOST_PORT_REDIS; that, a different project name and its own volume are what keep the copy apart.
 name: opspilot
 
 x-app-env: &app-env
@@ -45,7 +48,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-opspilot}
       POSTGRES_DB: opspilot
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:${HOST_PORT_POSTGRES:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
@@ -58,8 +61,14 @@ services:
   redis:
     restart: unless-stopped
     image: redis:7-alpine
+    # The queue holds work that was accepted and not yet done. With the default snapshots
+    # alone, a killed Redis forgets everything since the last one; the append-only file,
+    # written once a second and kept on a volume, limits that to about a second.
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes:
+      - redisdata:/data
     ports:
-      - "127.0.0.1:6379:6379"
+      - "127.0.0.1:${HOST_PORT_REDIS:-6379}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -88,14 +97,16 @@ services:
     command: ["node", "dist/src/server.js"]
     environment: *app-env
     ports:
-      - "127.0.0.1:4000:4000"
+      - "127.0.0.1:${HOST_PORT_API:-4000}:4000"
     depends_on:
       migrate:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
+    # Readiness, not liveness: healthy means it can reach PostgreSQL and Redis, so "healthy"
+    # is what the web container and `--wait` are really waiting for.
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://localhost:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4000/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
       timeout: 3s
       retries: 10
@@ -108,8 +119,11 @@ services:
       dockerfile: apps/api/Dockerfile
     command: ["node", "dist/src/worker.js"]
     environment: *app-env
+    # On stop the worker lets running jobs finish for WORKER_SHUTDOWN_GRACE_MS (10 s), then
+    # records what is still running as interrupted. It needs longer than Docker's default 10 s.
+    stop_grace_period: 30s
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://localhost:9464/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://localhost:9464/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 15s
       timeout: 3s
       retries: 5
@@ -152,7 +166,7 @@ services:
       timeout: 3s
       retries: 5
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:${HOST_PORT_AI:-8000}:8000"
 
   web:
     restart: unless-stopped
@@ -168,7 +182,7 @@ services:
       timeout: 3s
       retries: 5
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:${HOST_PORT_WEB:-3000}:3000"
     depends_on:
       api:
         condition: service_healthy
@@ -347,3 +361,4 @@ services:
 
 volumes:
   pgdata:
+  redisdata:

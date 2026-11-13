@@ -220,7 +220,7 @@ export default function IncidentPage() {
           </>
         }
       />
-      <FormError error={actionError} />
+      {!asking && <FormError error={actionError} />}
       {incident.description && <p className="mb-4 max-w-4xl text-sm whitespace-pre-wrap text-ink-2">{incident.description}</p>}
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
@@ -314,6 +314,8 @@ export default function IncidentPage() {
       </div>
 
       <Modal open={asking} onClose={() => setAsking(false)} title={`Investigate ${incident.key}`} wide footer={<><Button onClick={() => setAsking(false)}>Cancel</Button><Button variant="primary" loading={busy === 'ask'} disabled={question.trim().length < 8} onClick={async () => { const r = await run(() => api.post<{ id: string }>('/investigations', { question, incidentId: incident.id }), 'ask'); if (r) router.push(`/investigations/${r.id}`); }}>Start investigation</Button></>}>
+        {/* A refusal (limits reached, queue unreachable) is shown where the person is looking, not behind the dialog. */}
+        <FormError error={actionError} />
         <Field label="What should be investigated?" hint="The investigation is read-only. It may propose remediation actions, which always need human approval.">
           {(fid) => <Textarea id={fid} rows={4} value={question} onChange={(e) => setQuestion(e.target.value)} />}
         </Field>

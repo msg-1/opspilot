@@ -8,6 +8,9 @@ import { reportSchema } from './schema';
 /** Thrown out of the stream when the investigation was cancelled while it was running. */
 export class Cancelled extends Error {}
 
+/** Thrown when a report arrives for an investigation that already reached another end (failed, interrupted, cancelled). */
+export class Superseded extends Error {}
+
 /**
  * Consumes the event stream of one investigation: records steps and evidence as they arrive,
  * and on the final event validates the report, applies the guardrails and stores the result.
@@ -49,10 +52,14 @@ export function eventConsumer(investigationId: string, abort: AbortController) {
         break;
       }
       case 'final': {
+        // One report per run. Anything after it is ignored.
+        if (state.finished) break;
         const parsed = reportSchema.safeParse(event.report);
         if (!parsed.success) throw new Error(`AI service returned a malformed report: ${parsed.error.issues[0]?.message ?? 'invalid'}`);
         const report = await withSpan('investigation.guardrails', {}, () => applyGuardrails(parsed.data, evidenceRefs, addStep, deploymentRefs));
-        await withSpan('investigation.persist', {}, () => persistFinal(investigationId, report, event.usage, event.engine));
+        const stored = await withSpan('investigation.persist', {}, () => persistFinal(investigationId, report, event.usage, event.engine));
+        // Not stored: the investigation stopped being a running one while the report was on its way.
+        if (!stored) throw new Superseded();
         annotate({ 'opspilot.engine.mode': report.analysisMode, 'opspilot.investigation.outcome': report.outcome ?? 'none', 'opspilot.investigation.evidence_count': evidenceRefs.size });
         state.finished = true;
         break;

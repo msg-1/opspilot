@@ -1,11 +1,13 @@
 import { Router } from 'express';
 import { aiService } from '../integrations/aiService';
+import { env } from '../config/env';
 import { writeAudit } from '../lib/audit';
 import { logger } from '../lib/logger';
 import { prisma } from '../lib/prisma';
 import { requirePermission } from '../middleware/auth';
 import { enqueue, queueStats, redisPing, registerProcessor } from '../queues';
 import { addIncidentEvent } from './incidents';
+import { markInterrupted } from './investigations/persistence';
 import { evaluateAlerts } from './monitoring';
 
 // ───────────────────────── Scheduled jobs ─────────────────────────
@@ -16,8 +18,8 @@ registerProcessor('alert-eval', async () => {
   await reapStranded();
 });
 
-// Longer than any job can legitimately take (the AI call itself times out at 15 minutes).
-const STALE = { runningInvestigation: 20 * 60_000, queuedInvestigation: 60 * 60_000, executingRemediation: 5 * 60_000, indexingDocument: 10 * 60_000 };
+// Longer than any job can legitimately take (the AI call itself times out after INVESTIGATION_TIMEOUT_MS).
+const STALE = { runningInvestigation: env.INVESTIGATION_TIMEOUT_MS + 5 * 60_000, queuedInvestigation: 60 * 60_000, orphanedInvestigation: 2 * 60_000, executingRemediation: 5 * 60_000, indexingDocument: 10 * 60_000 };
 
 /**
  * A job that dies with its process leaves its row in an in-progress state that no retry will
@@ -25,18 +27,22 @@ const STALE = { runningInvestigation: 20 * 60_000, queuedInvestigation: 60 * 60_
  */
 export async function reapStranded(now = new Date()) {
   const before = (ms: number) => new Date(now.getTime() - ms);
-  const interrupted = 'Interrupted: the worker stopped before this investigation finished. No conclusions were recorded. Start it again.';
-
   const investigations = await prisma.investigation.findMany({
     where: { OR: [{ status: 'RUNNING', startedAt: { lt: before(STALE.runningInvestigation) } }, { status: 'QUEUED', createdAt: { lt: before(STALE.queuedInvestigation) } }] },
-    select: { id: true, organizationId: true, _count: { select: { steps: true } } },
+    select: { id: true },
   });
-  for (const inv of investigations) {
-    const claimed = await prisma.investigation.updateMany({ where: { id: inv.id, status: { in: ['RUNNING', 'QUEUED'] } }, data: { status: 'FAILED', error: interrupted, completedAt: now } });
-    if (!claimed.count) continue;
-    await prisma.investigationStep.create({ data: { investigationId: inv.id, index: inv._count.steps, type: 'error', title: 'Investigation interrupted', detail: interrupted, status: 'failed' } });
-    await writeAudit({ organizationId: inv.organizationId, actorType: 'system', actorLabel: 'OPSILUME worker', action: 'investigation.interrupted', resourceType: 'investigation', resourceId: inv.id });
-  }
+  for (const inv of investigations) await markInterrupted(inv.id, now);
+
+  // An investigation that has waited for minutes may have lost its job (Redis lost its data).
+  // Its job is put on the queue again under the same id: if the job is still there this adds
+  // nothing, and since the investigation never started, running it now runs it once.
+  const waiting = await prisma.investigation.findMany({
+    where: { status: 'QUEUED', createdAt: { lt: before(STALE.orphanedInvestigation), gte: before(STALE.queuedInvestigation) } },
+    select: { id: true },
+    orderBy: { createdAt: 'asc' },
+    take: 50,
+  });
+  for (const inv of waiting) await enqueue('investigation', { investigationId: inv.id }, { jobId: inv.id }).catch(() => undefined);
 
   const unknown = 'Execution was interrupted and its outcome is unknown. Check the target system before retrying: the change may or may not have been applied.';
   const actions = await prisma.remediationAction.findMany({ where: { status: 'EXECUTING', updatedAt: { lt: before(STALE.executingRemediation) } }, select: { id: true, organizationId: true, incidentId: true, title: true } });

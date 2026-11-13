@@ -106,3 +106,42 @@ def test_the_investigation_continues_the_trace_it_was_called_with(spans):
     exported = json.dumps([{"name": s.name, "attributes": dict(s.attributes), "events": [dict(e.attributes) for e in s.events], "status": s.status.description} for s in recorded])
     for forbidden in ("ada@example.com", "checkout failing", "tool-token-value", TOKEN, "x-internal-token"):
         assert forbidden not in exported
+
+
+class _FailingExporter(InMemorySpanExporter):
+    """A trace store that cannot be written to. Only fails while `broken` is set, so other tests are unaffected."""
+
+    broken = False
+    attempts = 0
+
+    def export(self, spans):
+        if not self.broken:
+            return super().export(spans)
+        type(self).attempts += 1
+        raise ConnectionError("trace store is not there")
+
+
+_provider.add_span_processor(SimpleSpanProcessor(ScrubbingExporter(_FailingExporter())))
+
+
+def test_an_investigation_is_unaffected_by_a_trace_store_that_cannot_be_reached(spans):
+    """Tracing is an observer. When exporting fails, the investigation must still run and report honestly."""
+    main.app.dependency_overrides[get_settings] = lambda: Settings(_env_file=None, internal_service_token=TOKEN, ollama_base_url="http://127.0.0.1:9")
+    _FailingExporter.broken, _FailingExporter.attempts = True, 0
+    try:
+        body = {"investigationId": "inv-43", "question": "Is billing healthy?", "organizationName": "Org", "apiUrl": "http://127.0.0.1:9", "toolToken": "tool-token-value"}
+        with TestClient(main.app).stream("POST", "/v1/investigations/run", json=body, headers={"x-internal-token": TOKEN}) as res:
+            assert res.status_code == 200
+            events = [json.loads(line) for line in res.iter_lines() if line]
+    finally:
+        _FailingExporter.broken = False
+        main.app.dependency_overrides.clear()
+
+    assert _FailingExporter.attempts > 0, "the failing exporter was never in the path"
+    assert [e["type"] for e in events if e["type"] in ("final", "error")] == ["final"]
+    report = events[-1]["report"]
+    # Nothing listens at the API address either, so no data could be read. That is not good
+    # health: the outcome is undetermined, with no hypothesis and nothing recommended.
+    assert report["assessment"]["outcome"] == "UNDETERMINED"
+    assert report["hypotheses"] == [] and report["recommendedActions"] == []
+    assert report["analysisMode"] == "heuristic"

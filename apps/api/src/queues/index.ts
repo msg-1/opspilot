@@ -17,7 +17,13 @@ export interface JobPayloads {
 }
 export type JobName = keyof JobPayloads;
 
-type Processor<N extends JobName> = (data: JobPayloads[N]) => Promise<void>;
+/** What the queue knows about this delivery of a job. */
+export interface Delivery {
+  /** The job is being handed out again because the worker that had it stopped renewing its claim. */
+  redelivered: boolean;
+}
+
+type Processor<N extends JobName> = (data: JobPayloads[N], delivery: Delivery) => Promise<void>;
 
 /**
  * A job as it sits in Redis: the payload, plus the trace context of whoever enqueued it, so
@@ -52,6 +58,12 @@ export function registerProcessor<N extends JobName>(name: N, processor: Process
   processors.set(name, processor as unknown as Processor<JobName>);
 }
 
+// Called when the worker is shutting down and jobs are still running after the grace period.
+const shutdownHooks: (() => unknown)[] = [];
+export function onWorkerShutdown(hook: () => unknown) {
+  shutdownHooks.push(hook);
+}
+
 let connection: IORedis | undefined;
 let producerConnection: IORedis | undefined;
 const queues = new Map<JobName, Queue>();
@@ -59,7 +71,10 @@ const PRODUCER_TIMEOUT_MS = 3000;
 
 /** Worker connection: BullMQ needs unlimited retries on its blocking connections. */
 function redis() {
-  connection ??= new IORedis(env.REDIS_URL, { maxRetriesPerRequest: null });
+  if (!connection) {
+    connection = new IORedis(env.REDIS_URL, { maxRetriesPerRequest: null });
+    connection.on('error', (err) => logger.debug({ err: err.message }, 'redis worker connection error'));
+  }
   return connection;
 }
 
@@ -100,14 +115,14 @@ function queueFor(name: JobName, forWorker = false) {
   return queue;
 }
 
-async function run(name: JobName, envelope: unknown, jobId?: string) {
+async function run(name: JobName, envelope: unknown, jobId?: string, delivery: Delivery = { redelivered: false }) {
   const processor = processors.get(name);
   if (!processor) throw new Error(`No processor registered for job "${name}"`);
   const { _trace: parent, ...data } = (envelope ?? {}) as Envelope;
   const stop = jobDuration.startTimer({ queue: name });
   try {
     await withSpan(`process ${name}`, { kind: SpanKind.CONSUMER, parent, attributes: { ...jobAttributes(name, data), ...(jobId ? { 'messaging.message.id': jobId } : {}) } }, () =>
-      processor(data as JobPayloads[JobName]),
+      processor(data as JobPayloads[JobName], delivery),
     );
     jobsProcessed.inc({ queue: name, status: 'completed' });
   } catch (err) {
@@ -151,20 +166,72 @@ export async function enqueue<N extends JobName>(name: N, data: JobPayloads[N], 
  */
 export async function startWorkers({ schedulers = true }: { schedulers?: boolean } = {}) {
   const workers = (Object.keys(CONFIG) as JobName[]).map((name) => {
-    const worker = new Worker(name, async (job) => run(name, job.data, job.id), { connection: redis(), concurrency: CONFIG[name].concurrency, prefix: env.QUEUE_PREFIX });
+    // attemptsStarted counts every time the job was handed to a worker; stalledCounter every time its claim lapsed.
+    const worker = new Worker(name, async (job) => run(name, job.data, job.id, { redelivered: job.attemptsStarted > 1 || job.stalledCounter > 0 }), {
+      connection: redis(),
+      concurrency: CONFIG[name].concurrency,
+      prefix: env.QUEUE_PREFIX,
+      lockDuration: env.QUEUE_LOCK_MS,
+      stalledInterval: env.QUEUE_STALLED_INTERVAL_MS,
+    });
     worker.on('failed', (job, err) => logger.error({ err, queue: name, jobId: job?.id }, 'job failed'));
+    // Without a listener a connection error is an unhandled 'error' event. Redis going away is
+    // survivable: the connection retries, and work continues when it is back.
+    worker.on('error', (err) => logger.warn({ err: err.message, queue: name }, 'worker connection error'));
+    worker.on('stalled', (jobId) => logger.warn({ queue: name, jobId }, 'job stalled: its worker stopped renewing its claim'));
     worker.on('completed', (job) => logger.debug({ queue: name, jobId: job.id }, 'job completed'));
     return worker;
   });
+  let schedulerCheck: NodeJS.Timeout | undefined;
   if (schedulers) {
     await queueFor('alert-eval', true).upsertJobScheduler('alert-eval-every-minute', { every: 60_000 }, { name: 'alert-eval', data: {} });
     await queueFor('log-retention', true).upsertJobScheduler('log-retention-hourly', { every: 3_600_000 }, { name: 'log-retention', data: {} });
+    // The schedules live in Redis. If Redis loses its data they are gone, and with them alert
+    // evaluation, retention and the sweep for stranded work, until the next restart. So the
+    // worker looks once a minute and puts back what is missing. Only what is missing: writing
+    // an existing schedule again would push its next run back.
+    schedulerCheck = setInterval(() => void ensureSchedulers().catch((err: Error) => logger.debug({ err: err.message }, 'could not check the job schedules')), 60_000);
+    schedulerCheck.unref();
   }
   logger.info({ queues: Object.keys(CONFIG) }, 'workers started');
-  return async () => {
-    await Promise.all(workers.map((w) => w.close()));
+  /**
+   * Stops taking new jobs and waits for the running ones. With `graceMs`, jobs still running
+   * after that long are told to stop (each records itself as interrupted) and are given a few
+   * more seconds; after that the workers are closed regardless. Without it, waits indefinitely.
+   */
+  return async ({ graceMs }: { graceMs?: number } = {}) => {
+    clearInterval(schedulerCheck);
+    const closing = Promise.all(workers.map((w) => w.close()));
+    if (graceMs !== undefined) {
+      const finished = Symbol('finished');
+      const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms).unref());
+      if ((await Promise.race([closing.then(() => finished), pause(graceMs)])) !== finished) {
+        logger.warn({ graceMs }, 'jobs still running after the shutdown grace period; stopping them');
+        for (const hook of shutdownHooks) hook();
+        if ((await Promise.race([closing.then(() => finished), pause(5000)])) !== finished) await Promise.all(workers.map((w) => w.close(true)));
+      }
+    }
+    await closing.catch(() => undefined);
     await closeQueues();
   };
+}
+
+const SCHEDULES = [
+  { queue: 'alert-eval', id: 'alert-eval-every-minute', every: 60_000 },
+  { queue: 'log-retention', id: 'log-retention-hourly', every: 3_600_000 },
+] as const;
+
+/** Puts back any repeating job that is missing from Redis. Returns the ids it restored. */
+export async function ensureSchedulers() {
+  const restored: string[] = [];
+  for (const schedule of SCHEDULES) {
+    const queue = queueFor(schedule.queue, true);
+    if (await queue.getJobScheduler(schedule.id)) continue;
+    await queue.upsertJobScheduler(schedule.id, { every: schedule.every }, { name: schedule.queue, data: {} });
+    restored.push(schedule.id);
+  }
+  if (restored.length) logger.warn({ restored }, 'job schedules were missing from Redis and have been restored');
+  return restored;
 }
 
 export async function queueStats() {
