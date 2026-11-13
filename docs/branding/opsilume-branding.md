@@ -42,10 +42,10 @@ Use these names in the interface and in documentation. They map onto the existin
 | Log Management and Analysis | Logs | `modules/logs.ts` |
 | Deployment Intelligence | Deployments | `modules/services.ts`, `modules/tools.ts` (`deployment-context`) |
 | GitHub Integration | Changes | `modules/github.ts` |
-| AI Incident Investigation | Investigations | `modules/investigations.ts`, `services/ai/app/graph.py` |
+| AI Incident Investigation | Investigations | `modules/investigations/`, `services/ai/app/graph.py` |
 | Evidence Intelligence | Evidence, assessment and checked figures inside an investigation | `services/ai/app/evidence.py`, `assessment.py`, `claims.py` |
 | Engineering Knowledge Base | Knowledge | `modules/knowledge.ts` |
-| Human-approved Remediation | Approvals | `modules/remediation.ts` |
+| Human-approved Remediation | Approvals | `modules/remediation/` |
 | Monitoring and Service Health | Monitoring, service health | `modules/monitoring.ts` |
 | Analytics and Reporting | Analytics | `modules/analytics.ts` |
 

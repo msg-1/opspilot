@@ -4,9 +4,10 @@ AI-assisted incident investigation platform. OPSILUME is the product's working n
 
 ## Layout
 
-- `apps/api` — Express 5 + TypeScript + Prisma (PostgreSQL, pgvector). System of record. `src/modules/<feature>.ts` holds routes and logic per feature; `src/lib` shared helpers; `src/queues` BullMQ; `src/integrations` outbound clients (AI service, GitHub).
+- `apps/api` — Express 5 + TypeScript + Prisma (PostgreSQL, pgvector). System of record. `src/modules/<feature>.ts` holds routes and logic per feature; the two large features are directories split by responsibility (`modules/investigations/`, `modules/remediation/`, each re-exported from its `index.ts`). `src/lib` shared helpers; `src/queues` BullMQ; `src/integrations` outbound clients (AI service, GitHub); `src/contracts` the response contracts the web app's types are generated from; `src/generated` generated, never edited.
 - `apps/web` — Next.js 15 App Router + Tailwind 4. Client-rendered pages under `src/app/(app)`, auth pages under `src/app/(auth)`. `/api/*` is proxied to the API (`next.config.ts`).
-- `services/ai` — FastAPI + LangGraph. Embeddings, the investigation agent, evals, the MCP server. Stateless: it reaches data only through the API's `/api/v1/tools`.
+- `services/ai` — FastAPI + LangGraph. Embeddings, the investigation agent, evals, the MCP server. Stateless: it reaches data only through the API's `/api/v1/tools`. The rule-based engine is `app/rules.py` (one function per rule) orchestrated by `app/heuristics.py`.
+- `contracts/` — the single definition of what the AI service, the API and the web app must agree on (see `contracts/README.md`). `npm run contracts` regenerates; CI fails when a generated file is stale.
 - `infra/` — Postgres init, Prometheus, Grafana. `docs/` — keep in sync with the code.
 - `demo/` — three instrumented services, failure scenarios and an end-to-end runner (Compose profile `demo`). Not part of the npm workspaces.
 
@@ -21,6 +22,8 @@ npm run evals -- --heuristic
 npm run demo:up && npm run demo:e2e   # local microservices demo, rule-based engine only (about 25 minutes)
 npm run test:e2e            # needs the stack running and a fresh `npm run db:seed`
 npm run lint && npm run typecheck
+npm run contracts            # regenerate shared contracts and frontend API types (contracts:check fails if stale)
+npm run tracing:up && npm run trace -- --latest   # local traces of the platform itself (docs/tracing.md)
 cd services/ai && uv run ruff check .
 ```
 
@@ -30,15 +33,18 @@ cd services/ai && uv run ruff check .
 - **Tenancy:** every query filters by `organizationId` from `req.auth`. Use `authOf(req)`; never take an organisation id from the request body or path. Cross-tenant references must be validated (see `assertServices`, `assertMembers`).
 - **Permissions:** add new ones in `src/lib/permissions.ts`; guard routes with `requirePermission`. Approve/execute routes also use `requireUser` so API keys and the AI tool token can never reach them.
 - **The AI agent is read-only.** It gets a short-lived token valid only under `/api/v1/tools`. New agent capabilities are new GET tools there plus a `ToolSpec` in `services/ai/app/tools.py`. Do not add write tools.
-- **Evidence cannot be invented.** Evidence items are created only by `services/ai/app/evidence.py` from tool results. Reports are checked in `guardrails.py` (Python) and again in `investigations.ts` (Node).
+- **Evidence cannot be invented.** Evidence items are created only by `services/ai/app/evidence.py` from tool results. Reports are checked in `guardrails.py` (Python) and again in `modules/investigations/guardrails.ts` (Node).
 - **Outcome is computed, not authored.** `services/ai/app/assessment.py` decides HEALTHY / DEGRADED / INCIDENT / UNDETERMINED from the evidence for every engine. Do not let a prompt or a rule set it directly, and do not add a metric rule without an absolute floor (a percentage on a near-zero value is noise).
-- **Action effects** are decided from type and text in two places that must agree: `services/ai/app/effects.py` and `apps/api/src/lib/actionEffect.ts`. Change both and extend `services/ai/tests/fixtures/action-effects.json`, which both test suites check. Unclear means state-changing.
+- **Action effects** are decided from type and text by rules defined once, in `contracts/action-effects.json`, and applied by `services/ai/app/effects.py` and `apps/api/src/lib/actionEffect.ts`. Change the JSON, run `npm run contracts`, and extend `contracts/fixtures/action-effects.json`, which both test suites check. Unclear means state-changing.
 - **Withdraw, do not relabel.** An action the evidence does not support is removed from the proposals and listed in next steps. Never downgrade a production change to `manual`.
-- **Approvals are bound to content** (`contentHash` in `remediation.ts`). Anything that edits an action must supersede its approvals. A webhook timeout or 5xx is outcome `unknown`, never success and never a clean failure.
+- **Approvals are bound to content** (`contentHash` in `modules/remediation/content.ts`). Anything that edits an action must supersede its approvals (`approvals.ts`). A webhook timeout or 5xx is outcome `unknown`, never success and never a clean failure (`execution.ts`).
 - **Figures are checked** by `services/ai/app/claims.py`. When it flags something wrong on real output, fix the validator and add the case to `tests/test_reliability.py`.
 - **The demo must never call a paid model.** `demo/scripts` start the AI service with `AI_PROVIDER=deterministic` and refuse to run otherwise. Keep it that way.
 - **Naming.** The product is OPSILUME in anything a person reads; identifiers (packages, headers, env vars, database, repository) stay `opspilot`. See `docs/branding/opsilume-branding.md`.
-- **Report contract** lives in two places that must match: `services/ai/app/schemas.py` and `reportSchema` in `apps/api/src/modules/investigations.ts`.
+- **Shared contracts.** Closed value sets, guardrail limits and action-effect rules live in `contracts/*.json` and are generated into both languages; never edit `generated/` files or re-declare one of those values by hand. The report (`services/ai/app/schemas.py`) and the agent tools are exported from Python and the API is tested against the export (`apps/api/tests/contract.test.ts`). The API keeps its own, independent guardrail pass (`modules/investigations/guardrails.ts`); do not remove it.
+- **Frontend API types are generated.** `apps/web/src/lib/types.ts` only re-exports `lib/generated/api.ts`, which comes from `apps/api/src/contracts/api.ts`. To use a new response field in the web app, add it to the contract, run `npm run contracts`, and let `apps/api/tests/api-contract.test.ts` prove the API returns it.
+- **Rule-based engine.** Each rule in `services/ai/app/rules.py` has its own tests (`tests/test_rules.py`); `tests/test_heuristics_golden.py` pins every report the engine produces. Regenerate the snapshot (`OPSPILOT_WRITE_GOLDEN=1`) only for an intended change, and say so in the commit.
+- **Spans carry ids and counts only.** No question text, tool arguments, log lines, prompts, error messages, credentials or anything identifying a person. Both services scrub every span on export; the cases are in `contracts/fixtures/span-scrubbing.json`. See `docs/tracing.md`.
 - **Next.js page files** may only export the page component. Shared components go in `src/components`.
 - **Audit:** mutating routes call `audit(req, action, resourceType, id, metadata)`. Never put secrets in metadata.
 - **Pinned majors:** TypeScript 5.9, Prisma 6, Next 15, Zod 3, Vitest 3 (see docs/decisions.md). Do not bump majors casually.

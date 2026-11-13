@@ -115,7 +115,17 @@ Lets Claude Desktop, Claude Code or another MCP client query OpsPilot read-only.
 
 ## 8. Observability
 
-`npm run obs:up` starts Prometheus (http://localhost:9090) and Grafana (http://localhost:3001, admin/admin, dashboard "OpsPilot platform"). Set `OTEL_ENABLED=true` and `OTEL_EXPORTER_OTLP_ENDPOINT` to export traces from the API, worker and AI service to any OTLP/HTTP collector (none is bundled).
+`npm run obs:up` starts Prometheus (http://localhost:9090) and Grafana (http://localhost:3001, admin/admin, dashboard "OpsPilot platform").
+
+Traces of OPSILUME itself (one trace per investigation, across the API, the queue, the worker, the AI service and every tool call):
+
+```bash
+npm run tracing:up                    # the application with tracing on, plus a local trace store (http://localhost:16687)
+npm run trace -- <investigation id>   # or --latest: prints the trace and checks every hop is in it
+npm run tracing:down
+```
+
+Tracing is off unless asked for, and spans are scrubbed of credentials and personal data before they leave a process. To export elsewhere, set `OTEL_ENABLED=true` and `OTEL_EXPORTER_OTLP_ENDPOINT`. Details: [tracing.md](tracing.md).
 
 ## 9. Demo environment: real telemetry and failures
 
@@ -131,8 +141,9 @@ Sign in as `shop-demo@example.com` / `OpsPilot-demo-1`. No model is called and n
 ## 10. Tests
 
 ```bash
-npm test                 # API: 69 integration tests on database opspilot_test (5 of them use Redis and skip without it) · web: 14 tests
-npm run test:ai          # 115 tests, all against mocked model APIs or hand-written evidence
+npm test                 # API: 90 integration tests on database opspilot_test (6 of them use Redis and skip without it) · web: 47 tests
+npm run test:ai          # 170 tests, all against mocked model APIs or hand-written evidence
+npm run contracts:check  # shared contracts and generated frontend API types are up to date
 npm run evals -- --heuristic          # 11 scenarios on the rule-based engine
 npm run db:seed && npm run test:e2e   # 9 browser tests; needs the stack running on the deterministic engine:
                                       #   AI_PROVIDER=deterministic docker compose --profile app up -d ai

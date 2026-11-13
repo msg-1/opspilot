@@ -27,9 +27,9 @@ Status as of 12 November 2026. "Verified" means exercised by automated tests or 
 
 | Suite | Count | Scope |
 |---|---|---|
-| API integration (Vitest + Supertest) | 69 | HTTP → PostgreSQL, all modules |
-| AI service (pytest, mocked model APIs) | 115 | Agent graph, guardrails, providers, embeddings, HTTP API, MCP |
-| Web (Vitest + Testing Library) | 14 | API client, formatting, accessible components |
+| API integration (Vitest + Supertest) | 90 | HTTP → PostgreSQL, all modules; shared contracts; real API responses against the response contracts; trace continuity through BullMQ |
+| AI service (pytest, mocked model APIs) | 170 | Agent graph, guardrails, providers, embeddings, HTTP API, MCP; each rule of the rule-based engine; a snapshot of all its reports; shared contracts; tracing |
+| Web (Vitest + Testing Library) | 47 | API client, formatting, accessible components; the seven journeys as rendered pages (sign-in, incident, starting an investigation, report, evidence, approval, execution outcomes) |
 | End-to-end (Playwright) | 9 | Sign-in, incident, investigation, approval, RBAC, logs, knowledge, audit, mobile layout |
 | Agent evaluations | 11 scenarios | Outcome, cause, service, citations, invention, contradictory and missing evidence, calibration, diagnostics, remediation safety, deployment-tool use |
 | Local demo, end to end | 10 scenarios | Real telemetry and failures, rule-based engine: outcomes, blame, proposals, evidence provenance, recovery, runbook safety (run locally, not in CI) |
@@ -43,6 +43,24 @@ Not done, and why:
 - **No model was run in this milestone** (no budget). The changed report instructions and schema, the new `get_traces` tool and the demo environment are untested with a language model.
 - **The name is not cleared.** Trademark and domain checks are listed in [branding/opsilume-branding.md](branding/opsilume-branding.md).
 - **The demo is not in CI.** It needs the whole stack and about 25 minutes; it was run locally, and the recorded run is in [demo/README.md](../demo/README.md). CI checks only that it builds.
+
+## Milestone 5: architecture hardening
+
+No change to the runtime architecture, the API or any safety boundary. What changed is how the code is divided and how its parts are kept in agreement.
+
+| Area | Before | After |
+|---|---|---|
+| Contracts between Python and TypeScript | Each side declared its own enums, guardrail limits and effect rules; one fixture tied the reports together | One definition under `contracts/`, generated into both languages; the report, the tools and the guardrail behaviour are checked on both sides; CI fails on drift |
+| `investigations.ts` (one file) | Routes, validation, limits, orchestration, stream handling, guardrails and persistence together | `modules/investigations/`, one file each |
+| `remediation.ts` (one file) | Proposals, hashing, effect, approvals, execution, recording and routes together | `modules/remediation/`, one file each |
+| Rule-based engine | One 313-line `analyse()` | `rules.py`: one function per rule, each tested alone; a snapshot of all sixteen reports |
+| Web API types | Written by hand, drifted | Generated from the API's response contracts; real responses tested against them; CI fails on drift |
+| Tracing | A switch that stopped at the queue, the streamed response and the tool calls | One trace per investigation across every hop; spans scrubbed; local store and `npm run trace` |
+| Web tests | 14 unit tests | 47, including the seven journeys as rendered pages |
+
+What it found along the way: the API accepted any string as a claim kind; the investigation list never returned `attemptedProvider`, so a rule-based fallback was not labelled there; the incident page read fields its type did not have; the sign-in page named a demo password the seed does not set. All four are fixed.
+
+Not done, on purpose: the other API modules are not split; Prisma queries are not traced; the browser does not start traces; page-local response types outside the generated contracts (dashboard, settings, monitoring, analytics, knowledge, changes) are still written by hand.
 
 ## Needs the owner's input
 

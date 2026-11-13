@@ -5,6 +5,11 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- Shared contracts (`contracts/`): one definition of the closed value sets, guardrail limits, action-effect rules, the investigation report, the agent tools and the API responses the web app uses. `npm run contracts` generates the TypeScript and Python representations; `npm run contracts:check` and CI fail when one is stale.
+- Web API types generated from the API's response contracts (`apps/api/src/contracts/api.ts`), with a test that validates real API responses against them.
+- Distributed tracing of the platform itself: one trace per investigation across the API, the queue, the worker, the AI service and every tool call. Compose profile `tracing`, `npm run tracing:up`, `npm run trace -- <investigation id>`. Off by default; spans are scrubbed of credentials and personal data in both services. See docs/tracing.md.
+- Page-level web tests for signing in, incident details, starting an investigation, reading a report, reviewing evidence, approving a remediation and viewing execution outcomes.
+- Independent tests for each rule of the rule-based engine, and a snapshot of every report it produces.
 - Product name: OPSILUME (working name, not yet cleared) in the interface, the labels the API shows to people, the README and new documentation. Identifiers are unchanged. See docs/branding/opsilume-branding.md.
 - Outcome assessment on every investigation: `HEALTHY`, `DEGRADED`, `INCIDENT` or `UNDETERMINED`, computed from the evidence for every engine, with its signals, the evidence it rests on, what was not examined, and its own confidence. Steady metrics and a healthy status are evidence items. Observations that are not evidence of a fault are reported separately.
 - Action effects: every recommended action and remediation is `read_only` or `state_changing`, decided from its type and text and from the steps of the runbook it points at. `GET /knowledge/documents/:id/plan` returns a runbook as a labelled plan.
@@ -29,6 +34,9 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 - Web error boundary and not-found page; `SEED_DEMO_DATA` switch.
 
 ### Changed
+- Internal structure only, no change in behaviour: `investigations.ts` and `remediation.ts` are directories split by responsibility; the rule-based engine's `analyse()` is one function per rule (`services/ai/app/rules.py`).
+- `GET /investigations` also returns `attemptedProvider`, so a rule-based fallback is labelled in the list as it is on the detail page.
+- A claim's `kind` in a report must be one of the defined kinds (the API previously accepted any string).
 - An action the evidence does not stand behind is withdrawn from the proposals and listed under next steps with the reason, instead of being relabelled as a manual action. This applies to production changes without an incident, changes resting on a hypothesis rated unlikely, and rollbacks whose target is not an earlier successful deployment in the evidence.
 - `run_runbook` and `manual` are no longer treated as read-only: they are judged by what they say. A state-changing action is at least medium risk and needs at least one approval whatever the organisation's settings.
 - An incident needs a strong signal and a leading hypothesis that cites something which can be a cause, not only the symptoms.
@@ -42,6 +50,7 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 - Failed sign-ins are audited; retrieved records are marked as untrusted data for the model.
 
 ### Fixed
+- The sign-in page showed a demo password the seed does not set.
 - After a bad release was rolled back, the rule-based engine could blame the rollback deployment for an unrelated problem and propose returning to the bad release. Deployments can now be recorded as rollbacks (`rollbackOf`), a rolled-back version is never a rollback target, and a deployment after which errors fell loses standing as a suspect.
 - Trace retrieval sampled only the end of the window.
 - A webhook timeout or server error was recorded as a plain failure and could be retried at once, which could apply a change twice.
