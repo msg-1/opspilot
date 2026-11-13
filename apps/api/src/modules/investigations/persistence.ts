@@ -76,10 +76,16 @@ export const INTERRUPTED = 'Interrupted: the worker stopped before this investig
  * writes. Returns whether this call did.
  */
 export async function markInterrupted(investigationId: string, now = new Date()) {
-  const claimed = await prisma.investigation.updateMany({ where: { id: investigationId, status: { in: ['RUNNING', 'QUEUED'] } }, data: { status: 'FAILED', error: INTERRUPTED, completedAt: now } });
-  if (!claimed.count) return false;
-  const inv = await prisma.investigation.findUniqueOrThrow({ where: { id: investigationId }, select: { organizationId: true, createdById: true, steps: { orderBy: { index: 'desc' }, take: 1, select: { index: true } } } });
-  await prisma.investigationStep.create({ data: { investigationId, index: (inv.steps[0]?.index ?? -1) + 1, type: 'error', title: 'Investigation interrupted', detail: INTERRUPTED, status: 'failed' } });
+  // The state and the step that explains it are written together, so the investigation is
+  // never seen as failed without its reason on the timeline.
+  const inv = await prisma.$transaction(async (tx) => {
+    const claimed = await tx.investigation.updateMany({ where: { id: investigationId, status: { in: ['RUNNING', 'QUEUED'] } }, data: { status: 'FAILED', error: INTERRUPTED, completedAt: now } });
+    if (!claimed.count) return null;
+    const found = await tx.investigation.findUniqueOrThrow({ where: { id: investigationId }, select: { organizationId: true, createdById: true, steps: { orderBy: { index: 'desc' }, take: 1, select: { index: true } } } });
+    await tx.investigationStep.create({ data: { investigationId, index: (found.steps[0]?.index ?? -1) + 1, type: 'error', title: 'Investigation interrupted', detail: INTERRUPTED, status: 'failed' } });
+    return found;
+  });
+  if (!inv) return false;
   await writeAudit({ organizationId: inv.organizationId, actorType: 'system', actorLabel: 'OPSILUME worker', action: 'investigation.interrupted', resourceType: 'investigation', resourceId: investigationId });
   await notifyUsers([inv.createdById], { organizationId: inv.organizationId, type: 'investigation.failed', title: 'Investigation interrupted', body: INTERRUPTED, link: `/investigations/${investigationId}` });
   return true;
