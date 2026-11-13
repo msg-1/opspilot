@@ -6,10 +6,17 @@ import { notifyUsers } from '../../lib/notify';
 import { prisma } from '../../lib/prisma';
 import { withSpan } from '../../lib/tracing';
 import { signToolToken } from '../../middleware/auth';
-import { onWorkerShutdown, registerProcessor } from '../../queues';
+import { enqueue, onWorkerShutdown, registerProcessor } from '../../queues';
 import { incidentKey } from '../incidents';
 import { markFailed, markInterrupted, persistently } from './persistence';
 import { Cancelled, Superseded, eventConsumer } from './stream';
+
+/**
+ * Puts an investigation on the queue. The job carries the investigation's id, so the queue
+ * holds at most one for it. A job that fails without the investigation having started (the
+ * database was away for longer than the retries) is removed, so that the sweep can put it back.
+ */
+export const enqueueInvestigation = (investigationId: string) => enqueue('investigation', { investigationId }, { jobId: investigationId, removeOnFail: true });
 
 /** The reason a run is aborted when its worker is shutting down. */
 class ShuttingDown extends Error {}
@@ -41,7 +48,9 @@ export async function runInvestigation(investigationId: string, { redelivered = 
   const abort = new AbortController();
   running.set(investigationId, abort);
   try {
-    const claimed = await prisma.investigation.updateMany({ where: { id: investigationId, status: 'QUEUED' }, data: { status: 'RUNNING', startedAt: new Date() } });
+    // Retried for a few seconds: right after a database outage the worker's connections may
+    // not be back yet, and a job that fails here would leave the investigation waiting for nobody.
+    const claimed = await persistently(() => prisma.investigation.updateMany({ where: { id: investigationId, status: 'QUEUED' }, data: { status: 'RUNNING', startedAt: new Date() } }));
     if (!claimed.count) {
       if (redelivered && (await markInterrupted(investigationId))) logger.warn({ investigationId }, 'investigation interrupted: its worker stopped; recorded as failed');
       return;
@@ -53,10 +62,10 @@ export async function runInvestigation(investigationId: string, { redelivered = 
 }
 
 async function execute(investigationId: string, abort: AbortController) {
-  const investigation = await prisma.investigation.findUniqueOrThrow({
+  const investigation = await persistently(() => prisma.investigation.findUniqueOrThrow({
     where: { id: investigationId },
     include: { organization: { select: { name: true } }, incident: { include: { services: { select: { service: { select: { id: true, name: true, slug: true } } } } } } },
-  });
+  }));
   const { organizationId } = investigation;
 
   const { onEvent, addStep, state } = eventConsumer(investigationId, abort);

@@ -134,6 +134,7 @@ Found by reading the code, then confirmed by a test that failed before the fix, 
 | 10 | On the incident page, the reason an investigation was refused appeared behind the open dialog (found by the browser test) | Shown in the dialog |
 | 11 | Redis kept queued jobs in memory between snapshots, so killing it lost a job that had been accepted (reproduced by a drill); the investigation read `QUEUED` and the sweep would have failed it an hour later | Three layers: an append-only file on a volume for Redis; the sweep puts back the job of any investigation that has waited more than two minutes (same job id, so nothing is added if the job is still there, and nothing can run twice); the worker restores the schedules of its repeating jobs if they are missing |
 | 12 | The schedules of the repeating jobs (alert evaluation, retention, the sweep itself) exist only in Redis and were written only when the worker started, so after a loss of Redis data all three stopped until the next restart (found by reading; reproduced by the `queue-wiped` drill, which cannot pass without the fix) | The worker checks once a minute and puts back what is missing |
+| 13 | Right after a PostgreSQL outage, a newly accepted investigation could stay `QUEUED`: the worker's first query for the job failed while its connections were still recovering, the job failed, and nothing picked the investigation up again (found by the `postgres-down` drill on CI, where it had passed locally three times) | The worker retries its first queries for about eight seconds. A job that still fails before the investigation started is removed from the queue, so the sweep puts it back after two minutes |
 
 Looked for and not found: a throwing trace exporter breaking the work it traces (the SDK contains it; the test passes without any change to the tracing code); a hang with Redis down (fixed in an earlier milestone, and still fixed).
 
@@ -143,14 +144,14 @@ Looked for and not found: a throwing trace exporter breaking the work it traces 
 |---|---|---|
 | `apps/api/tests/safety.test.ts` | +3 | Risk kept on edit, explicit risk changes, approvals counted again at execution (Phase 1) |
 | `apps/api/tests/reliability.test.ts` | 19 | AI service failures (10), duplicate delivery and cancellation (2), Redis (4), the worker process (3) |
-| `apps/api/tests/outage.test.ts` | 3 | PostgreSQL away and back: for requests, during a run, and for longer than the retries |
+| `apps/api/tests/outage.test.ts` | 4 | PostgreSQL away and back: for requests, when a worker picks a job up, during a run, and for longer than the retries |
 | `apps/api/tests/tracing-failure.test.ts` | 5 | Failing exporters, a missing trace store, spans of failed runs |
 | `apps/api/tests/faults.ts` | (helpers) | The TCP proxy, the scripted AI stub, the worker child process |
 | `services/ai/tests/test_tracing.py` | +1 | Trace store unreachable and data source unreachable: still a report, and it is `UNDETERMINED` |
 | `apps/web/e2e/recovery.spec.ts` | 2 | What the page shows with the AI service down and with the queue down, and after each returns |
 | `scripts/reliability-drills.mjs` | 11 drills | Section 2 and 3, on real containers |
 
-Totals after this milestone: API 120 (was 90), AI service 171 (was 170), web unit 47 (unchanged), browser 11 (was 9), drills 11 (new).
+Totals after this milestone: API 121 (was 90), AI service 171 (was 170), web unit 47 (unchanged), browser 11 (was 9), drills 11 (new).
 
 All were run locally on 13 November 2026 and pass. The reliability and outage tests were run three times in a row without a failure. The browser tests and drills were run from a stack built from nothing (`isolated:down`, `isolated:up`, `isolated:e2e`, `drills`).
 
@@ -171,7 +172,8 @@ All were run locally on 13 November 2026 and pass. The reliability and outage te
 - **Killing the worker is noticed after about a minute, not at once.** That is the queue's claim time plus its check interval (`QUEUE_LOCK_MS`, `QUEUE_STALLED_INTERVAL_MS`). Until then the investigation reads `RUNNING`.
 - **A long database outage leaves `RUNNING` rows for up to twenty minutes.** The sweep that ends them runs in the worker. If no worker is running, nothing sweeps.
 - **Chromium only**, desktop and one phone viewport.
-- **Local runs were on Docker Desktop for macOS**; CI runs on Linux. Timings in this report are from the local runs.
+- **Local runs were on Docker Desktop for macOS**; CI runs on Linux. Timings in this report are from the local runs. One defect (13) showed only on CI, which is a reminder that a drill passing a few times is not proof of the absence of a timing fault.
+- **A job that fails before its investigation started and is removed leaves no entry in the queue's failed set.** The failure is in the worker's log; the investigation is put back by the sweep. That removal-and-return path is covered by reasoning and by the tests of its two halves, not by one test of the whole.
 - **The log search looks for known secrets and shapes.** It is not a proof of absence.
 - **The browser tests need a freshly seeded stack.** Run twice on the same data, the investigation test fails, because the first run rolls a deployment back and the second finds it rolled back. That is the test's assumption, not a fault in the application; the isolated stack exists so that the assumption holds.
 
@@ -180,7 +182,7 @@ All were run locally on 13 November 2026 and pass. The reliability and outage te
 Ordered by how much they could hurt.
 
 1. **A worker that is alive but cut off from Redis, with a second worker running.** The queue hands its job to the second worker, which records the investigation as interrupted. The first worker's report, when it arrives, is discarded: the record stays consistent, but the run's cost is lost and the person is told it failed. With one worker this cannot happen (the worker recognises its own run; tested). With several it can, and it is untested.
-2. **Side effects after the report is stored are not atomic with it.** The report, the outcome and the hypotheses are one transaction. The proposed actions, the timeline entry, the audit entry and the notification follow one by one. A crash between them leaves a completed investigation whose report recommends an action that has no row to approve. Nothing can be executed because of this (a missing proposal cannot be approved), so it is a completeness gap, not a safety gap. Untested.
+2. **Side effects after the report is stored are not atomic with it.** The report, the outcome and the hypotheses are one transaction. The proposed actions, the timeline entry, the audit entry and the notification follow one by one. A crash between them leaves a completed investigation whose report recommends an action that has no row to approve. Nothing can be executed because of this (a missing proposal cannot be approved), so it is a completeness gap, not a safety gap. The crash case is untested. The gap itself is observable in normal operation: an investigation reads `COMPLETED` a few milliseconds before its proposed actions exist, which a test of this milestone ran into on CI and now waits for.
 3. **The API process dying during a remediation webhook call.** The action stays `EXECUTING` and the sweep records its outcome as unknown after five minutes (tested since Milestone 4 at the level of the sweep). It was not drilled with real containers.
 4. **Redis durability is one second.** With the append-only file, a killed Redis loses at most about a second of accepted jobs. An investigation lost that way is put back on the queue by the sweep after two minutes. Jobs of the other queues (knowledge indexing, GitHub synchronisation) are not put back: a document being indexed is retried by the sweep after ten minutes, a synchronisation waits for the next request.
 5. **No backup or restore of PostgreSQL was tested**, and there is no replica.

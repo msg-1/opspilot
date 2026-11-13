@@ -19,6 +19,7 @@ const settings = vi.hoisted(() => {
 });
 
 import { terminalWriteRetry } from '../src/modules/investigations/persistence';
+import { runInvestigation } from '../src/modules/investigations';
 import { reapStranded } from '../src/modules/system';
 import { api, createOrg, createService, prisma } from './helpers';
 
@@ -116,6 +117,20 @@ describe('PostgreSQL outage', () => {
     ai.reset();
     const next = await org.owner.post('/api/v1/investigations').send({ question: 'And now?' }).expect(202);
     expect((await read(org, next.body.id)).status).toBe('COMPLETED');
+  });
+
+  it('is still away when a worker picks an investigation up: the worker waits for it and runs the investigation', async () => {
+    // Found by the drills on CI: the job arrived while the worker's connections were still
+    // recovering, failed on its first query, and the investigation stayed QUEUED.
+    const org = await createOrg();
+    const row = await prisma.investigation.create({ data: { organizationId: org.organizationId, question: 'Why is checkout failing?', status: 'QUEUED' } });
+    await db.down();
+    const run = runInvestigation(row.id);
+    await pause(900);
+    await db.up();
+    await run;
+    expect(await read(org, row.id)).toMatchObject({ status: 'COMPLETED', report: expect.objectContaining({ summary: EMPTY_REPORT.summary }) });
+    expect(ai.state.runs).toHaveLength(1);
   });
 
   it('outlasts the attempts to record the failure: the run stays in progress, never completed, until the sweep ends it', async () => {

@@ -8,6 +8,7 @@ import { requirePermission } from '../middleware/auth';
 import { enqueue, queueStats, redisPing, registerProcessor } from '../queues';
 import { addIncidentEvent } from './incidents';
 import { markInterrupted } from './investigations/persistence';
+import { enqueueInvestigation } from './investigations/runner';
 import { evaluateAlerts } from './monitoring';
 
 // ───────────────────────── Scheduled jobs ─────────────────────────
@@ -42,7 +43,7 @@ export async function reapStranded(now = new Date()) {
     orderBy: { createdAt: 'asc' },
     take: 50,
   });
-  for (const inv of waiting) await enqueue('investigation', { investigationId: inv.id }, { jobId: inv.id }).catch(() => undefined);
+  for (const inv of waiting) await enqueueInvestigation(inv.id).catch(() => undefined);
 
   const unknown = 'Execution was interrupted and its outcome is unknown. Check the target system before retrying: the change may or may not have been applied.';
   const actions = await prisma.remediationAction.findMany({ where: { status: 'EXECUTING', updatedAt: { lt: before(STALE.executingRemediation) } }, select: { id: true, organizationId: true, incidentId: true, title: true } });
