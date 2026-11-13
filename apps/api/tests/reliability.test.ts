@@ -121,7 +121,7 @@ describe.skipIf(!redisAvailable)('reliability under failure', () => {
       expect(failed.steps.at(-1)).toMatchObject({ type: 'error', title: 'Investigation failed', status: 'failed' });
       await expectNoConclusions(failed);
       // The person who asked is told, and the system says the service is unreachable instead of guessing.
-      expect(await prisma.notification.count({ where: { organizationId: org.organizationId, type: 'investigation.failed' } })).toBe(1);
+      expect(await until(() => prisma.notification.count({ where: { organizationId: org.organizationId, type: 'investigation.failed' } }), (n) => n >= 1, 'the follow-up record to be written')).toBe(1);
       expect((await org.owner.get('/api/v1/investigations/ai-status')).body).toMatchObject({ reachable: false });
 
       // Recovery: nothing to repair, no restart. The same worker runs the next one to a stored report.
@@ -258,8 +258,8 @@ describe.skipIf(!redisAvailable)('reliability under failure', () => {
       expect(done.remediations).toEqual([expect.objectContaining({ type: 'rollback_deployment', status: 'PROPOSED' })]);
       await pause(200);
       expect(await prisma.remediationAction.count({ where: { organizationId: org.organizationId } })).toBe(1);
-      expect(await prisma.auditLog.count({ where: { organizationId: org.organizationId, action: 'investigation.complete' } })).toBe(1);
-      expect(await prisma.notification.count({ where: { organizationId: org.organizationId, type: 'investigation.completed' } })).toBe(1);
+      expect(await until(() => prisma.auditLog.count({ where: { organizationId: org.organizationId, action: 'investigation.complete' } }), (n) => n >= 1, 'the follow-up record to be written')).toBe(1);
+      expect(await until(() => prisma.notification.count({ where: { organizationId: org.organizationId, type: 'investigation.completed' } }), (n) => n >= 1, 'the follow-up record to be written')).toBe(1);
     });
   });
 
@@ -472,8 +472,8 @@ describe.skipIf(!redisAvailable)('reliability under failure', () => {
         expect(failed.steps.at(-1)).toMatchObject({ type: 'error', title: 'Investigation interrupted', status: 'failed' });
         expect(failed.evidence).toHaveLength(1);
         await expectNoConclusions(failed);
-        expect(await prisma.auditLog.count({ where: { organizationId: org.organizationId, action: 'investigation.interrupted' } })).toBe(1);
-        expect(await prisma.notification.count({ where: { organizationId: org.organizationId, type: 'investigation.failed' } })).toBe(1);
+        expect(await until(() => prisma.auditLog.count({ where: { organizationId: org.organizationId, action: 'investigation.interrupted' } }), (n) => n >= 1, 'the follow-up record to be written')).toBe(1);
+        expect(await until(() => prisma.notification.count({ where: { organizationId: org.organizationId, type: 'investigation.failed' } }), (n) => n >= 1, 'the follow-up record to be written')).toBe(1);
         // It was not started a second time: with a model that would be a second charge.
         await pause(800);
         expect(ai.state.runs).toHaveLength(0);
