@@ -2,6 +2,7 @@ import type { Prisma } from '@prisma/client';
 import { Router } from 'express';
 import { z } from 'zod';
 import { env } from '../config/env';
+import { ACTION_EFFECTS, ANALYSIS_MODES, CLAIM_KINDS, CLAIM_STATUSES, GUARDRAIL_LIMITS as LIMITS, HYPOTHESIS_STATUSES, OUTCOMES, REMEDIATION_TYPES, RISK_LEVELS, SIGNAL_LEVELS, VERIFICATION_STATUSES } from '../generated/contracts';
 import { type InvestigationEvent, type InvestigationUsage, aiService } from '../integrations/aiService';
 import { actionEffect } from '../lib/actionEffect';
 import { audit, writeAudit } from '../lib/audit';
@@ -14,7 +15,7 @@ import { prisma } from '../lib/prisma';
 import { authOf, can, requirePermission, signToolToken } from '../middleware/auth';
 import { enqueue, registerProcessor } from '../queues';
 import { addIncidentEvent, incidentKey, requireIncident } from './incidents';
-import { REMEDIATION_TYPES, proposeRemediation } from './remediation';
+import { proposeRemediation } from './remediation';
 
 // ───────────────────────── Report contract (mirrors services/ai/app/schemas.py) ─────────────────────────
 
@@ -24,7 +25,7 @@ const hypothesisSchema = z.object({
   title: z.string().min(1).max(300),
   description: z.string().max(4000),
   confidence: z.number().min(0).max(1),
-  status: z.enum(['likely', 'possible', 'unlikely']).default('possible'),
+  status: z.enum(HYPOTHESIS_STATUSES).default('possible'),
   evidenceRefs: refs,
   contradictingEvidenceRefs: refs,
   contradictions: z.array(z.string()).default([]),
@@ -33,22 +34,21 @@ const hypothesisSchema = z.object({
   gaps: z.array(z.string()).default([]),
 });
 
-const claimStatus = z.enum(['exact', 'rounded', 'calculated', 'estimate', 'uncited', 'unsupported']);
+const claimStatus = z.enum(CLAIM_STATUSES);
 // Set by the AI service's claim checker (services/ai/app/claims.py); carried through unchanged.
 const verificationSchema = z
   .object({
-    status: z.enum(['verified', 'partly', 'unsupported', 'no_claims']),
-    checks: z.array(z.object({ text: z.string(), kind: z.string(), status: claimStatus, detail: z.string(), evidenceRef: z.string().nullable().optional() })).default([]),
+    status: z.enum(VERIFICATION_STATUSES),
+    checks: z.array(z.object({ text: z.string(), kind: z.enum(CLAIM_KINDS), status: claimStatus, detail: z.string(), evidenceRef: z.string().nullable().optional() })).default([]),
   })
   .nullable()
   .optional();
 const statementSchema = z.object({ statement: z.string(), evidenceRefs: refs, verification: verificationSchema });
-const OUTCOMES = ['HEALTHY', 'DEGRADED', 'INCIDENT', 'UNDETERMINED'] as const;
 
 export const reportSchema = z.object({
   summary: z.string().min(1).max(6000),
   confidence: z.number().min(0).max(1),
-  analysisMode: z.enum(['llm', 'heuristic', 'mock']),
+  analysisMode: z.enum(ANALYSIS_MODES),
   // Whether the evidence shows a fault at all. Computed by the AI service from the evidence.
   outcome: z.enum(OUTCOMES).nullable().optional(),
   assessment: z
@@ -57,7 +57,7 @@ export const reportSchema = z.object({
       confidence: z.number().min(0).max(1),
       rationale: z.string().max(4000),
       supportingRefs: refs,
-      signals: z.array(z.object({ level: z.enum(['strong', 'moderate', 'weak']), kind: z.string(), text: z.string(), evidenceRefs: refs })).default([]),
+      signals: z.array(z.object({ level: z.enum(SIGNAL_LEVELS), kind: z.string(), text: z.string(), evidenceRefs: refs })).default([]),
       missingTelemetry: z.array(z.string()).default([]),
     })
     .nullable()
@@ -86,9 +86,9 @@ export const reportSchema = z.object({
         title: z.string().min(4).max(200),
         description: z.string().min(4).max(5000),
         rationale: z.string().max(5000).optional().nullable(),
-        risk: z.enum(['LOW', 'MEDIUM', 'HIGH']).default('MEDIUM'),
+        risk: z.enum(RISK_LEVELS).default('MEDIUM'),
         // Recomputed here from the type and text; what the sender says is not relied on.
-        effect: z.enum(['read_only', 'state_changing']).optional(),
+        effect: z.enum(ACTION_EFFECTS).optional(),
         effectReasons: z.array(z.string()).optional(),
         serviceSlug: z.string().optional().nullable(),
         parameters: z.record(z.string(), z.unknown()).optional().nullable(),
@@ -258,7 +258,7 @@ export async function runInvestigation(investigationId: string) {
  *  - a production change resting on a hypothesis rated unlikely becomes a manual action;
  *  - a high-risk action offered next to a safer one moves to the next steps.
  */
-async function applyGuardrails(
+export async function applyGuardrails(
   report: InvestigationReport,
   known: Set<string>,
   addStep: (step: Extract<InvestigationEvent, { type: 'step' }>['step']) => Promise<unknown>,
@@ -274,8 +274,8 @@ async function applyGuardrails(
     const evidence = clean(h.evidenceRefs, `hypothesis "${h.title}"`);
     let { confidence, status } = h;
     if (!evidence.length) {
-      if (confidence > 0.3 || status === 'likely') notes.push(`Hypothesis "${h.title}" has no supporting evidence; confidence capped at 0.3.`);
-      confidence = Math.min(confidence, 0.3);
+      if (confidence > LIMITS.unsupportedHypothesisCap || status === 'likely') notes.push(`Hypothesis "${h.title}" has no supporting evidence; confidence capped at ${LIMITS.unsupportedHypothesisCap}.`);
+      confidence = Math.min(confidence, LIMITS.unsupportedHypothesisCap);
       if (status === 'likely') status = 'possible';
     }
     return { ...h, evidenceRefs: evidence, contradictingEvidenceRefs: clean(h.contradictingEvidenceRefs, `the evidence against "${h.title}"`), confidence, status };
@@ -309,7 +309,7 @@ async function applyGuardrails(
   });
   const withdraw = (a: (typeof result.recommendedActions)[number], reason: string) => {
     notes.push(`Action "${a.title.slice(0, 60)}" is not offered for approval: ${reason}. It is listed under next steps.`);
-    result.nextSteps = [...result.nextSteps, `Considered and not recommended (${reason}): ${a.title}`.slice(0, 500)];
+    result.nextSteps = [...result.nextSteps, LIMITS.nextStepPrefixes.withdrawn.replace('{reason}', reason).replace('{title}', a.title).slice(0, 500)];
   };
   // 1. A production change must not rest on a hypothesis the report itself rates unlikely.
   //    It is withdrawn, not relabelled: as a "manual" action the same change would still be on offer.
@@ -325,15 +325,15 @@ async function applyGuardrails(
     const subject = typeof id === 'string' ? deploymentRefs.get(id) : undefined;
     const restsOn = subject ? [subject] : a.evidenceRefs;
     if (!restsOn.some((r) => doubted.has(r))) return true;
-    withdraw(a, 'it would change production on the strength of a hypothesis rated unlikely');
+    withdraw(a, LIMITS.withdrawalReasons.unlikelyHypothesis);
     return false;
   });
   // 1b. Without an incident and an established cause, nothing justifies changing production.
   const outcome = result.assessment?.outcome ?? result.outcome;
-  if (outcome && outcome !== 'INCIDENT') {
+  if (outcome && outcome !== LIMITS.outcomeAllowingProductionChanges) {
     result.recommendedActions = result.recommendedActions.filter((a) => {
       if (a.effect !== 'state_changing') return true;
-      withdraw(a, `it would change production, and the evidence supports ${outcome}, not an incident with an established cause`);
+      withdraw(a, LIMITS.withdrawalReasons.noIncident.replace('{outcome}', outcome));
       return false;
     });
   }
@@ -342,7 +342,7 @@ async function applyGuardrails(
     const risky = result.recommendedActions.filter((a) => a.risk === 'HIGH');
     for (const a of risky) {
       notes.push(`High-risk action "${a.title.slice(0, 60)}" moved to next steps: a lower-risk action is proposed.`);
-      result.nextSteps = [...result.nextSteps, `Higher-risk alternative, only if the lower-risk action is not possible: ${a.title}. ${a.description}`.slice(0, 600)];
+      result.nextSteps = [...result.nextSteps, LIMITS.nextStepPrefixes.highRisk.replace('{title}', a.title).replace('{description}', a.description).slice(0, 600)];
     }
     result.recommendedActions = result.recommendedActions.filter((a) => a.risk !== 'HIGH');
   }

@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import { env } from '../config/env';
+import { REMEDIATION_TYPES, RISK_LEVELS } from '../generated/contracts';
 import { type ActionEffect, actionEffect, runbookPlan } from '../lib/actionEffect';
 import { audit } from '../lib/audit';
 import { decrypt, hmacSha256Hex } from '../lib/crypto';
@@ -37,14 +38,14 @@ import { getSettings } from './organization';
  * applied; the idempotency key stays the same across attempts so a receiver can refuse a repeat.
  */
 
-export const REMEDIATION_TYPES = ['rollback_deployment', 'restart_service', 'scale_service', 'toggle_feature_flag', 'config_change', 'run_runbook', 'manual'] as const;
+export { REMEDIATION_TYPES };
 
 export const remediationInput = z.object({
   type: z.enum(REMEDIATION_TYPES),
   title: z.string().trim().min(4).max(200),
   description: z.string().trim().min(4).max(5000),
   rationale: z.string().trim().max(5000).nullable().optional(),
-  risk: z.enum(['LOW', 'MEDIUM', 'HIGH']).default('MEDIUM'),
+  risk: z.enum(RISK_LEVELS).default('MEDIUM'),
   incidentId: z.string().nullable().optional(),
   investigationId: z.string().nullable().optional(),
   serviceId: z.string().nullable().optional(),

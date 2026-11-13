@@ -14,6 +14,7 @@ from typing import Any
 
 from .assessment import find_signals
 from .evidence import EvidenceStore
+from .generated.contracts import GUARDRAIL_LIMITS
 from .schemas import (
     EvidenceItem,
     Fact,
@@ -26,7 +27,7 @@ from .schemas import (
     TimelineEntry,
 )
 
-MAX_HEURISTIC_CONFIDENCE = 0.75
+MAX_HEURISTIC_CONFIDENCE: float = GUARDRAIL_LIMITS["maxConfidence"]["heuristic"]
 
 STOPWORDS = set(
     "the a an and or of to in on for from with after before by at is are was were be been it this that as not no failed failure error "

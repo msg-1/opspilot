@@ -6,54 +6,59 @@
  * it inspects and mentions nothing that changes state; anything unclear is state-changing,
  * because a state-changing action is the one that needs a human's approval.
  *
- * services/ai/app/effects.py implements the same rules. Both test suites check
- * services/ai/tests/fixtures/action-effects.json, so the two cannot drift apart.
+ * The rules themselves are data: contracts/action-effects.json is the one definition, generated
+ * into src/generated/contracts.ts for the API and into the AI service, where
+ * services/ai/app/effects.py applies them the same way. Both test suites check
+ * contracts/fixtures/action-effects.json.
  */
-export type ActionEffect = 'read_only' | 'state_changing';
+import { ACTION_EFFECT_RULES as RULES, type ActionEffect } from '../generated/contracts';
+
+export type { ActionEffect };
 
 /** Types that change production whatever their description says. */
-export const STATE_CHANGING_TYPES = new Set(['rollback_deployment', 'restart_service', 'scale_service', 'toggle_feature_flag', 'config_change']);
+export const STATE_CHANGING_TYPES = new Set<string>(RULES.stateChangingTypes);
 
-const CONFIG_VERBS = 'change|changing|modify|modifying|edit|editing|update|updating|adjust|adjusting|tune|tuning|override|overriding|raise|raising|lower|lowering|increase|increasing|decrease|decreasing|bump|bumping';
+// Verb stems are matched as whole words with common endings, case-insensitively.
+const CHANGING = RULES.changing.map((rule) => ({
+  label: rule.label,
+  plain: new RegExp(`\\b(?:${rule.pattern})`, 'i'),
+  // A configuration verb followed by a constant-style name ("Lower DB_POOL_MAX"). The verb may
+  // be in any case, the name must be upper case, so this part is matched in two steps.
+  verbThen: 'verbThenConstant' in rule ? new RegExp(`\\b(?:${rule.verbThenConstant.verbs}) (\\S+)`, 'gi') : null,
+  constant: 'verbThenConstant' in rule ? new RegExp(`^${rule.verbThenConstant.constant}\\b`) : null,
+}));
+const READING = new RegExp(`\\b(?:${RULES.reading})`, 'i');
 
-const CHANGING: [string, RegExp][] = [
-  ['restarts or stops a process', /\b(?:restart\w*|reboot\w*|kill\w*|terminat\w*|shut\s?down|stop(?:ping)? (?:the|a|all|every)\b|bounce\w*)/i],
-  ['deploys or rolls back a version', /\b(?:deploy(?:ing|s)?\b|redeploy\w*|roll(?:ing|ed)?[\s-]?back|revert\w*|promot(?:e|ing)\b|hotfix\w*|releas(?:e|ing) (?:a|the|new)\b)/i],
-  // Verbs with an object: "change the pool size", not "no change should be made" or "what changed".
-  ['changes configuration', new RegExp(`\\b(?:reconfigur\\w*|(?:${CONFIG_VERBS}) (?:the|a|an|its|this|that|their|it|[A-Za-z]+[_.][A-Za-z_.]+)\\b|set(?:ting)? (?:the\\b|[A-Za-z_.]+ ?(?:=|to\\b)))`, 'i')],
-  ['turns something on or off', /\b(?:toggl\w*|enabl(?:e|ing)\b|disabl(?:e|ing)\b|turn(?:ing)? (?:on|off)\b|switch(?:ing)? (?:on|off|over|to)\b|paus(?:e|ing)\b|resum(?:e|ing)\b)/i],
-  ['clears a queue, cache or data', /\b(?:flush\w*|purg\w*|clear(?:ing)?\b|evict\w*|invalidat\w*|drain\w*|delet(?:e|ing)\b|drop(?:ping)?\b|truncat\w*|wip(?:e|ing)\b|remov(?:e|ing)\b|reset\w*|requeue\w*|replay\w*)/i],
-  ['runs a migration or writes data', /\b(?:migrat\w*|backfill\w*|reindex\w*|rebuild\w*|restor(?:e|ing)\b|(?:insert|update|delete|alter|create|grant|revoke) (?:into|table|from|index|user|role)\b|write(?:s|ing)? to\b)/i],
-  ['changes capacity or infrastructure', /\b(?:scal(?:e|ing)\b|resiz\w*|provision\w*|fail[\s-]?over|add(?:ing)? (?:a |more )?(?:replica|node|instance|capacity)\w*|terraform apply|kubectl (?:apply|delete|scale|rollout|edit|patch|set|cordon|drain)|systemctl (?:start|stop|restart|reload)|helm (?:upgrade|install|rollback|uninstall))/i],
-  ['changes access', /\b(?:rotat(?:e|ing)\b|revok(?:e|ing)\b|grant(?:ing)?\b|chmod|chown|permission change|change (?:the )?permissions)/i],
-  ['upgrades or patches software', /\b(?:upgrad\w*|downgrad\w*|patch(?:ing)?\b|apply(?:ing)? (?:the|a)\b|install\w*|uninstall\w*)/i],
-];
-// A configuration verb followed by a constant-style name: "Lower DB_POOL_MAX". The verb may be in
-// any case, the name must be upper case, so this one is matched in two steps.
-const CONFIG_VERB_THEN = new RegExp(`\\b(?:${CONFIG_VERBS}) (\\S+)`, 'gi');
-const CONSTANT_NAME = /^[A-Z][A-Z0-9_]{2,}\b/;
-const READING =
-  /\b(?:check\w*|verif\w*|confirm\w*|inspect\w*|review\w*|read\w*|look\w*|view\w*|examin\w*|compar\w*|monitor\w*|observ\w*|watch\w*|quer(?:y|ies|ying)|list\w*|describ\w*|fetch\w*|search\w*|investigat\w*|analy[sz]\w*|trac(?:e|ing)\b|measur\w*|collect\w*|captur\w*|gather\w*|identif\w*|determin\w*|ask\w*|contact\w*|notif\w*|escalat\w*|document\w*|record\w*|note\b|open (?:the )?(?:dashboard|log|trace)\w*)/i;
+/** The earliest occurrence in the text of either form of the rule. */
+function firstMatch(text: string, rule: (typeof CHANGING)[number]): string | null {
+  const found: [number, string][] = [];
+  const plain = rule.plain.exec(text);
+  if (plain) found.push([plain.index, plain[0]]);
+  if (rule.verbThen && rule.constant) {
+    for (const m of text.matchAll(rule.verbThen)) {
+      if (rule.constant.test(m[1]!)) {
+        found.push([m.index, m[0]]);
+        break;
+      }
+    }
+  }
+  return found.length ? found.sort((a, b) => a[0] - b[0])[0]![1] : null;
+}
 
 export function classifyText(text: string): { effect: ActionEffect; reasons: string[] } {
   const found: string[] = [];
-  for (const [label, rx] of CHANGING) {
-    let match = rx.exec(text)?.[0];
-    if (!match && label === 'changes configuration') {
-      for (const m of text.matchAll(CONFIG_VERB_THEN)) {
-        if (CONSTANT_NAME.test(m[1]!)) match = m[0];
-      }
-    }
-    if (match) found.push(`${label} ("${match.trim()}")`);
+  for (const rule of CHANGING) {
+    const match = firstMatch(text, rule);
+    if (match) found.push(`${rule.label} ("${match.trim()}")`);
   }
   if (found.length) return { effect: 'state_changing', reasons: found };
-  if (READING.test(text)) return { effect: 'read_only', reasons: ['only inspects, and names nothing that changes state'] };
-  return { effect: 'state_changing', reasons: ['its effect cannot be told from the description, so it is treated as state-changing'] };
+  if (READING.test(text)) return { effect: 'read_only', reasons: [RULES.reasons.readOnly] };
+  return { effect: 'state_changing', reasons: [RULES.reasons.unclear] };
 }
 
 /** Effect of an action. `steps` are the steps of the runbook it refers to, if known. */
 export function actionEffect(type: string, title = '', description = '', steps: string[] = []): { effect: ActionEffect; reasons: string[] } {
-  if (STATE_CHANGING_TYPES.has(type)) return { effect: 'state_changing', reasons: [`${type} changes production by definition`] };
+  if (STATE_CHANGING_TYPES.has(type)) return { effect: 'state_changing', reasons: [RULES.reasons.byType.replace('{type}', type)] };
   return classifyText([title, description, ...steps].join(' . '));
 }
 

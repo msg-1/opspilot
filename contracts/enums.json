@@ -1,0 +1,13 @@
+{
+  "$comment": "Closed sets of values shared by the AI service, the API and the web app. Authoritative: edit here, then run `npm run contracts`.",
+  "remediationTypes": ["rollback_deployment", "restart_service", "scale_service", "toggle_feature_flag", "config_change", "run_runbook", "manual"],
+  "riskLevels": ["LOW", "MEDIUM", "HIGH"],
+  "actionEffects": ["read_only", "state_changing"],
+  "outcomes": ["HEALTHY", "DEGRADED", "INCIDENT", "UNDETERMINED"],
+  "analysisModes": ["llm", "heuristic", "mock"],
+  "hypothesisStatuses": ["likely", "possible", "unlikely"],
+  "signalLevels": ["strong", "moderate", "weak"],
+  "claimStatuses": ["exact", "rounded", "calculated", "estimate", "uncited", "unsupported"],
+  "claimKinds": ["number", "timestamp", "version", "commit", "pull_request", "incident"],
+  "verificationStatuses": ["verified", "partly", "unsupported", "no_claims"]
+}

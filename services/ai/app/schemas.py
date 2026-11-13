@@ -7,6 +7,23 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
+# The closed sets of values are defined once, in contracts/enums.json, and generated for every
+# language that uses them. Re-exported here so the rest of the service imports them from one place.
+from .generated.contracts import (
+    ActionEffect,
+    AnalysisMode,
+    ClaimKind,
+    ClaimStatus,
+    HypothesisStatus,
+    Outcome,
+    RemediationType,
+    RiskLevel,
+    SignalLevel,
+    VerificationStatus,
+)
+
+__all__ = ["ActionEffect", "AnalysisMode", "ClaimKind", "ClaimStatus", "HypothesisStatus", "Outcome", "RemediationType", "RiskLevel", "SignalLevel", "VerificationStatus"]
+
 
 class CamelModel(BaseModel):
     """Wire format is camelCase; Python attributes stay snake_case."""
@@ -102,9 +119,6 @@ class InvestigationPlan(CamelModel):
 
 # ───────────────────────── Report ─────────────────────────
 
-RemediationType = Literal[
-    "rollback_deployment", "restart_service", "scale_service", "toggle_feature_flag", "config_change", "run_runbook", "manual"
-]
 
 
 class TimelineEntry(CamelModel):
@@ -113,14 +127,13 @@ class TimelineEntry(CamelModel):
     evidence_refs: list[str] = Field(default_factory=list)
 
 
-ClaimStatus = Literal["exact", "rounded", "calculated", "estimate", "uncited", "unsupported"]
 
 
 class ClaimCheck(CamelModel):
     """One figure or identifier found in a statement, and whether the evidence bears it out."""
 
     text: str
-    kind: Literal["number", "timestamp", "version", "commit", "pull_request", "incident"]
+    kind: ClaimKind
     status: ClaimStatus
     detail: str
     evidence_ref: str | None = None
@@ -131,7 +144,7 @@ class Verification(CamelModel):
 
     #: verified: every figure is borne out by cited evidence · partly: some are only estimates or
     #: appear in evidence that is not cited · unsupported: at least one figure matches nothing
-    status: Literal["verified", "partly", "unsupported", "no_claims"]
+    status: VerificationStatus
     checks: list[ClaimCheck] = Field(default_factory=list)
 
 
@@ -145,7 +158,7 @@ class HypothesisOut(CamelModel):
     title: str
     description: str = Field(description="The causal mechanism proposed and how the evidence supports it")
     confidence: float = Field(ge=0, le=1)
-    status: Literal["likely", "possible", "unlikely"]
+    status: HypothesisStatus
     evidence_refs: list[str] = Field(default_factory=list, description="Evidence that supports this hypothesis")
     contradicting_evidence_refs: list[str] = Field(default_factory=list, description="Evidence that argues against this hypothesis")
     contradictions: list[str] = Field(default_factory=list, description="What in the evidence does not fit this hypothesis")
@@ -174,20 +187,19 @@ class RecommendedAction(CamelModel):
     title: str
     description: str
     rationale: str | None = None
-    risk: Literal["LOW", "MEDIUM", "HIGH"] = "MEDIUM"
+    risk: RiskLevel = "MEDIUM"
     #: What carrying it out would do, decided by app/effects.py from the type and the text
-    effect: Literal["read_only", "state_changing"] = "state_changing"
+    effect: ActionEffect = "state_changing"
     effect_reasons: list[str] = Field(default_factory=list)
     service_slug: str | None = None
     parameters: RemediationParameters | None = None
     evidence_refs: list[str] = Field(default_factory=list)
 
 
-Outcome = Literal["HEALTHY", "DEGRADED", "INCIDENT", "UNDETERMINED"]
 
 
 class Signal(CamelModel):
-    level: Literal["strong", "moderate", "weak"]
+    level: SignalLevel
     kind: str
     text: str
     evidence_refs: list[str] = Field(default_factory=list)
@@ -227,7 +239,7 @@ class Integrity(CamelModel):
 class InvestigationReport(CamelModel):
     summary: str = Field(description="3-6 sentences: what happened, the leading explanation, and how sure we are")
     confidence: float = Field(ge=0, le=1, description="Overall confidence in the leading hypothesis")
-    analysis_mode: Literal["llm", "heuristic", "mock"] = "llm"
+    analysis_mode: AnalysisMode = "llm"
     root_cause_confirmed: Literal[False] = False
     #: What the engine concluded before the evidence check; the assessment is authoritative
     outcome: Outcome | None = None
@@ -276,7 +288,7 @@ class LLMHypothesis(CamelModel):
     title: str
     description: str = Field(description="The causal mechanism proposed and how the evidence supports it")
     confidence: float = Field(description="Between 0 and 1")
-    status: Literal["likely", "possible", "unlikely"]
+    status: HypothesisStatus
     evidence_refs: list[str] = Field(description="Evidence references that support it, e.g. E3")
     contradicting_evidence_refs: list[str] = Field(description="Evidence references that argue against it; empty if none")
     contradictions: list[str] = Field(description="What in the evidence does not fit; empty if you checked and found nothing")
@@ -289,7 +301,7 @@ class LLMAction(CamelModel):
     title: str
     description: str
     rationale: str
-    risk: Literal["LOW", "MEDIUM", "HIGH"]
+    risk: RiskLevel
     service_slug: str = Field(description="Slug of the service the action applies to, or an empty string")
     deployment_id: str = Field(description="For rollback_deployment: sourceId of the deployment evidence to roll back; otherwise an empty string")
     to_version: str = Field(description="For rollback_deployment: the version to return to; otherwise an empty string")
@@ -300,7 +312,7 @@ class LLMReport(CamelModel):
     """Mode and confirmation flags are set by the service, never by the model."""
 
     summary: str = Field(description="3-6 sentences: what happened, the leading explanation, and how sure we are")
-    outcome: Literal["HEALTHY", "DEGRADED", "INCIDENT", "UNDETERMINED"] = Field(description="HEALTHY: no material evidence of a fault. DEGRADED: anomalies or warnings, cause not established. INCIDENT: a failure is evident and a cause is supported. UNDETERMINED: no telemetry could be examined")
+    outcome: Outcome = Field(description="HEALTHY: no material evidence of a fault. DEGRADED: anomalies or warnings, cause not established. INCIDENT: a failure is evident and a cause is supported. UNDETERMINED: no telemetry could be examined")
     confidence: float = Field(description="Confidence between 0 and 1 in the leading hypothesis; 0 when there is none")
     observations: list[FactRequired] = Field(description="Things worth knowing that are not evidence of a fault; empty if none")
     timeline: list[TimelineEntryRequired]

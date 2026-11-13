@@ -1,0 +1,58 @@
+{
+  "$comment": "What an action would do to production. Authoritative: edit here, then run `npm run contracts`. Patterns use the regular-expression subset common to JavaScript and Python and are matched case-insensitively after a word boundary.",
+  "stateChangingTypes": [
+    "rollback_deployment",
+    "restart_service",
+    "scale_service",
+    "toggle_feature_flag",
+    "config_change"
+  ],
+  "changing": [
+    {
+      "label": "restarts or stops a process",
+      "pattern": "restart\\w*|reboot\\w*|kill\\w*|terminat\\w*|shut\\s?down|stop(?:ping)? (?:the|a|all|every)\\b|bounce\\w*"
+    },
+    {
+      "label": "deploys or rolls back a version",
+      "pattern": "deploy(?:ing|s)?\\b|redeploy\\w*|roll(?:ing|ed)?[\\s-]?back|revert\\w*|promot(?:e|ing)\\b|hotfix\\w*|releas(?:e|ing) (?:a|the|new)\\b"
+    },
+    {
+      "label": "changes configuration",
+      "pattern": "reconfigur\\w*|(?:change|changing|modify|modifying|edit|editing|update|updating|adjust|adjusting|tune|tuning|override|overriding|raise|raising|lower|lowering|increase|increasing|decrease|decreasing|bump|bumping) (?:the|a|an|its|this|that|their|it|[A-Za-z]+[_.][A-Za-z_.]+)\\b|\\bset(?:ting)? (?:the\\b|[A-Za-z_.]+ ?(?:=|to\\b))",
+      "verbThenConstant": {
+        "verbs": "change|changing|modify|modifying|edit|editing|update|updating|adjust|adjusting|tune|tuning|override|overriding|raise|raising|lower|lowering|increase|increasing|decrease|decreasing|bump|bumping",
+        "constant": "[A-Z][A-Z0-9_]{2,}"
+      }
+    },
+    {
+      "label": "turns something on or off",
+      "pattern": "toggl\\w*|enabl(?:e|ing)\\b|disabl(?:e|ing)\\b|turn(?:ing)? (?:on|off)\\b|switch(?:ing)? (?:on|off|over|to)\\b|paus(?:e|ing)\\b|resum(?:e|ing)\\b"
+    },
+    {
+      "label": "clears a queue, cache or data",
+      "pattern": "flush\\w*|purg\\w*|clear(?:ing)?\\b|evict\\w*|invalidat\\w*|drain\\w*|delet(?:e|ing)\\b|drop(?:ping)?\\b|truncat\\w*|wip(?:e|ing)\\b|remov(?:e|ing)\\b|reset\\w*|requeue\\w*|replay\\w*"
+    },
+    {
+      "label": "runs a migration or writes data",
+      "pattern": "migrat\\w*|backfill\\w*|reindex\\w*|rebuild\\w*|restor(?:e|ing)\\b|\\b(?:insert|update|delete|alter|create|grant|revoke) (?:into|table|from|index|user|role)\\b|write(?:s|ing)? to\\b"
+    },
+    {
+      "label": "changes capacity or infrastructure",
+      "pattern": "scal(?:e|ing)\\b|resiz\\w*|provision\\w*|fail[\\s-]?over|add(?:ing)? (?:a |more )?(?:replica|node|instance|capacity)\\w*|terraform apply|kubectl (?:apply|delete|scale|rollout|edit|patch|set|cordon|drain)|systemctl (?:start|stop|restart|reload)|helm (?:upgrade|install|rollback|uninstall)"
+    },
+    {
+      "label": "changes access",
+      "pattern": "rotat(?:e|ing)\\b|revok(?:e|ing)\\b|grant(?:ing)?\\b|chmod|chown|permission change|change (?:the )?permissions"
+    },
+    {
+      "label": "upgrades or patches software",
+      "pattern": "upgrad\\w*|downgrad\\w*|patch(?:ing)?\\b|apply(?:ing)? (?:the|a)\\b|install\\w*|uninstall\\w*"
+    }
+  ],
+  "reading": "check\\w*|verif\\w*|confirm\\w*|inspect\\w*|review\\w*|read\\w*|look\\w*|view\\w*|examin\\w*|compar\\w*|monitor\\w*|observ\\w*|watch\\w*|quer(?:y|ies|ying)|list\\w*|describ\\w*|fetch\\w*|search\\w*|investigat\\w*|analy[sz]\\w*|trac(?:e|ing)\\b|measur\\w*|collect\\w*|captur\\w*|gather\\w*|identif\\w*|determin\\w*|ask\\w*|contact\\w*|notif\\w*|escalat\\w*|document\\w*|record\\w*|note\\b|open (?:the )?(?:dashboard|log|trace)\\w*",
+  "reasons": {
+    "byType": "{type} changes production by definition",
+    "readOnly": "only inspects, and names nothing that changes state",
+    "unclear": "its effect cannot be told from the description, so it is treated as state-changing"
+  }
+}

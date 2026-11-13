@@ -98,6 +98,14 @@ jobs:
         with: { enable-cache: true }
       - run: uv sync --frozen
       - run: uv run ruff check .
+      # contracts/ is the one definition of what the services share. Everything generated from
+      # it, and everything this service exports into it, must be committed and current.
+      - name: Shared contracts are up to date
+        working-directory: .
+        run: |
+          node scripts/contracts.mjs
+          (cd services/ai && uv run python -m app.contracts)
+          git diff --exit-code -- contracts apps/api/src/generated apps/web/src/lib/generated services/ai/app/generated
       - run: uv run pytest -q
       # Regression gate for the investigation engine: every ground-truth scenario must pass.
       - run: uv run python -m app.evals.run --heuristic

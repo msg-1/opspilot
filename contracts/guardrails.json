@@ -1,0 +1,17 @@
+{
+  "$comment": "Limits the report guardrails enforce. The AI service applies all of them; the API applies those marked in contracts/README.md again, independently. Authoritative: edit here, then run `npm run contracts`.",
+  "maxConfidence": { "llm": 0.9, "heuristic": 0.75, "mock": 0.1 },
+  "unsupportedHypothesisCap": 0.3,
+  "noFaultHypothesisCap": 0.2,
+  "likelyMinimumConfidence": 0.5,
+  "maxRecommendedActions": 4,
+  "outcomeAllowingProductionChanges": "INCIDENT",
+  "withdrawalReasons": {
+    "unlikelyHypothesis": "it would change production on the strength of a hypothesis rated unlikely",
+    "noIncident": "it would change production, and the evidence supports {outcome}, not an incident with an established cause"
+  },
+  "nextStepPrefixes": {
+    "withdrawn": "Considered and not recommended ({reason}): {title}",
+    "highRisk": "Higher-risk alternative, only if the lower-risk action is not possible: {title}. {description}"
+  }
+}
