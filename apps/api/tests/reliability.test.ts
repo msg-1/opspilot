@@ -248,7 +248,10 @@ describe.skipIf(!redisAvailable)('reliability under failure', () => {
         res.end();
       };
       await start();
-      const done = await ended(org, (await ask(org)).body.id);
+      const id = (await ask(org)).body.id as string;
+      await ended(org, id);
+      // The proposed action is written just after the report is stored, not with it: wait for it.
+      const done = await until(() => read(org, id), (i) => i.remediations.length > 0, 'the proposed action to be recorded');
       expect(done).toMatchObject({ status: 'COMPLETED', outcome: 'INCIDENT' });
       expect(done.evidence.map((e: { ref: string }) => e.ref)).toEqual(['E1', 'E2']);
       expect(done.hypotheses).toHaveLength(1);
@@ -281,6 +284,7 @@ describe.skipIf(!redisAvailable)('reliability under failure', () => {
       const done = await ended(org, id);
       expect(done.status).toBe('COMPLETED');
       await until(counts, (c) => c.active === 0 && c.waiting === 0, 'the queue to drain');
+      await until(() => prisma.remediationAction.count({ where: { organizationId: org.organizationId } }), (n) => n > 0, 'the proposed action to be recorded');
       // Processing it again by hand, during and after, changes nothing either.
       await Promise.all([runInvestigation(id), runInvestigation(id), runInvestigation(id, { redelivered: true })]);
       expect(ai.state.runs).toHaveLength(1);
@@ -369,6 +373,7 @@ describe.skipIf(!redisAvailable)('reliability under failure', () => {
       const done = await ended(org, id);
       expect(done).toMatchObject({ status: 'COMPLETED', outcome: 'INCIDENT' });
       await until(counts, (c) => c.active === 0 && c.waiting === 0, 'the queue to settle');
+      await until(() => prisma.remediationAction.count({ where: { organizationId: org.organizationId } }), (n) => n > 0, 'the proposed action to be recorded');
       await pause(500);
       expect(ai.state.runs).toHaveLength(1);
       expect((await read(org, id)).status).toBe('COMPLETED');
