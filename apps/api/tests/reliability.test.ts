@@ -22,7 +22,8 @@ const settings = vi.hoisted(() => {
 
 import { env } from '../src/config/env';
 import { runInvestigation } from '../src/modules/investigations';
-import { closeQueues, enqueue, queueStats, startWorkers } from '../src/queues';
+import { reapStranded } from '../src/modules/system';
+import { closeQueues, enqueue, ensureSchedulers, queueStats, startWorkers } from '../src/queues';
 import { api, createOrg, createService, prisma } from './helpers';
 
 expect(testPort(1)).toBe(settings.redisPort);
@@ -87,6 +88,9 @@ describe.skipIf(!redisAvailable)('reliability under failure', () => {
   beforeAll(async () => {
     await redisProxy.up();
     await ai.start();
+    // The sweep puts waiting investigations back on the queue, whoever they belong to. None
+    // left over from an earlier file may wander into this file's queue and be counted here.
+    await prisma.investigation.updateMany({ where: { status: 'QUEUED' }, data: { status: 'CANCELLED' } });
   });
   beforeEach(async () => {
     ai.reset();
@@ -372,6 +376,52 @@ describe.skipIf(!redisAvailable)('reliability under failure', () => {
       // The worker is still serving the queue.
       ai.reset();
       expect((await ended(org, (await ask(org)).body.id)).status).toBe('COMPLETED');
+    });
+
+    it('loses its data while an investigation is waiting: the sweep puts the job back, once, and it runs', async () => {
+      const org = await createOrg();
+      const raw = new IORedis(settings.realRedis);
+      const wipe = async (queue: string) => {
+        const keys = await raw.keys(`${settings.prefix}:${queue}:*`);
+        if (keys.length) await raw.del(...keys);
+      };
+      try {
+        const id = (await ask(org)).body.id as string; // accepted; no worker is running
+        expect((await counts()).waiting).toBe(1);
+        await wipe('investigation');
+        expect((await counts()).waiting).toBe(0);
+        expect((await read(org, id)).status).toBe('QUEUED'); // it looks as if it were waiting; nothing will ever pick it up
+
+        // Too recent to be suspected: an investigation normally waits a moment.
+        await reapStranded();
+        expect((await counts()).waiting).toBe(0);
+        // After a few minutes of waiting its job is put back, and only once however often the sweep runs.
+        await prisma.investigation.update({ where: { id }, data: { createdAt: new Date(Date.now() - 3 * 60_000) } });
+        await reapStranded();
+        await reapStranded();
+        expect((await counts()).waiting).toBe(1);
+
+        await start();
+        expect((await ended(org, id)).status).toBe('COMPLETED');
+        await until(counts, (c) => c.active === 0 && c.waiting === 0, 'the queue to drain');
+        // Sweeping again after it ran does not run it again.
+        await reapStranded();
+        await pause(300);
+        expect(ai.state.runs.filter((r) => r.investigationId === id)).toHaveLength(1);
+
+        // The repeating jobs (alert evaluation, retention, and this sweep) live in Redis too.
+        await ensureSchedulers();
+        expect(await ensureSchedulers()).toEqual([]); // present: left alone
+        await wipe('alert-eval');
+        await wipe('log-retention');
+        expect((await ensureSchedulers()).sort()).toEqual(['alert-eval-every-minute', 'log-retention-hourly']);
+        expect(await ensureSchedulers()).toEqual([]);
+      } finally {
+        await halt();
+        await wipe('alert-eval');
+        await wipe('log-retention');
+        await raw.quit();
+      }
     });
 
     it('is not there when the workers start: they wait for it instead of failing', async () => {

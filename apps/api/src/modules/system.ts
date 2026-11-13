@@ -19,7 +19,7 @@ registerProcessor('alert-eval', async () => {
 });
 
 // Longer than any job can legitimately take (the AI call itself times out after INVESTIGATION_TIMEOUT_MS).
-const STALE = { runningInvestigation: env.INVESTIGATION_TIMEOUT_MS + 5 * 60_000, queuedInvestigation: 60 * 60_000, executingRemediation: 5 * 60_000, indexingDocument: 10 * 60_000 };
+const STALE = { runningInvestigation: env.INVESTIGATION_TIMEOUT_MS + 5 * 60_000, queuedInvestigation: 60 * 60_000, orphanedInvestigation: 2 * 60_000, executingRemediation: 5 * 60_000, indexingDocument: 10 * 60_000 };
 
 /**
  * A job that dies with its process leaves its row in an in-progress state that no retry will
@@ -32,6 +32,17 @@ export async function reapStranded(now = new Date()) {
     select: { id: true },
   });
   for (const inv of investigations) await markInterrupted(inv.id, now);
+
+  // An investigation that has waited for minutes may have lost its job (Redis lost its data).
+  // Its job is put on the queue again under the same id: if the job is still there this adds
+  // nothing, and since the investigation never started, running it now runs it once.
+  const waiting = await prisma.investigation.findMany({
+    where: { status: 'QUEUED', createdAt: { lt: before(STALE.orphanedInvestigation), gte: before(STALE.queuedInvestigation) } },
+    select: { id: true },
+    orderBy: { createdAt: 'asc' },
+    take: 50,
+  });
+  for (const inv of waiting) await enqueue('investigation', { investigationId: inv.id }, { jobId: inv.id }).catch(() => undefined);
 
   const unknown = 'Execution was interrupted and its outcome is unknown. Check the target system before retrying: the change may or may not have been applied.';
   const actions = await prisma.remediationAction.findMany({ where: { status: 'EXECUTING', updatedAt: { lt: before(STALE.executingRemediation) } }, select: { id: true, organizationId: true, incidentId: true, title: true } });

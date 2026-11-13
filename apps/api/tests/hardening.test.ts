@@ -69,7 +69,7 @@ describe('recovery of stranded work', () => {
     const incident = (await org.owner.post('/api/v1/incidents').send({ title: 'Stranded work incident' })).body;
     const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000);
     const mk = (status: 'RUNNING' | 'QUEUED', startedAt: Date | null, createdAt: Date) => prisma.investigation.create({ data: { organizationId: org.organizationId, question: 'why did it stop?', status, startedAt, createdAt } });
-    const [staleRunning, freshRunning, staleQueued, freshQueued] = await Promise.all([mk('RUNNING', ago(45), ago(46)), mk('RUNNING', ago(2), ago(3)), mk('QUEUED', null, ago(90)), mk('QUEUED', null, ago(5))]);
+    const [staleRunning, freshRunning, staleQueued, freshQueued] = await Promise.all([mk('RUNNING', ago(45), ago(46)), mk('RUNNING', ago(2), ago(3)), mk('QUEUED', null, ago(90)), mk('QUEUED', null, ago(1))]);
     const action = await prisma.remediationAction.create({ data: { organizationId: org.organizationId, incidentId: incident.id, type: 'restart_service', title: 'Restart checkout', description: 'Rolling restart', status: 'EXECUTING' } });
     await prisma.$executeRaw`UPDATE "RemediationAction" SET "updatedAt" = ${ago(30)} WHERE "id" = ${action.id}`;
 
@@ -88,6 +88,8 @@ describe('recovery of stranded work', () => {
     const timeline = (await org.owner.get(`/api/v1/incidents/${incident.id}`)).body.timeline.map((e: { message: string }) => e.message);
     expect(timeline.some((m: string) => m.startsWith('Remediation outcome unknown'))).toBe(true);
     expect((await reapStranded())).toMatchObject({ remediations: 0 });
+    // Nothing is left behind in a state a later sweep would act on.
+    await prisma.investigation.deleteMany({ where: { id: { in: [freshRunning.id, freshQueued.id] } } });
   });
 });
 

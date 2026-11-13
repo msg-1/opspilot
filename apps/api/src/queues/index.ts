@@ -182,9 +182,16 @@ export async function startWorkers({ schedulers = true }: { schedulers?: boolean
     worker.on('completed', (job) => logger.debug({ queue: name, jobId: job.id }, 'job completed'));
     return worker;
   });
+  let schedulerCheck: NodeJS.Timeout | undefined;
   if (schedulers) {
     await queueFor('alert-eval', true).upsertJobScheduler('alert-eval-every-minute', { every: 60_000 }, { name: 'alert-eval', data: {} });
     await queueFor('log-retention', true).upsertJobScheduler('log-retention-hourly', { every: 3_600_000 }, { name: 'log-retention', data: {} });
+    // The schedules live in Redis. If Redis loses its data they are gone, and with them alert
+    // evaluation, retention and the sweep for stranded work, until the next restart. So the
+    // worker looks once a minute and puts back what is missing. Only what is missing: writing
+    // an existing schedule again would push its next run back.
+    schedulerCheck = setInterval(() => void ensureSchedulers().catch((err: Error) => logger.debug({ err: err.message }, 'could not check the job schedules')), 60_000);
+    schedulerCheck.unref();
   }
   logger.info({ queues: Object.keys(CONFIG) }, 'workers started');
   /**
@@ -193,6 +200,7 @@ export async function startWorkers({ schedulers = true }: { schedulers?: boolean
    * more seconds; after that the workers are closed regardless. Without it, waits indefinitely.
    */
   return async ({ graceMs }: { graceMs?: number } = {}) => {
+    clearInterval(schedulerCheck);
     const closing = Promise.all(workers.map((w) => w.close()));
     if (graceMs !== undefined) {
       const finished = Symbol('finished');
@@ -206,6 +214,24 @@ export async function startWorkers({ schedulers = true }: { schedulers?: boolean
     await closing.catch(() => undefined);
     await closeQueues();
   };
+}
+
+const SCHEDULES = [
+  { queue: 'alert-eval', id: 'alert-eval-every-minute', every: 60_000 },
+  { queue: 'log-retention', id: 'log-retention-hourly', every: 3_600_000 },
+] as const;
+
+/** Puts back any repeating job that is missing from Redis. Returns the ids it restored. */
+export async function ensureSchedulers() {
+  const restored: string[] = [];
+  for (const schedule of SCHEDULES) {
+    const queue = queueFor(schedule.queue, true);
+    if (await queue.getJobScheduler(schedule.id)) continue;
+    await queue.upsertJobScheduler(schedule.id, { every: schedule.every }, { name: schedule.queue, data: {} });
+    restored.push(schedule.id);
+  }
+  if (restored.length) logger.warn({ restored }, 'job schedules were missing from Redis and have been restored');
+  return restored;
 }
 
 export async function queueStats() {
