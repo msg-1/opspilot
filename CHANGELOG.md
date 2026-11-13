@@ -5,6 +5,7 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- A temporary dataset for manual testing (`npm run demo:seed`, `demo:status`, `demo:reset`): a dedicated organisation, Acme Commerce, with six services, eight incidents and their telemetry, removable without touching any other data. Local databases only. See docs/manual-demo-testing.md.
 - Shared contracts (`contracts/`): one definition of the closed value sets, guardrail limits, action-effect rules, the investigation report, the agent tools and the API responses the web app uses. `npm run contracts` generates the TypeScript and Python representations; `npm run contracts:check` and CI fail when one is stale.
 - Web API types generated from the API's response contracts (`apps/api/src/contracts/api.ts`), with a test that validates real API responses against them.
 - Distributed tracing of the platform itself: one trace per investigation across the API, the queue, the worker, the AI service and every tool call. Compose profile `tracing`, `npm run tracing:up`, `npm run trace -- <investigation id>`. Off by default; spans are scrubbed of credentials and personal data in both services. See docs/tracing.md.
