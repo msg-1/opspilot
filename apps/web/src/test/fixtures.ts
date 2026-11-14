@@ -4,11 +4,11 @@ import type { IncidentDetail, InvestigationDetail, InvestigationSummary, Paged, 
 // field the API stops returning, or returns differently, breaks these fixtures at compile time,
 // so the page tests cannot keep passing against a shape that no longer exists.
 
-const ALL = ['read', 'incident:write', 'investigation:run', 'remediation:propose', 'remediation:approve', 'remediation:approve:high', 'remediation:execute', 'member:manage'];
+const ALL = ['read', 'incident:write', 'investigation:run', 'remediation:propose', 'remediation:approve', 'remediation:approve:high', 'remediation:execute', 'member:manage', 'integration:manage', 'settings:manage', 'service:write'];
 const ROLE_PERMISSIONS: Record<Session['role'], string[]> = {
   OWNER: ALL,
   ADMIN: ALL,
-  ENGINEER: ['read', 'incident:write', 'investigation:run', 'remediation:propose', 'remediation:approve', 'remediation:execute'],
+  ENGINEER: ['read', 'service:write', 'incident:write', 'investigation:run', 'remediation:propose', 'remediation:approve', 'remediation:execute'],
   VIEWER: ['read'],
 };
 

@@ -3,7 +3,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactElement } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { RemediationDetail, Session } from '@/lib/types';
+import type { Integration, IntegrationOverview, RemediationDetail, Session } from '@/lib/types';
 
 // The journeys a person takes through an incident, rendered as the real pages with the real
 // components, session, permissions and API client. Only two things are replaced: the router
@@ -19,6 +19,7 @@ vi.mock('next/navigation', () => ({
 }));
 
 import IncidentPage from '@/app/(app)/incidents/[id]/page';
+import IntegrationsPage from '@/app/(app)/integrations/page';
 import InvestigationPage from '@/app/(app)/investigations/[id]/page';
 import InvestigationsPage from '@/app/(app)/investigations/page';
 import RemediationDetailPage from '@/app/(app)/remediation/[id]/page';
@@ -527,5 +528,81 @@ describe('viewing execution outcomes', () => {
     show(<RemediationDetailPage />, session('VIEWER', { id: 'user-vic', name: 'Vic Viewer' }));
     expect(await screen.findByText('The outcome of the last attempt is unknown.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Retry|Execute/ })).not.toBeInTheDocument();
+  });
+});
+
+describe('connecting integrations', () => {
+  const source = (over: Partial<Integration>): Integration => ({
+    id: 'logs', name: 'Logs', kind: 'push', scope: 'organization', provides: 'Application log lines.', requires: ['An API key with the scope ingest:logs.'],
+    status: 'not_configured', statusDetail: 'No API key with the scope ingest:logs exists, and no data has been received.', lastReceivedAt: null, lastError: null, lastCheck: null,
+    facts: [{ label: 'API keys with this scope', value: '0' }], setup: { endpoint: 'POST /api/v1/logs', apiKeyScope: 'ingest:logs', example: '{"service":"checkout-service","logs":[]}', settingsTab: 'keys', canCheck: false }, ...over,
+  });
+  const github = source({ id: 'github', name: 'GitHub', kind: 'pull', status: 'connected', statusDetail: 'The token was accepted by GitHub (account acme-bot). No repository is connected yet.', setup: { endpoint: null, apiKeyScope: null, example: null, settingsTab: 'github', canCheck: true } });
+  const engine = source({ id: 'analysis_engine', name: 'Analysis engine', kind: 'engine', scope: 'installation', status: 'connected', statusDetail: 'The rule-based engine is active. No model is called and nothing is billed.', setup: { endpoint: null, apiKeyScope: null, example: null, settingsTab: null, canCheck: false } });
+  const steps = (done: number) => ['services', 'source', 'connect', 'data', 'associate', 'investigate'].map((id, i) => ({ id, title: `Step ${id}`, done: i < done, detail: `Detail of ${id}`, href: id === 'services' ? '/services' : '/integrations' }));
+  const overview = (over: Partial<IntegrationOverview> = {}): IntegrationOverview => ({ generatedAt: '2026-11-14T09:00:00.000Z', integrations: [source({}), github, engine], unresolvedServices: [], onboarding: { complete: false, steps: steps(1) }, ...over });
+
+  it('tells saved, connected and receiving apart, and shows how to connect without ever showing a key', async () => {
+    fakeApi({ 'GET /integrations': overview({ integrations: [source({}), source({ id: 'metrics', name: 'Metrics', status: 'delivering', statusDetail: 'Receiving data: 120 samples in the last 24 hours.', lastReceivedAt: new Date().toISOString() }), source({ id: 'deployments', name: 'Deployments', status: 'configured', statusDetail: '1 API key can send this data. None has been used yet.' }), github, engine] }), 'GET /services': { data: [], meta: { page: 1, pageSize: 100, total: 0, totalPages: 0 } } });
+    show(<IntegrationsPage />, session('ADMIN'));
+    expect(await screen.findByText('Not set up')).toBeInTheDocument();
+    expect(screen.getByText('Receiving data')).toBeInTheDocument();
+    expect(screen.getByText('Set up, not yet verified')).toBeInTheDocument();
+    expect(screen.getByText('Connected, no data yet')).toBeInTheDocument(); // GitHub: token accepted, nothing read
+    expect(screen.getByText('Connected')).toBeInTheDocument(); // the engine: connected is all there is
+    // The list of steps says what is done and what comes next.
+    expect(screen.getByText('1 of 6 steps done.', { exact: false })).toBeInTheDocument();
+    expect(screen.getByTestId('step-services')).toHaveAttribute('data-done', 'true');
+    expect(within(screen.getByTestId('step-source')).getByText('next')).toBeInTheDocument();
+    // How to connect: the request to send, with a placeholder where the key goes.
+    await userEvent.click(screen.getAllByRole('button', { name: 'How to connect' })[0]!);
+    const example = screen.getByText(/curl -X POST/);
+    expect(example.textContent).toContain('/api/v1/logs');
+    expect(example.textContent).toContain('$OPSILUME_API_KEY');
+    expect(example.textContent).not.toMatch(/opk_[A-Za-z0-9]/);
+    expect(screen.getByText('An API key with the scope ingest:logs.')).toBeInTheDocument();
+  });
+
+  it('runs a connection check on request and shows what it found, including a failure in plain words', async () => {
+    let current = github;
+    const api = fakeApi({
+      'GET /integrations': () => overview({ integrations: [current, engine] }),
+      'GET /services': { data: [], meta: { page: 1, pageSize: 100, total: 0, totalPages: 0 } },
+      'POST /integrations/github/check': () => {
+        current = { ...github, status: 'unavailable', statusDetail: 'The last connection check failed.', lastCheck: { at: new Date().toISOString(), ok: false, detail: 'GitHub rejected the token (401). Check that it is valid and not expired.' } };
+        return { ok: false, detail: current.lastCheck!.detail };
+      },
+    });
+    show(<IntegrationsPage />, session('ADMIN'));
+    await userEvent.click(await screen.findByRole('button', { name: 'Check connection' }));
+    expect(await screen.findByText('Not working')).toBeInTheDocument();
+    expect(screen.getByText(/GitHub rejected the token \(401\)/)).toBeInTheDocument();
+    expect(api.writes().map((c) => `${c.method} ${c.path}`)).toEqual(['POST /integrations/github/check']);
+  });
+
+  it('does not offer checks or linking to someone who may not use them', async () => {
+    fakeApi({ 'GET /integrations': overview({ integrations: [github, engine], unresolvedServices: [{ ref: 'payments-api', sources: ['logs'], count: 12, lastSeenAt: new Date().toISOString(), linkable: true, registered: false }] }), 'GET /services': { data: [], meta: { page: 1, pageSize: 100, total: 0, totalPages: 0 } } });
+    show(<IntegrationsPage />, session('VIEWER'));
+    expect(await screen.findByText('payments-api')).toBeInTheDocument();
+    expect(screen.getByText(/12 log lines stored without a service/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Check connection' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Give these lines to it' })).not.toBeInTheDocument();
+  });
+
+  it('gives stored log lines to a service once it exists', async () => {
+    let linked = false;
+    const api = fakeApi({
+      'GET /integrations': () => overview({ unresolvedServices: linked ? [] : [{ ref: 'payments-api', sources: ['logs'], count: 12, lastSeenAt: new Date().toISOString(), linkable: true, registered: true }] }),
+      'GET /services': { data: [{ id: 'svc-1', name: 'Payments API', slug: 'payments-api' }], meta: { page: 1, pageSize: 100, total: 1, totalPages: 1 } },
+      'POST /integrations/unresolved-services/link': () => {
+        linked = true;
+        return { linked: 12 };
+      },
+    });
+    show(<IntegrationsPage />, session('ENGINEER'));
+    // The service of the same name is already chosen.
+    await userEvent.click(await screen.findByRole('button', { name: 'Give these lines to it' }));
+    await waitFor(() => expect(screen.queryByText('Data that belongs to no service')).not.toBeInTheDocument());
+    expect(api.writes()).toEqual([{ method: 'POST', path: '/integrations/unresolved-services/link', body: { ref: 'payments-api', service: 'payments-api' } }]);
   });
 });

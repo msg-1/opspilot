@@ -4,7 +4,7 @@ import { CheckCircle2, Rocket, ShieldCheck, Sparkles } from 'lucide-react';
 import Link from 'next/link';
 import { DeploymentStatusBadge, HealthDot, IncidentStatusBadge, InvestigationStatusBadge, RiskBadge, SeverityBadge } from '@/components/badges';
 import { ERROR_SERIES, StackedBars } from '@/components/charts';
-import { Card, EmptyState, ErrorState, LinkButton, Mono, PageHeader, Skeleton, Stat } from '@/components/ui';
+import { Card, EmptyState, ErrorState, LinkButton, Mono, Notice, PageHeader, Skeleton, Stat } from '@/components/ui';
 import { useApi } from '@/lib/api';
 import { duration, percent, timeAgo } from '@/lib/format';
 import { useSession } from '@/lib/session';
@@ -51,6 +51,15 @@ export default function OverviewPage() {
         description={counts.activeIncidents ? `${counts.activeIncidents} incident${counts.activeIncidents > 1 ? 's need' : ' needs'} attention across ${session.organization.name}.` : `No active incidents across ${session.organization.name}.`}
         actions={session.can('incident:write') && <LinkButton href="/incidents?new=1" variant="primary">Declare incident</LinkButton>}
       />
+
+      {totalServices === 0 && (
+        <div className="mb-4">
+          <Notice>
+            <strong>Nothing is connected yet.</strong> OPSILUME investigates with the logs, metrics, deployments and code changes of your services.{' '}
+            <Link href="/integrations" className="font-medium underline underline-offset-2">See what can be connected and set it up</Link>.
+          </Notice>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <Stat label="Active incidents" value={counts.activeIncidents} tone={counts.activeIncidents ? 'critical' : undefined} hint={`${counts.incidentsThisWeek} opened in the last 7 days`} />
