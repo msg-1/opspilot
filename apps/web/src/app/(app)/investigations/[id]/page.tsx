@@ -1,13 +1,13 @@
 'use client';
 
 import clsx from 'clsx';
-import { Activity, AlertTriangle, BookOpen, Bot, Boxes, HeartPulse, Route, ChevronDown, CircleHelp, FileCode2, GitPullRequest, ListChecks, Rocket, ScrollText, ShieldAlert, Siren, Sparkles, TrendingUp, Wrench, XCircle } from 'lucide-react';
+import { Activity, AlertTriangle, BookOpen, Bot, Boxes, HeartPulse, Route, ChevronDown, CircleHelp, FileCode2, GitPullRequest, ListChecks, Rocket, ScrollText, ShieldAlert, Siren, Sparkles, TrendingUp, Wrench, XCircle, FileText } from 'lucide-react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useMemo, useState } from 'react';
 import { ConfidenceMeter, EffectBadge, EngineBadge, InvestigationStatusBadge, RemediationStatusBadge, RiskBadge, SeverityBadge } from '@/components/badges';
 import { AssessmentCard, IntegritySummary, VerificationMark } from '@/components/findings';
-import { Button, Card, EmptyState, ErrorState, FormError, Mono, Notice, PageHeader, Spinner, Tabs } from '@/components/ui';
+import { Button, Card, EmptyState, ErrorState, FormError, Mono, Notice, PageHeader, Spinner, Tabs, LinkButton } from '@/components/ui';
 import { api, useApi } from '@/lib/api';
 import { clock, dateTime, timeAgo, titleCase } from '@/lib/format';
 import { useAction } from '@/lib/hooks';
@@ -233,7 +233,13 @@ export default function InvestigationPage() {
             )}
           </span>
         }
-        actions={running && session.can('investigation:run') && <Button loading={busy === 'cancel'} onClick={() => void run(() => api.post(`/investigations/${data.id}/cancel`), 'cancel')}>Cancel</Button>}
+        actions={
+          <>
+            {running && session.can('investigation:run') && <Button loading={busy === 'cancel'} onClick={() => void run(() => api.post(`/investigations/${data.id}/cancel`), 'cancel')}>Cancel</Button>}
+            {/* The same content as a document to read, share or print. */}
+            {report && <LinkButton href={`/investigations/${data.id}/report`} icon={<FileText className="size-4" aria-hidden />}>Report to share</LinkButton>}
+          </>
+        }
       />
       <FormError error={actionError} />
 

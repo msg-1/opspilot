@@ -21,6 +21,7 @@ vi.mock('next/navigation', () => ({
 import IncidentPage from '@/app/(app)/incidents/[id]/page';
 import IntegrationsPage from '@/app/(app)/integrations/page';
 import InvestigationPage from '@/app/(app)/investigations/[id]/page';
+import InvestigationReportPage from '@/app/(app)/investigations/[id]/report/page';
 import InvestigationsPage from '@/app/(app)/investigations/page';
 import RemediationDetailPage from '@/app/(app)/remediation/[id]/page';
 import LoginPage from '@/app/(auth)/login/page';
@@ -604,5 +605,92 @@ describe('connecting integrations', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Give these lines to it' }));
     await waitFor(() => expect(screen.queryByText('Data that belongs to no service')).not.toBeInTheDocument());
     expect(api.writes()).toEqual([{ method: 'POST', path: '/integrations/unresolved-services/link', body: { ref: 'payments-api', service: 'payments-api' } }]);
+  });
+});
+
+describe('the report to share', () => {
+  const actions = { data: [{ ...remediation, id: 'act-1', title: 'Roll back checkout to v2.3.1', risk: 'MEDIUM', effect: 'state_changing', status: 'PENDING_APPROVAL', requiredApprovals: 1, approvalsGranted: 0 }], meta: { page: 1, pageSize: 50, total: 1, totalPages: 1 }, statusCounts: {}, executionMode: 'manual' };
+  beforeEach(() => {
+    nav.params = { id: 'inv-1' };
+  });
+
+  it('reads as a document: conclusion, probable cause, facts, changes, limits, next steps, in words a reader outside the team can follow', async () => {
+    fakeApi({ 'GET /investigations/inv-1': investigation, 'GET /remediations': actions });
+    show(<InvestigationReportPage />, session('VIEWER'));
+    expect(await screen.findByRole('heading', { level: 1, name: /^INC-42: / })).toBeInTheDocument();
+    // Which engine wrote it is said in a sentence, and that the cause is unconfirmed.
+    expect(screen.getByTestId('engine-line')).toHaveTextContent('Written by the rule-based engine from the evidence listed below. No AI model was used.');
+    expect(screen.getByText(/The cause has not been confirmed/)).toBeInTheDocument();
+
+    // Conclusion: the outcome in a sentence, what was examined and when, and two confidences that are not confused.
+    const conclusion = screen.getByRole('region', { name: 'Conclusion' });
+    expect(within(conclusion).getByText('Incident')).toBeInTheDocument();
+    expect(within(conclusion).getByText(/A failure is evident in the data/)).toBeInTheDocument();
+    expect(within(conclusion).getByText('checkout')).toBeInTheDocument();
+    expect(within(conclusion).getByText(/86% \(high\)/)).toBeInTheDocument();
+    expect(within(conclusion).getByText(/2 of 3 numbers, times and identifiers/)).toBeInTheDocument();
+
+    // The probable cause is labelled a hypothesis, with what supports it, what speaks against it and what is missing.
+    const cause = screen.getByRole('region', { name: /Most probable cause/ });
+    expect(within(cause).getByText('Hypothesis')).toBeInTheDocument();
+    expect(within(cause).getByText('v2.4.0 reduced the database connection pool')).toBeInTheDocument();
+    expect(within(cause).getByText(/62% \(moderate; rated likely\)/)).toBeInTheDocument();
+    expect(within(cause).getByText('Deployment of checkout v2.4.0 (succeeded)', { exact: false })).toBeInTheDocument();
+    expect(within(cause).getByText(/Nothing in the evidence gathered contradicts it/)).toBeInTheDocument();
+    expect(within(cause).getByText('The pool size changed in this release.')).toBeInTheDocument();
+    expect(within(cause).getByText('The diff of v2.4.0.')).toBeInTheDocument();
+
+    // Facts are labelled facts, and a figure the evidence does not support is marked where it is read and listed under limits.
+    const facts = screen.getByRole('region', { name: /What is established/ });
+    expect(within(facts).getByText('Facts')).toBeInTheDocument();
+    expect(within(facts).getByText('Unsupported figure')).toBeInTheDocument();
+    const limits = screen.getByRole('region', { name: /What is not known/ });
+    expect(within(limits).getByText('The diff of v2.4.0 was not reviewed.')).toBeInTheDocument();
+    expect(within(limits).getByText('Traces were not examined.')).toBeInTheDocument();
+    expect(within(limits).getByText(/Figures in this report that the evidence does not support/)).toBeInTheDocument();
+
+    // Changes come from the evidence, with their times.
+    const changes = screen.getByRole('region', { name: /Deployments and changes in the evidence/ });
+    expect(within(changes).getByText('Deployment')).toBeInTheDocument();
+    expect(within(changes).getByText(/Deployment of checkout v2.4.0/)).toBeInTheDocument();
+
+    // Recommendations are labelled, and an action says what it would do, its risk and what approval it needs.
+    const next = screen.getByRole('region', { name: /Recommended next steps/ });
+    expect(within(next).getByText('Recommendations')).toBeInTheDocument();
+    expect(within(next).getByText('Review the connection pool change in v2.4.0')).toBeInTheDocument();
+    expect(await within(next).findByText('Roll back checkout to v2.3.1')).toBeInTheDocument();
+    expect(within(next).getByText('Changes production')).toBeInTheDocument();
+    expect(within(next).getByText('Medium risk')).toBeInTheDocument();
+    expect(within(next).getByText(/Needs 1 approval before it may be carried out; 0 given\./)).toBeInTheDocument();
+    expect(within(next).getByText(/OPSILUME does not carry out any of these by itself/)).toBeInTheDocument();
+
+    // The internals stay on the investigation page: no tool names, no steps, no token counts.
+    const text = document.body.textContent ?? '';
+    for (const internal of ['find_log_anomalies', 'Agent steps', 'tool_call', 'tokens', 'guardrail']) expect(text).not.toContain(internal);
+    // Every reference in the text resolves to an evidence item listed at the end.
+    for (const ref of ['E1', 'E2', 'E3']) expect(document.getElementById(`evidence-${ref}`)).not.toBeNull();
+  });
+
+  it('prints from the browser, and never dresses up an investigation that did not finish or was not an analysis', async () => {
+    const print = vi.spyOn(window, 'print').mockImplementation(() => undefined);
+    fakeApi({ 'GET /investigations/inv-1': { ...investigation, status: 'FAILED', error: 'AI service is not reachable.', report: null, hypotheses: [], outcome: null }, 'GET /remediations': { ...actions, data: [] } });
+    const first = show(<InvestigationReportPage />, session('VIEWER'));
+    expect(await screen.findByText(/This investigation failed and reached no conclusion/)).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Conclusion' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Print or save as PDF' }));
+    expect(print).toHaveBeenCalledTimes(1);
+    first.unmount();
+
+    fakeApi({ 'GET /investigations/inv-1': { ...investigation, analysisMode: 'mock', report: { ...investigation.report!, analysisMode: 'mock' } }, 'GET /remediations': { ...actions, data: [] } });
+    const second = show(<InvestigationReportPage />, session('VIEWER'));
+    expect(await screen.findByText(/This is test output/)).toBeInTheDocument();
+    expect(screen.getByTestId('engine-line')).toHaveTextContent('It is not an analysis.');
+    second.unmount();
+
+    // A healthy conclusion proposes no cause and recommends no production change, and says so.
+    fakeApi({ 'GET /investigations/inv-1': { ...investigation, outcome: 'HEALTHY', hypotheses: [], report: { ...investigation.report!, outcome: 'HEALTHY', assessment: { ...investigation.report!.assessment!, outcome: 'HEALTHY', rationale: 'No material evidence of a fault in the window examined.' }, facts: [], nextSteps: [] } }, 'GET /remediations': { ...actions, data: [] } });
+    show(<InvestigationReportPage />, session('VIEWER'));
+    expect(await screen.findByText('No cause is proposed, because the evidence shows no fault.')).toBeInTheDocument();
+    expect(await screen.findByText(/No action was proposed\. Nothing that would change a production system is recommended on this evidence\./)).toBeInTheDocument();
   });
 });

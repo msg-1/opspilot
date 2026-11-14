@@ -43,6 +43,7 @@ function Organisation() {
       {saved && <Notice tone="good">Settings saved.</Notice>}
       <Card title="Organisation">
         <Field label="Name">{(id) => <Input id={id} required disabled={!can} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />}</Field>
+        <p className="mt-3 text-[13px] text-ink-2">Identifier (slug): <Mono>{data?.organization.slug}</Mono>. It does not change with the name, and is what an operator uses to refer to this organisation.</p>
       </Card>
       <Card title="Remediation approvals" description="How many different people must approve an action before it can be executed.">
         <div className="grid gap-4 sm:grid-cols-3">

@@ -91,6 +91,19 @@ test('a new organisation sees what can be connected, connects a source, watches 
   // The report rests on what was sent: the error pattern from the log lines.
   await expect(page.getByText(/timeout acquiring connection from pool/).first()).toBeVisible();
 
+  // The same investigation as a document to hand to someone else.
+  await page.getByRole('link', { name: 'Report to share' }).click();
+  await expect(page).toHaveURL(/\/report$/);
+  await expect(page.getByTestId('engine-line')).toContainText('No AI model was used');
+  for (const section of ['Conclusion', 'Most probable cause', 'What is established', 'What is not known', 'Recommended next steps', 'Evidence referred to']) await expect(page.getByRole('heading', { level: 2, name: new RegExp(`^${section}`) })).toBeVisible();
+  await expect(page.getByText('The cause has not been confirmed')).toBeVisible();
+  // On paper there is the report and nothing of the application around it.
+  await page.emulateMedia({ media: 'print' });
+  await expect(page.getByRole('navigation', { name: 'Main' })).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Print or save as PDF' })).toBeHidden();
+  await expect(page.getByRole('heading', { level: 2, name: /^Conclusion/ })).toBeVisible();
+  await page.emulateMedia({ media: 'screen' });
+
   await page.goto('/integrations');
   await expect(page.getByText('Set-up is complete.')).toBeVisible();
   // Nowhere on the page is the key.
