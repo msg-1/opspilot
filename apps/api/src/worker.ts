@@ -33,21 +33,27 @@ function startOpsServer() {
 
 async function main() {
   const ops = startOpsServer();
-  const stop = await startWorkers();
+  // Start-up can take a while (it waits for Redis). The signal handlers are in place before it
+  // begins, so that a stop request during start-up is a clean exit and not a kill.
+  const starting = startWorkers();
   let stopping = false;
   const shutdown = async (signal: string) => {
     if (stopping) return;
     stopping = true;
     logger.info({ signal, graceMs: env.WORKER_SHUTDOWN_GRACE_MS }, 'worker shutting down');
     ops.close();
+    const notYet = Symbol('still starting');
+    const stop = await Promise.race([starting, new Promise<typeof notYet>((resolve) => setTimeout(() => resolve(notYet), 2000).unref())]).catch(() => notYet);
     // Running jobs get the grace period to finish. What is still running then is stopped and
     // recorded as interrupted, so nothing is left looking as if it were still in progress.
-    await stop({ graceMs: env.WORKER_SHUTDOWN_GRACE_MS });
+    // A worker that never finished starting has taken no job.
+    if (stop !== notYet) await (stop as Awaited<typeof starting>)({ graceMs: env.WORKER_SHUTDOWN_GRACE_MS });
     await prisma.$disconnect();
     process.exit(0);
   };
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
   process.on('SIGINT', () => void shutdown('SIGINT'));
+  await starting;
 }
 
 main().catch((err) => {

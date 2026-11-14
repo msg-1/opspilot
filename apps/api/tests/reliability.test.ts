@@ -521,6 +521,15 @@ describe.skipIf(!redisAvailable)('reliability under failure', () => {
       expect(ai.state.abandoned).toBe(1);
     }, 90_000);
 
+    it('is asked to stop while it is still waiting for Redis: it exits cleanly', async () => {
+      await redisProxy.down();
+      const worker = await spawnWorker(workerEnv());
+      expect(await worker.probe('/ready')).toMatchObject({ status: 503 });
+      // It has not finished starting: it is waiting for Redis. A stop request must still be a clean exit, not a kill.
+      expect(await worker.terminate()).toBe(0);
+      await redisProxy.up();
+    }, 60_000);
+
     it('starts without Redis: it stays up, says it is not ready, and takes work once Redis is there', async () => {
       const org = await createOrg();
       await redisProxy.down();

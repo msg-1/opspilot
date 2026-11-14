@@ -23,6 +23,7 @@ npm run demo:up && npm run demo:e2e   # local microservices demo, rule-based eng
 npm run test:e2e            # needs the stack running and a fresh `npm run db:seed`
 npm run isolated:up && npm run isolated:e2e && npm run drills   # throwaway stack on its own ports: browser tests, then failure drills (what CI's e2e.yml runs)
 npm run isolated:down       # removes that stack and its volume; never touches the default project
+npm run org:remove -- <slug>            # dry run; add --confirm <slug> to remove one organisation (docs/customer-pilot-guide.md)
 npm run lint && npm run typecheck
 npm run contracts            # regenerate shared contracts and frontend API types (contracts:check fails if stale)
 npm run tracing:up && npm run trace -- --latest   # local traces of the platform itself (docs/tracing.md)

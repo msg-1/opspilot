@@ -214,11 +214,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   useEffect(() => setDrawer(false), [pathname]);
   return (
-    <div className="min-h-dvh lg:pl-60">
+    <div className="min-h-dvh lg:pl-60 print:pl-0">
       <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:bg-ink focus:px-3 focus:py-2 focus:text-white">
         Skip to content
       </a>
-      <aside className="fixed inset-y-0 left-0 z-20 hidden w-60 lg:block">
+      <aside className="fixed inset-y-0 left-0 z-20 hidden w-60 lg:block print:hidden">
         <Sidebar />
       </aside>
       {drawer && (
@@ -232,14 +232,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </aside>
         </div>
       )}
-      <div className="sticky top-0 z-10 flex h-12 items-center justify-between border-b border-line bg-page/90 px-4 backdrop-blur lg:px-8">
+      <div className="sticky top-0 z-10 flex h-12 items-center justify-between border-b border-line bg-page/90 px-4 backdrop-blur lg:px-8 print:hidden">
         <button type="button" aria-label="Open navigation" onClick={() => setDrawer(true)} className="rounded-md p-2 text-ink-2 hover:bg-sunken lg:hidden">
           <Menu className="size-[18px]" aria-hidden />
         </button>
         <div className="hidden lg:block" />
         <Notifications />
       </div>
-      <main id="main" className="mx-auto max-w-[1280px] px-4 py-6 lg:px-8">
+      <main id="main" className="mx-auto max-w-[1280px] px-4 py-6 lg:px-8 print:max-w-none print:p-0">
         {children}
       </main>
     </div>

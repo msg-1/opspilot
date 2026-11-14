@@ -1,6 +1,6 @@
 # Roadmap
 
-Status as of 13 November 2026. "Verified" means exercised by automated tests or by running the stack.
+Status as of 14 November 2026. "Verified" means exercised by automated tests or by running the stack.
 
 ## Milestones
 
@@ -27,10 +27,10 @@ Status as of 13 November 2026. "Verified" means exercised by automated tests or 
 
 | Suite | Count | Scope |
 |---|---|---|
-| API integration (Vitest + Supertest) | 121 | HTTP → PostgreSQL, all modules; shared contracts; real API responses against the response contracts; trace continuity through BullMQ; failure handling (AI service, Redis and PostgreSQL outages, a killed worker, duplicate delivery, failing trace export) |
-| AI service (pytest, mocked model APIs) | 171 | Agent graph, guardrails, providers, embeddings, HTTP API, MCP; each rule of the rule-based engine; a snapshot of all its reports; shared contracts; tracing |
-| Web (Vitest + Testing Library) | 47 | API client, formatting, accessible components; the seven journeys as rendered pages (sign-in, incident, starting an investigation, report, evidence, approval, execution outcomes) |
-| End-to-end (Playwright), in CI on every pull request | 11 | Sign-in, incident, investigation, approval, RBAC, logs, knowledge, audit, mobile layout; what the page shows while the AI service or the queue is down, and after it returns |
+| API integration (Vitest + Supertest) | 135 | HTTP → PostgreSQL, all modules; shared contracts; real API responses against the response contracts; trace continuity through BullMQ; failure handling (AI service, Redis and PostgreSQL outages, a killed worker, duplicate delivery, failing trace export) |
+| AI service (pytest, mocked model APIs) | 177 | Agent graph, guardrails, providers, embeddings, HTTP API, MCP; each rule of the rule-based engine; a snapshot of all its reports; shared contracts; tracing |
+| Web (Vitest + Testing Library) | 53 | API client, formatting, accessible components; the seven journeys as rendered pages (sign-in, incident, starting an investigation, report, evidence, approval, execution outcomes) |
+| End-to-end (Playwright), in CI on every pull request | 12 | Sign-in, incident, investigation, approval, RBAC, logs, knowledge, audit, mobile layout; what the page shows while the AI service or the queue is down, and after it returns |
 | Failure drills (`npm run drills`), in CI on every pull request | 11 | Real containers killed, stopped and started on a throwaway stack: what was recorded, and that an investigation completes afterwards |
 | Agent evaluations | 11 scenarios | Outcome, cause, service, citations, invention, contradictory and missing evidence, calibration, diagnostics, remediation safety, deployment-tool use |
 | Local demo, end to end | 10 scenarios | Real telemetry and failures, rule-based engine: outcomes, blame, proposals, evidence provenance, recovery, runbook safety (run locally, not in CI) |
@@ -76,6 +76,27 @@ Not done, and why:
 - **No model was run.** Every test and drill used the rule-based engine or a scripted stand-in. Timeouts and interrupted streams with a real provider are tested only against mocks.
 - **`e2e.yml` is not a required check.** Making it one is a branch-protection change, which is the owner's to make.
 
+## Milestone 7: pilot readiness
+
+The question was what stands between this codebase and an outside team connecting its systems, investigating an incident and judging the result. The starting point is in [pilot-readiness-gap-analysis.md](pilot-readiness-gap-analysis.md); the result for a reader outside the project is [customer-pilot-guide.md](customer-pilot-guide.md).
+
+Done:
+
+- **Integrations.** One page and one endpoint for every source that really exists, with a status that follows accepted data, recorded rejections and explicit checks, not saved credentials. A getting-started list ticked from what was received. Data that names an unregistered service is surfaced and can be linked.
+- **Past incidents.** Health for a window that is over comes from the alerts, incidents and metrics recorded in it, not from today. Missing history is stated and lowers confidence.
+- **Reports.** A document view of an investigation, with facts, hypotheses and recommendations labelled, that prints from the browser.
+- **Pilot guide, and a safe way to remove a trial organisation** (`npm run org:remove`).
+- **Security review of the new surface**, recorded in the pull requests: isolation, credentials in responses and stored state, authorisation, outbound requests, error text, audit, limits. Two defects found and fixed in review (an in-memory count over a day of logs; a stored rejection that could repeat a caller's value).
+
+Not done, and why:
+
+- **Not a claim of pilot success or production readiness.** No outside team has used it. Everything was verified on the rule-based engine, on one machine.
+- **No model was run** (no budget). The model's instructions and the `get_service` tool changed in this milestone and are untested with a model.
+- **GitHub against github.com** still needs a real token.
+- **No pull-based collectors.** A team whose logs and metrics live in a vendor needs a forwarder; none is provided.
+- **Ingestion has no idempotency key.** A retried batch is stored twice.
+- **`Browser end-to-end tests` is still not a required check on `develop`.** The steps are in [git-workflow.md](git-workflow.md).
+
 ## Needs the owner's input
 
 1. ~~An Anthropic API key~~ — configured; live verification done.
@@ -85,7 +106,8 @@ Not done, and why:
 5. **Promotion of `develop` to `main`** (release 0.1.0) once you have reviewed the result.
 6. **A budget for a live model run** of the eleven evaluation scenarios and of the demo environment, if you want the Milestone 4 changes validated with a model.
 7. **Clearance of the OPSILUME name** (trademark, domains) before it is used beyond a working name.
-8. **Whether `End-to-end` becomes a required check** for `develop` and `main`. It takes about ten minutes per pull request.
+8. **Whether `Browser end-to-end tests` becomes a required check on `develop`** (it already is on `main`). It takes about eleven minutes per pull request; the steps are in git-workflow.md.
+9. **A GitHub token and a model budget** before a pilot: the two integrations that have never been exercised for real.
 
 ## Next
 

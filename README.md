@@ -59,6 +59,7 @@ npm run dev                   # API :4000, worker, web :3000, AI service :8000
 | `npm run tracing:up`, `npm run trace -- <id>` | Trace the platform itself, locally: one trace per investigation ([docs/tracing.md](docs/tracing.md)) |
 | `npm run evals` | Scores the investigation agent on ground-truth scenarios |
 | `npm run test:e2e` | Playwright tests against the running, freshly seeded stack |
+| `npm run org:remove -- <slug>` | Shows, and with `--confirm <slug>` removes, one organisation and everything in it; every other organisation is checked to be unchanged ([docs/customer-pilot-guide.md](docs/customer-pilot-guide.md)) |
 | `npm run isolated:up`, `isolated:e2e`, `drills`, `isolated:down` | A throwaway copy of the stack on its own ports and volume: browser tests, then failure drills that kill and restart services ([docs/reliability-readiness-report.md](docs/reliability-readiness-report.md)) |
 | `npm run obs:up` | Prometheus (:9090) and Grafana (:3001) |
 | `npm run simulate` | Sends live demo metrics and logs through the ingestion API |
