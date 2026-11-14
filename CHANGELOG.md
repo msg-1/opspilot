@@ -64,6 +64,7 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 - Failed sign-ins are audited; retrieved records are marked as untrusted data for the model.
 
 ### Fixed
+- Old incidents were judged with today's health: investigating a closed incident named whatever dependency happened to be down at the time of the investigation. For a window that is over, the health of a service and of its dependencies is now worked out from the alerts, incidents and metrics recorded in that window; evidence says whether it describes then or now; a dependency whose state at the time is not on record produces no hypothesis, is listed as not examined and lowers the confidence.
 - A report that arrived for an investigation that was no longer running (cancelled, failed, timed out) still created hypotheses and proposed remediation actions, and a repeated final event proposed the actions a second time. Everything that follows from a report now happens only if that report was stored.
 - A stream from the AI service that was cut in the middle of an event, or that carried an invalid line, was recorded as a JSON syntax error quoting the text received. Timeout, interrupted connection and invalid event now have their own messages, and none repeats the input.
 - A database error during an investigation was stored on the investigation, and shown, with the database host and port in it.
