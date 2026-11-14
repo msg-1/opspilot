@@ -111,6 +111,18 @@ Each is stated as a contradiction on the hypothesis. This was added after a run 
 
 What OPSILUME cannot guarantee: that a webhook receiver honours the idempotency key, or that a person who confirms "not applied" checked.
 
+## 4a. Health belongs to a time
+
+A service's health in the catalogue is its state now. An investigation of something that is over must not read it: what is down today says nothing about last week, and a rule that names today's outage as the cause of an old incident produces a confident, wrong report. That was the behaviour until Milestone 7.
+
+- **What the engine is told.** `GET /tools/services/:ref` and the incident context take the window under investigation. When that window is over (it ended more than 15 minutes ago), the health of the service and of each dependency is worked out from what was recorded in the window, by the same rule that computes health now (`apps/api/src/modules/healthHistory.ts`): an alert that was firing, an incident that was open, metrics that were arriving. The answer carries `healthAsOf.mode: "window"` and leaves the present state out altogether. For a window that reaches the present, the present state is the right answer and the mode is `"current"`.
+- **Nothing is assumed.** A service with no alert, no incident and no metrics in the window is `UNKNOWN`, not healthy. The incident being investigated does not count as evidence for itself.
+- **What the report says.** Evidence from a past window is titled "was DOWN during the window" and says what it rests on and that it is not the state now; evidence about the present is titled "is DOWN". A dependency whose state at the time is unknown produces no evidence and no hypothesis; it is listed under what was not examined, and each one lowers the confidence in the assessment by 0.05 (at most 0.15). The outcome rules are unchanged.
+- **Whoever asks.** The window is added to every `get_service` call that does not carry one (`run_tool`), so a model that asks with only a service name still gets the window's answer.
+- **Limit.** Health is reconstructed, not replayed: there is no stored history of the health column. A service that was unhealthy without any alert rule covering it, and without an incident, looks healthy in retrospect if it was sending metrics. Reports say what the conclusion rests on for that reason.
+
+Tests: `apps/api/tests/historical-health.test.ts` (the tool API and the incident context, against a database), `services/ai/tests/test_historical_health.py` (a dependency that was down then, one that is down only today, missing history, a healthy past window, and a caller that gives no window).
+
 ## 5. Figures and identifiers
 
 `services/ai/app/claims.py`. A citation that resolves is not enough: "error rate rose to 14% (E3)" has to be compared with what E3 says.

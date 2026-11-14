@@ -20,7 +20,10 @@
       "pathParameters": [
         "service"
       ],
-      "query": [],
+      "query": [
+        "from",
+        "to"
+      ],
       "body": [],
       "reads": [
         "dependsOn",

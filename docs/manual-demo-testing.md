@@ -188,10 +188,13 @@ that organisation and are removed with it.
 - **An active incident counts as a signal.** A service with an open incident is recorded as
   degraded, and the engine counts that. For this reason the Healthy and Undetermined scenarios
   are a resolved and a mitigated incident. Reopen INC-5 and its outcome becomes Degraded.
-- **Old incidents are judged with today's health.** The engine reads the current state of a
-  service's dependencies, not their state at the time. Investigating INC-1 or INC-2 today names
-  the Redis outage that is happening now, days after those incidents closed. Their recorded
-  root causes are the correct ones.
+- **Old incidents are judged by what was recorded at the time.** For an incident that is over,
+  the health of a service and of what it depends on is worked out from the alerts, incidents
+  and metrics recorded in its window, not from their state today (this was a defect until
+  Milestone 7: INC-1 and INC-2 used to name the Redis outage that is happening now). INC-1 and
+  INC-2 predate the stored telemetry, so they come out Undetermined and the report says that
+  the state of their dependencies at the time is not on record. Their recorded root causes are
+  the correct ones.
 - **INC-3 has no telemetry in range** (it predates the stored history) and comes out
   Undetermined.
 - **No traces.** No trace store is connected, so every report lists traces as not examined.
