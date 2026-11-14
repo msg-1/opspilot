@@ -141,8 +141,8 @@ Sign in as `shop-demo@example.com` / `OpsPilot-demo-1`. No model is called and n
 ## 10. Tests
 
 ```bash
-npm test                 # API: 121 integration tests on database opspilot_test (25 of them use Redis and skip without it) · web: 47 tests
-npm run test:ai          # 171 tests, all against mocked model APIs or hand-written evidence
+npm test                 # API: 134 integration tests on database opspilot_test (25 of them use Redis and skip without it) · web: 53 tests
+npm run test:ai          # 177 tests, all against mocked model APIs or hand-written evidence
 npm run contracts:check  # shared contracts and generated frontend API types are up to date
 npm run evals -- --heuristic          # 11 scenarios on the rule-based engine
 npm run db:seed && npm run test:e2e   # 9 browser tests; needs the stack running on the deterministic engine:
@@ -156,7 +156,7 @@ The browser tests need a freshly seeded organisation, and the failure drills kil
 
 ```bash
 npm run isolated:up      # a second copy of the application: web :13000, API :14000, AI :18000, Postgres :15432, Redis :16379
-npm run isolated:e2e     # 11 browser tests, including two that stop the AI service and Redis and check what the page shows
+npm run isolated:e2e     # 12 browser tests, including a new organisation's first steps and two that stop the AI service and Redis and check what the page shows
 npm run drills           # 11 drills: worker killed and stopped mid-run, AI service, Redis and PostgreSQL stopped and started, full restart, …
 npm run isolated:down    # removes it, including its database volume
 ```

@@ -5,6 +5,9 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- A report to share: `/investigations/:id/report` shows an investigation as a document (conclusion, most probable cause with the evidence for and against it, established facts, deployments and changes, what is not known, recommended next steps with each action's effect, risk and approvals, and the evidence referred to). Facts, hypotheses and recommendations are labelled as such. It prints, and saves as a PDF, from the browser; no document library was added.
+- `npm run org:remove -- <slug>`: shows what one organisation holds and, with `--confirm <slug>`, removes it in one transaction that rolls back unless every other organisation is unchanged.
+- docs/customer-pilot-guide.md and docs/pilot-readiness-gap-analysis.md; docs/manual-test-walkthrough.md.
 - Integrations page and `GET /integrations`: every source that can be connected (logs, metrics, deployments, service events, GitHub, the remediation webhook, and the installation's trace store and analysis engine), what each provides and needs, and whether it works. Status follows accepted data, recorded rejections and explicit checks, not saved credentials: not set up, set up, connected, receiving data, needs attention, not working.
 - Ingestion visibility: the last time each source delivered, how much arrived in 24 hours, how many services are covered, and the last rejection in words that name the field and never the content. Metrics dropped for an unregistered service are no longer silent.
 - Getting-started list for a new organisation (register services, set up a source, send a request, confirm data, check it belongs to services, run an investigation), each step ticked from what was received.
