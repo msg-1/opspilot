@@ -37,6 +37,7 @@
     "demo:seed": "npm run -s demo:data -w @opspilot/api -- seed",
     "demo:status": "npm run -s demo:data -w @opspilot/api -- status",
     "demo:reset": "npm run -s demo:data -w @opspilot/api -- reset",
+    "org:remove": "npm run -s org:remove -w @opspilot/api --",
     "contracts": "node scripts/contracts.mjs && npm run contracts:api -w @opspilot/api && (cd services/ai && uv run python -m app.contracts)",
     "contracts:check": "npm run contracts && git diff --exit-code -- contracts apps/api/src/generated apps/web/src/lib/generated services/ai/app/generated",
     "tracing:up": "OTEL_ENABLED=true docker compose --profile app --profile tracing up -d --build",
