@@ -33,6 +33,8 @@ class EvidenceStore:
         self.log_lines: int | None = None
         #: service → the services it depends on, as far as get_service was asked
         self.depends_on: dict[str, list[str]] = {}
+        #: Dependencies whose state during a past window is not on record: neither shown unhealthy nor shown fine
+        self.health_gaps: list[str] = []
 
     def add(self, kind: str, title: str, summary: str, *, source_type: str, source_id: str, occurred_at: str | None = None,
             service: str | None = None, relevance: float | None = None, data: dict[str, Any] | None = None) -> EvidenceItem | None:
@@ -246,10 +248,21 @@ class EvidenceStore:
         out += [self._event(e) for e in r.get("serviceEvents", [])[:10]]
         out += [self._pattern(p, anomaly=False) for p in r.get("errorPatterns", [])[:8]]
         out += self._similar(r.get("similarIncidents", []))
+        as_of = _as_of(r)
         for d in r.get("upstreamDependencies", []):
             if d.get("health") in ("DEGRADED", "DOWN"):
-                out.append(self.add("dependency", f"Upstream dependency {d.get('slug')} is {d.get('health')}", f"{d.get('name')} ({d.get('kind')} dependency) is currently {d.get('health')}", source_type="service", source_id=d["id"], service=d.get("slug")))
+                out.append(self.add(
+                    "dependency", _dependency_title(d, as_of),
+                    f"{d.get('name')} ({d.get('kind')} dependency) {_dependency_state(d, as_of, with_note=False)}",
+                    source_type="service", source_id=d["id"], service=d.get("slug"), data={"health": d.get("health"), **_as_of_data(as_of)},
+                ))
+            elif as_of and d.get("health") == "UNKNOWN":
+                self._health_gap(d.get("slug"))
         return out
+
+    def _health_gap(self, slug: Any) -> None:
+        if slug and str(slug) not in self.health_gaps:
+            self.health_gaps.append(str(slug))
 
     def _similar(self, incidents: list[dict[str, Any]]) -> list[EvidenceItem | None]:
         out = []
@@ -284,17 +297,52 @@ class EvidenceStore:
         out = []
         # Who calls whom, kept so that analysis can tell where a chain of failing dependencies starts.
         self.depends_on[str(r.get("slug"))] = [str(d.get("slug")) for d in r.get("dependsOn", [])]
-        if r.get("health") and r.get("slug"):
+        as_of = _as_of(r)
+        if r.get("health") and r.get("slug") and not (as_of and r.get("health") == "UNKNOWN"):
             firing = r.get("firingAlerts") or []
+            if as_of:
+                title = f"{r.get('slug')} was {r.get('health')} during the window"
+                summary = f"{r.get('healthNote') or 'Worked out from the alerts, incidents and metrics recorded in the window'}. {len(firing)} alert(s) were firing in the window. This is its recorded state between {as_of[0]} and {as_of[1]}, not its state now."
+            else:
+                title = f"{r.get('slug')} is recorded as {r.get('health')}"
+                summary = (r.get("healthNote") or f"Health status of {r.get('name') or r.get('slug')} in the service catalogue.") + (f" {len(firing)} alert(s) firing." if firing else " No alert is firing.")
             out.append(self.add(
-                "service_health", f"{r.get('slug')} is recorded as {r.get('health')}",
-                (r.get("healthNote") or f"Health status of {r.get('name') or r.get('slug')} in the service catalogue.") + (f" {len(firing)} alert(s) firing." if firing else " No alert is firing."),
-                source_type="service_health", source_id=str(r.get("id") or r.get("slug")), service=r.get("slug"), data={"health": r.get("health"), "firingAlerts": len(firing)},
+                "service_health", title, summary,
+                source_type="service_health", source_id=str(r.get("id") or r.get("slug")), service=r.get("slug"), data={"health": r.get("health"), "firingAlerts": len(firing), **_as_of_data(as_of)},
             ))
         for d in r.get("dependsOn", []):
             if d.get("health") in ("DEGRADED", "DOWN"):
-                out.append(self.add("dependency", f"Upstream dependency {d.get('slug')} is {d.get('health')}", f"{r.get('slug')} depends on {d.get('name')} ({d.get('kind')}), which is {d.get('health')}: {d.get('healthNote') or ''}", source_type="service", source_id=f"dep:{d.get('slug')}", service=d.get("slug"), data={"health": d.get("health"), "dependant": r.get("slug"), "kind": d.get("kind")}))
+                out.append(self.add(
+                    "dependency", _dependency_title(d, as_of),
+                    f"{r.get('slug')} depends on {d.get('name')} ({d.get('kind')}), which {_dependency_state(d, as_of)}",
+                    source_type="service", source_id=f"dep:{d.get('slug')}", service=d.get("slug"), data={"health": d.get("health"), **_as_of_data(as_of)},
+                ))
+            elif as_of and d.get("health") == "UNKNOWN":
+                self._health_gap(d.get("slug"))
         return out
+
+
+def _as_of(result: dict[str, Any]) -> tuple[str, str] | None:
+    """The window a health answer describes, when the API says it describes a window that is over.
+    None means the answer is the state now (or comes from a source that does not say)."""
+    as_of = result.get("healthAsOf") or {}
+    return (str(as_of.get("from")), str(as_of.get("to"))) if as_of.get("mode") == "window" else None
+
+
+def _as_of_data(as_of: tuple[str, str] | None) -> dict[str, Any]:
+    return {"asOf": "window", "from": as_of[0], "to": as_of[1]} if as_of else {"asOf": "current"}
+
+
+def _dependency_title(d: dict[str, Any], as_of: tuple[str, str] | None) -> str:
+    # "was … during the window" and "is …" are different claims; the title carries which one this is.
+    return f"Upstream dependency {d.get('slug')} was {d.get('health')} during the window" if as_of else f"Upstream dependency {d.get('slug')} is {d.get('health')}"
+
+
+def _dependency_state(d: dict[str, Any], as_of: tuple[str, str] | None, with_note: bool = True) -> str:
+    note = d.get("healthNote") or ""
+    if as_of:
+        return f"was {d.get('health')} between {as_of[0]} and {as_of[1]}: {note}. Taken from what was recorded at the time, not from its state now."
+    return f"is {d.get('health')}: {note}" if with_note else f"is currently {d.get('health')}"
 
 
 def _num(v: Any) -> str:

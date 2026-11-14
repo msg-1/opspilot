@@ -239,14 +239,16 @@ def rule_unhealthy_dependency(case: Case) -> None:
             continue  # it is the service being asked about, not an independent cause
         below = [x for x in store.depends_on.get(slug, []) if x in unhealthy]
         down = (dep.data or {}).get("health") == "DOWN" or "DOWN" in dep.title
+        # Whether this is the dependency's recorded state during a window that is over, or its state now.
+        then = (dep.data or {}).get("asOf") == "window"
         path = _path_to(slug, scope, store.depends_on)
         via = f" The path from the service in question is {' → '.join(path)}." if len(path) > 2 else ""
         if below:
             if slug in affected:
                 continue  # already showing the symptoms: a link in the chain, not its start
-            score, role = 0.2, f"It depends in turn on {', '.join(below)}, which is also unhealthy, so its trouble may be a consequence rather than the cause."
+            score, role = 0.2, f"It depends in turn on {', '.join(below)}, which {'was' if then else 'is'} also unhealthy, so its trouble may be a consequence rather than the cause."
         else:
-            score, role = (0.45 if down else 0.3), "Nothing it depends on is recorded as unhealthy, so the chain of failures appears to start here."
+            score, role = (0.45 if down else 0.3), f"Nothing it depends on {'was' if then else 'is'} recorded as unhealthy{' in the window' if then else ''}, so the chain of failures appears to start here."
         dependency_hypotheses[slug] = len(hypotheses)
         hypotheses.append(HypothesisOut(
             title=f"{'Failure' if down else 'Degradation'} of upstream dependency {slug}",

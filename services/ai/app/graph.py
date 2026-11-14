@@ -38,6 +38,7 @@ SYSTEM_PROMPT = """You are OpsPilot's incident investigator. You help on-call en
 
 How to work:
 - Start from what changed. Most incidents follow a deployment, a configuration or flag change, a dependency failure, or a traffic shift. Establish when the problem started (logs, metrics), then look at what happened just before it.
+- Health belongs to a time. get_service answers for the investigation window; when healthAsOf.mode is 'window' it is what was recorded then. Never use what a service's state is today as evidence for something that is over, and when a dependency's state at the time is not on record, say so instead of assuming it was healthy.
 - Check alternatives before settling. If one change looks guilty, also look at the other changes in the window and at upstream dependencies, and say why they fit less well.
 - Read the content of changes, not only their timing. A pull request description or changed file that matches the failure mode is much stronger evidence than proximity in time. For a deployment that precedes the problem, get_deployment_context returns what it shipped, the error rate before and after it, and the version it replaced.
 - Not every question has a fault behind it. If logs, metrics and health show no material problem, say so plainly: the outcome is HEALTHY, there is no fault hypothesis to rank, and anything merely noteworthy (routine warnings, an old deployment) goes in observations. Do not construct a cause in order to be helpful. If something is off but you cannot tell why, the outcome is DEGRADED and you say what is missing.
@@ -84,6 +85,8 @@ class Context:
     tool_failures: list[str] = field(default_factory=list)
     #: Set when the model must not be called again in this run (bad key, no credit, budget reached)
     llm_stopped: str | None = None
+    #: The window under investigation, once it is fixed. Health is always asked for this window.
+    window: tuple[str, str] | None = None
 
     def now(self) -> datetime:
         """The investigation's notion of the present: the request's as-of time, or the real clock."""
@@ -112,6 +115,11 @@ async def run_tool(ctx: Context, name: str, args: dict[str, Any], title: str | N
     if ctx.tool_calls >= ctx.settings.max_tool_calls:
         return None, json.dumps({"error": "Tool call budget for this investigation is exhausted. Write your conclusions from the evidence you have."})
     ctx.tool_calls += 1
+    if name == "get_service" and ctx.window and not (args.get("from_time") and args.get("to_time")):
+        # Whoever asks (a rule or a model), health is asked for the window under investigation.
+        # Asked without one, the API would answer with the state today, which says nothing
+        # about a window that is over.
+        args = {**args, "from_time": ctx.window[0], "to_time": ctx.window[1]}
     started = time.perf_counter()
     try:
         result = await ctx.tools.call(name, args)
@@ -155,6 +163,7 @@ def build_graph(ctx: Context):
             scope = heuristics.match_services(req.question, catalogue)
         requested = (req.time_window.from_, req.time_window.to) if req.time_window else None
         window = heuristics.default_window(req.incident.started_at if req.incident else None, req.incident.resolved_at if req.incident else None, requested, ctx.now())
+        ctx.window = (iso(window[0]), iso(window[1]))
         return {"catalogue": catalogue, "scope": scope, "window_from": iso(window[0]), "window_to": iso(window[1]), "rounds": 0}
 
     def briefing(state: State) -> str:
@@ -203,6 +212,7 @@ def build_graph(ctx: Context):
         the_plan.services = [s for s in the_plan.services if s in valid] or state.get("scope", [])
         wire = the_plan.model_dump(by_alias=True)
         await _step(ctx, "plan", "Investigation plan", detail=f"{the_plan.objective}\nPlanned by: {source}", output=wire)
+        ctx.window = (the_plan.window_from, the_plan.window_to)
         return {"plan": wire, "scope": the_plan.services, "window_from": the_plan.window_from, "window_to": the_plan.window_to}
 
     # ── LLM path ──

@@ -33,6 +33,8 @@ class NoArgs(BaseModel):
 
 class ServiceArg(BaseModel):
     service: str = Field(description="Service slug, e.g. checkout-service")
+    from_time: str | None = Field(default=None, description=f"Start of the window whose health is wanted. {WINDOW_HELP}. Give it together with to_time when investigating something that is over.")
+    to_time: str | None = Field(default=None, description="End of that window. Health is then what was recorded during the window, not the state today.")
 
 
 class IncidentArg(BaseModel):
@@ -123,7 +125,9 @@ TOOLS: list[ToolSpec] = [
     ),
     ToolSpec(
         "get_service",
-        "Details for one service: what it depends on, what depends on it, linked repositories and alerts that are firing now.",
+        "Details for one service: what it depends on, what depends on it, linked repositories, its health and the health of its dependencies. "
+        "With from_time and to_time for a window that is over, health is what was recorded then (alerts, incidents, telemetry) and "
+        "healthAsOf.mode is 'window'; otherwise it is the state now. A service's state now is not evidence about a past window.",
         ServiceArg, "GET", "/services/{service}",
     ),
     ToolSpec(
@@ -217,6 +221,8 @@ def _request_for(spec: ToolSpec, args: BaseModel) -> tuple[str, dict[str, Any] |
     body: dict[str, Any] | None = None
     if isinstance(args, ServiceArg):
         path = path.format(service=args.service)
+        if args.from_time and args.to_time:
+            params = {"from": args.from_time, "to": args.to_time}
     elif isinstance(args, IncidentArg):
         path = path.format(incident=args.incident)
     elif isinstance(args, SearchIncidentsArgs):

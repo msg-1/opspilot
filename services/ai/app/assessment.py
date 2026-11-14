@@ -114,6 +114,11 @@ def missing_telemetry(store: EvidenceStore, scope: list[str], tool_failures: lis
         out.append("The trace store returned no traces for the window (none recorded, or no trace store is connected).")
     if not store.coverage.get("list_deployments", {}).get("calls") and not store.coverage.get("get_deployment_context", {}).get("calls"):
         out.append("Deployment history was not examined.")
+    # Dependencies that were found unhealthy in the window are evidence; the rest of these are not known either way.
+    known = {d.service for d in store.by_kind("dependency")}
+    gaps = [g for g in store.health_gaps if g not in known]
+    if gaps:
+        out.append(f"The state of {', '.join(gaps[:6])} during the window is not on record (no alert, incident or metrics from that time), so a problem in {'it' if len(gaps) == 1 else 'them'} at the time can be neither shown nor ruled out.")
     return out
 
 
@@ -130,6 +135,10 @@ def assess(store: EvidenceStore, hypotheses: list[HypothesisOut], scope: list[st
     strong = [s for s in signals if s.level == "strong"]
     moderate = [s for s in signals if s.level == "moderate"]
     missing = missing_telemetry(store, scope, tool_failures)
+    # A dependency whose state at the time is unknown is a way the conclusion could be wrong
+    # that nothing examined can exclude. Each one takes a little off the confidence.
+    known = {d.service for d in store.by_kind("dependency")}
+    unknown_dependencies = min(0.15, 0.05 * len([g for g in store.health_gaps if g not in known]))
     logs_queried = any(store.coverage.get(t, {}).get("calls") for t in LOG_TOOLS) and not any(f.split(":")[0] in LOG_TOOLS for f in tool_failures)
     # A query that returns nothing proves nothing about a service that sends nothing. Logs count
     # as examined only when the service is known to have logged in the window.
@@ -148,13 +157,13 @@ def assess(store: EvidenceStore, hypotheses: list[HypothesisOut], scope: list[st
         confidence = min(0.9, 0.75 + 0.07 * len(kinds))
         seen = "; ".join(s.text for s in strong[:3])
         if explained:
-            return Assessment(outcome="INCIDENT", confidence=round(confidence, 2), supporting_refs=refs(strong), signals=signals[:10], missing_telemetry=missing,
+            return Assessment(outcome="INCIDENT", confidence=round(max(0.1, confidence - unknown_dependencies), 2), supporting_refs=refs(strong), signals=signals[:10], missing_telemetry=missing,
                               rationale=f"A failure is evident ({seen}) and at least one explanation is supported by evidence.")
-        return Assessment(outcome="DEGRADED", confidence=round(confidence, 2), supporting_refs=refs(strong), signals=signals[:10], missing_telemetry=missing,
+        return Assessment(outcome="DEGRADED", confidence=round(max(0.1, confidence - unknown_dependencies), 2), supporting_refs=refs(strong), signals=signals[:10], missing_telemetry=missing,
                           rationale=f"A failure is evident ({seen}), but the available evidence does not establish what caused it.")
     if moderate:
         confidence = min(0.7, 0.45 + 0.08 * len(moderate))
-        return Assessment(outcome="DEGRADED", confidence=round(confidence, 2), supporting_refs=refs(moderate), signals=signals[:10], missing_telemetry=missing,
+        return Assessment(outcome="DEGRADED", confidence=round(max(0.1, confidence - unknown_dependencies), 2), supporting_refs=refs(moderate), signals=signals[:10], missing_telemetry=missing,
                           rationale="There are measurable anomalies (" + "; ".join(s.text for s in moderate[:3]) + "), but nothing that amounts to a clear failure, and no cause is established.")
     if not logs_examined and not metrics_examined:
         return Assessment(outcome="UNDETERMINED", confidence=0.0, signals=signals[:10], missing_telemetry=missing,
@@ -178,7 +187,8 @@ def assess(store: EvidenceStore, hypotheses: list[HypothesisOut], scope: list[st
         basis.append("no error pattern of any size appeared in the logs" if not store.by_kind("log_pattern") else "the logs contain no error pattern of material size")
     if healthy_status:
         confidence += 0.1
-        basis.append("the service catalogue records it as healthy with no alert firing")
+        historical = any((e.data or {}).get("asOf") == "window" for e in healthy_status)
+        basis.append("no alert or incident was recorded for it in the window while it was sending metrics" if historical else "the service catalogue records it as healthy with no alert firing")
         support += [e.ref for e in healthy_status]
     confidence -= min(0.3, 0.15 * len(tool_failures))
     confidence -= min(0.1, 0.03 * len([s for s in signals if s.level == "weak"]))
@@ -187,6 +197,6 @@ def assess(store: EvidenceStore, hypotheses: list[HypothesisOut], scope: list[st
     elif not logs_present:
         basis.append("no log lines were received in the window, so this rests on metrics")
     return Assessment(
-        outcome="HEALTHY", confidence=round(max(0.15, min(0.9, confidence)), 2), supporting_refs=list(dict.fromkeys(support))[:8], signals=signals[:10], missing_telemetry=missing,
+        outcome="HEALTHY", confidence=round(max(0.15, min(0.9, confidence - unknown_dependencies)), 2), supporting_refs=list(dict.fromkeys(support))[:8], signals=signals[:10], missing_telemetry=missing,
         rationale="No material evidence of a fault in the window examined: " + "; ".join(basis) + ".",
     )
