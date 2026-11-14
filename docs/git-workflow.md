@@ -142,6 +142,22 @@ Applied to `main` and `develop` on GitHub (pull request required, required check
 **`develop`**
 - Require a pull request before merging; 1 approval (0 for a solo maintainer)
 - Require the same checks except `Browser end-to-end tests`
+
+### Requiring the end-to-end check on `develop`
+
+State on 14 November 2026: `develop` requires five checks (Frontend, Backend, Database integration tests, AI service, Build verification). The end-to-end workflow runs on every pull request into `develop` and reports the check **`Browser end-to-end tests`**, but that check is **not required** there: a pull request can be merged while it is red or still running. `main` does require it.
+
+To require it, the repository owner can either:
+
+- in GitHub: Settings → Branches → the rule for `develop` → "Require status checks to pass before merging" → search for `Browser end-to-end tests` → add it → Save; or
+- with the CLI:
+
+  ```bash
+  gh api -X POST repos/msg-1/opspilot/branches/develop/protection/required_status_checks/contexts \
+    -f 'contexts[]=Browser end-to-end tests'
+  ```
+
+It adds about eleven minutes to every pull request. The name of the job in `.github/workflows/e2e.yml` and the name in branch protection must stay identical: renaming one without the other leaves pull requests waiting for a check that never reports (this happened to `main` in Milestone 6 and was corrected in Milestone 7).
 - Do not allow force pushes; do not allow deletions
 
 With the GitHub CLI, after the remote exists (replace `OWNER/REPO`):

@@ -81,6 +81,28 @@ API key scopes: `ingest:logs`, `ingest:deployments`, `ingest:events`, `ingest:me
 | `GET /github/commits`, `/github/pull-requests` | Filters: `repository`, `service`, `q`, `from`, `to`, `state` |
 | `POST /webhooks/github/:orgSlug` | GitHub webhook receiver (`push`, `pull_request`, `ping`); requires a valid `X-Hub-Signature-256` |
 
+### Integrations — `/integrations`
+
+What can be connected and whether it works. Status follows what happened (data accepted or rejected, a check answered or not), not what was saved. No response contains a credential, a webhook address or the address of an installation-level service.
+
+| Endpoint | Notes |
+|---|---|
+| `GET /` | Every source this installation has: `logs`, `metrics`, `deployments`, `events` (push, by API key), `github`, `remediation_webhook`, and the installation-level `traces` and `analysis_engine`. Per source: `status`, `statusDetail`, `provides`, `requires`, `lastReceivedAt`, `lastError`, `lastCheck`, `facts`, `setup`. Also `unresolvedServices` (names in incoming data that match no registered service) and `onboarding` (six steps, each ticked from what was received). Permission `read` |
+| `POST /github/check` | Asks GitHub whether the token and every connected repository can be read; stores and returns `{ ok, detail }`. People with `integration:manage` only; at most once every 5 seconds |
+| `POST /remediation-webhook/check` | Sends one signed request with `event: "ping"` and no action to the remediation webhook; stores and returns `{ ok, detail }`. The address is checked against private ranges again before sending; redirects are not followed; the answer's body is not read. People with `settings:manage` only |
+| `POST /unresolved-services/link` | `{ ref, service }`. Gives stored log lines that named the unregistered service `ref` to a registered service. Permission `service:write` |
+
+`status` is one of:
+
+| Status | Meaning |
+|---|---|
+| `not_configured` | Nothing is set up and nothing has arrived |
+| `configured` | Something was saved (an API key with the scope, a webhook address). Nothing has shown that it works |
+| `connected` | The other side answered (a key was used, a token was accepted, a check passed), but no usable data has arrived |
+| `delivering` | Usable data is arriving: accepted, recent for continuous sources, and belonging to registered services |
+| `degraded` | It worked or partly works, and something needs attention: the last request was rejected, a continuous source has been quiet for 24 hours, or data names services that are not registered |
+| `unavailable` | The last check failed, or an installation-level service does not answer |
+
 ### Knowledge — `/knowledge`
 | Method and path | Description |
 |---|---|
