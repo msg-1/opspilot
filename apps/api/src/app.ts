@@ -20,6 +20,7 @@ import { monitoringRouter } from './modules/monitoring';
 import { apiKeysRouter, auditRouter, membersRouter, notificationsRouter, settingsRouter, teamsRouter } from './modules/organization';
 import { remediationRouter } from './modules/remediation';
 import { deploymentsRouter, serviceEventsRouter, servicesRouter } from './modules/services';
+import { integrationsRouter } from './modules/integrations';
 import { healthRouter, systemRouter } from './modules/system';
 import { toolsRouter } from './modules/tools';
 
@@ -113,6 +114,7 @@ export function createApp() {
   v1.use('/logs', logsRouter);
   v1.use('/monitoring', monitoringRouter);
   v1.use('/github', githubRouter);
+  v1.use('/integrations', integrationsRouter);
   v1.use('/knowledge', knowledgeRouter);
   v1.use('/investigations', investigationsRouter);
   v1.use('/remediations', remediationRouter);

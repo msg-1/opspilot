@@ -85,6 +85,37 @@ registerProcessor('github-sync', async ({ organizationId, repositoryId }) => {
   await syncRepositories(organizationId, repositoryId);
 });
 
+/**
+ * Asks GitHub whether what is configured works: the token (if there is one) and every
+ * connected repository. Read-only. The result names repositories and GitHub's answer in our
+ * own words; it never contains the token.
+ */
+export async function checkGithub(organizationId: string): Promise<{ ok: boolean; detail: string; accountLogin: string | null }> {
+  const { token, source } = await tokenFor(organizationId);
+  const adapter = new RestGithubAdapter(token, githubConfig.baseUrl);
+  const say = (err: unknown) => (err instanceof GithubError ? err.message : 'GitHub could not be reached.');
+  let accountLogin: string | null = null;
+  if (token) {
+    try {
+      accountLogin = await adapter.whoAmI();
+    } catch (err) {
+      return { ok: false, detail: say(err), accountLogin: null };
+    }
+  }
+  const repos = await prisma.repository.findMany({ where: { organizationId, isMock: false }, select: { fullName: true }, orderBy: { fullName: 'asc' }, take: 10 });
+  const failures: string[] = [];
+  for (const repo of repos) {
+    try {
+      await adapter.getRepository(repo.fullName);
+    } catch (err) {
+      failures.push(`${repo.fullName}: ${say(err)}`);
+    }
+  }
+  const who = token ? `Authenticated as ${accountLogin ?? 'an unnamed account'} (token from ${source === 'environment' ? 'the installation' : 'this organisation'}).` : 'No token: public repositories only, at GitHub\'s unauthenticated rate limit.';
+  if (failures.length) return { ok: false, detail: `${who} ${failures.length} of ${repos.length} repositories could not be read. ${failures.join(' ')}`, accountLogin };
+  return { ok: true, detail: `${who} ${repos.length ? `${repos.length} of ${repos.length} connected repositories can be read.` : 'No repository is connected yet.'}`, accountLogin };
+}
+
 // ───────────────────────── Routes ─────────────────────────
 
 export const githubRouter = Router();

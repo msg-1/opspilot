@@ -23,7 +23,9 @@ permissions:
 
 jobs:
   e2e:
-    name: Browser journeys and failure drills (isolated stack)
+    # The name is a status check that branch protection refers to (main requires it). Changing it
+    # here without changing protection leaves pull requests waiting for a check that never reports.
+    name: Browser end-to-end tests
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:

@@ -273,6 +273,11 @@ function System() {
 
 export default function SettingsPage() {
   const [tab, setTab] = useState<Tab>('organisation');
+  // Other pages link straight to a tab (/settings?tab=keys).
+  useEffect(() => {
+    const wanted = new URLSearchParams(window.location.search).get('tab');
+    if (wanted && ['organisation', 'github', 'keys', 'audit', 'system'].includes(wanted)) setTab(wanted as Tab);
+  }, []);
   return (
     <>
       <PageHeader title="Settings" description="Organisation policy, integrations, machine access, the audit trail and system status." />

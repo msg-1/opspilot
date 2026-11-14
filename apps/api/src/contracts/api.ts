@@ -269,9 +269,37 @@ const statusCounts = z.record(z.string(), z.number()).describe('How many there a
 export const IncidentList = paged(Incident).extend({ statusCounts });
 export const RemediationList = paged(Remediation).extend({ statusCounts, executionMode: z.enum(['webhook', 'manual']) });
 
+/** One source of data, or one thing OPSILUME calls out to, and whether it works. Texts are written by the API. */
+export const Integration = z.object({
+  id: z.string(),
+  name: z.string(),
+  kind: z.enum(['push', 'pull', 'outbound', 'engine']),
+  scope: z.enum(['organization', 'installation']),
+  provides: z.string(),
+  requires: z.array(z.string()),
+  status: z.enum(['not_configured', 'configured', 'connected', 'delivering', 'degraded', 'unavailable']),
+  statusDetail: z.string(),
+  lastReceivedAt: timestamp.nullable(),
+  lastError: z.object({ at: timestamp, message: z.string() }).nullable(),
+  lastCheck: z.object({ at: timestamp, ok: z.boolean(), detail: z.string() }).nullable(),
+  facts: z.array(z.object({ label: z.string(), value: z.string() })),
+  setup: z.object({ endpoint: z.string().nullable(), apiKeyScope: z.string().nullable(), example: z.string().nullable(), settingsTab: z.enum(['keys', 'github', 'organisation']).nullable(), canCheck: z.boolean() }),
+});
+
+/** GET /integrations */
+export const IntegrationOverview = z.object({
+  generatedAt: timestamp,
+  integrations: z.array(Integration),
+  unresolvedServices: z.array(z.object({ ref: z.string(), sources: z.array(z.string()), count: z.number().nullable(), lastSeenAt: timestamp.nullable(), linkable: z.boolean(), registered: z.boolean() })),
+  onboarding: z.object({ complete: z.boolean(), steps: z.array(z.object({ id: z.string(), title: z.string(), done: z.boolean(), detail: z.string(), href: z.string() })) }),
+});
+
+/** POST /integrations/github/check and /integrations/remediation-webhook/check */
+export const IntegrationCheck = z.object({ ok: z.boolean(), detail: z.string() });
+
 /** Every response type the web app gets from the API, by the name it is generated under. */
 export const API_CONTRACT = {
   Ref, ServiceRef, PageMeta, Session, Incident, IncidentDetail, IncidentList, TimelineEvent, InvestigationSummary, InvestigationDetail, Evidence, Hypothesis, Step,
   Report, Statement, Verification, Assessment, Integrity, RemediationSummary, Remediation, RemediationDetail, RemediationList, ExecutionResult, Approval,
-  Deployment, Service, LogEntry, Member,
+  Deployment, Service, LogEntry, Member, Integration, IntegrationOverview, IntegrationCheck,
 } as const;

@@ -5498,6 +5498,528 @@
         "teams"
       ],
       "additionalProperties": false
+    },
+    "Integration": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "push",
+            "pull",
+            "outbound",
+            "engine"
+          ]
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "organization",
+            "installation"
+          ]
+        },
+        "provides": {
+          "type": "string"
+        },
+        "requires": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "not_configured",
+            "configured",
+            "connected",
+            "delivering",
+            "degraded",
+            "unavailable"
+          ]
+        },
+        "statusDetail": {
+          "type": "string"
+        },
+        "lastReceivedAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "description": "ISO-8601 timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lastError": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "at": {
+                  "type": "string",
+                  "description": "ISO-8601 timestamp"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "at",
+                "message"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lastCheck": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "at": {
+                  "type": "string",
+                  "description": "ISO-8601 timestamp"
+                },
+                "ok": {
+                  "type": "boolean"
+                },
+                "detail": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "at",
+                "ok",
+                "detail"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "facts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "label",
+              "value"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "setup": {
+          "type": "object",
+          "properties": {
+            "endpoint": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "apiKeyScope": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "example": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "settingsTab": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "keys",
+                    "github",
+                    "organisation"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "canCheck": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "endpoint",
+            "apiKeyScope",
+            "example",
+            "settingsTab",
+            "canCheck"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "kind",
+        "scope",
+        "provides",
+        "requires",
+        "status",
+        "statusDetail",
+        "lastReceivedAt",
+        "lastError",
+        "lastCheck",
+        "facts",
+        "setup"
+      ],
+      "additionalProperties": false
+    },
+    "IntegrationOverview": {
+      "type": "object",
+      "properties": {
+        "generatedAt": {
+          "type": "string",
+          "description": "ISO-8601 timestamp"
+        },
+        "integrations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "push",
+                  "pull",
+                  "outbound",
+                  "engine"
+                ]
+              },
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "organization",
+                  "installation"
+                ]
+              },
+              "provides": {
+                "type": "string"
+              },
+              "requires": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "not_configured",
+                  "configured",
+                  "connected",
+                  "delivering",
+                  "degraded",
+                  "unavailable"
+                ]
+              },
+              "statusDetail": {
+                "type": "string"
+              },
+              "lastReceivedAt": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "ISO-8601 timestamp"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "lastError": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "at": {
+                        "type": "string",
+                        "description": "ISO-8601 timestamp"
+                      },
+                      "message": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "at",
+                      "message"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "lastCheck": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "at": {
+                        "type": "string",
+                        "description": "ISO-8601 timestamp"
+                      },
+                      "ok": {
+                        "type": "boolean"
+                      },
+                      "detail": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "at",
+                      "ok",
+                      "detail"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "facts": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "label": {
+                      "type": "string"
+                    },
+                    "value": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "label",
+                    "value"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "setup": {
+                "type": "object",
+                "properties": {
+                  "endpoint": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "apiKeyScope": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "example": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "settingsTab": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "keys",
+                          "github",
+                          "organisation"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "canCheck": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "endpoint",
+                  "apiKeyScope",
+                  "example",
+                  "settingsTab",
+                  "canCheck"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "kind",
+              "scope",
+              "provides",
+              "requires",
+              "status",
+              "statusDetail",
+              "lastReceivedAt",
+              "lastError",
+              "lastCheck",
+              "facts",
+              "setup"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "unresolvedServices": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "ref": {
+                "type": "string"
+              },
+              "sources": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "count": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "lastSeenAt": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "ISO-8601 timestamp"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "linkable": {
+                "type": "boolean"
+              },
+              "registered": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "ref",
+              "sources",
+              "count",
+              "lastSeenAt",
+              "linkable",
+              "registered"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "onboarding": {
+          "type": "object",
+          "properties": {
+            "complete": {
+              "type": "boolean"
+            },
+            "steps": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "done": {
+                    "type": "boolean"
+                  },
+                  "detail": {
+                    "type": "string"
+                  },
+                  "href": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "title",
+                  "done",
+                  "detail",
+                  "href"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "complete",
+            "steps"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "generatedAt",
+        "integrations",
+        "unresolvedServices",
+        "onboarding"
+      ],
+      "additionalProperties": false
+    },
+    "IntegrationCheck": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "detail": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok",
+        "detail"
+      ],
+      "additionalProperties": false
     }
   }
 }

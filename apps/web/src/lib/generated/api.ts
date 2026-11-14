@@ -959,6 +959,96 @@ export interface Member {
   }[];
 }
 
+export interface Integration {
+  id: string;
+  name: string;
+  kind: 'push' | 'pull' | 'outbound' | 'engine';
+  scope: 'organization' | 'installation';
+  provides: string;
+  requires: string[];
+  status: 'not_configured' | 'configured' | 'connected' | 'delivering' | 'degraded' | 'unavailable';
+  statusDetail: string;
+  lastReceivedAt: string | null;
+  lastError: {
+    at: string;
+    message: string;
+  } | null;
+  lastCheck: {
+    at: string;
+    ok: boolean;
+    detail: string;
+  } | null;
+  facts: {
+    label: string;
+    value: string;
+  }[];
+  setup: {
+    endpoint: string | null;
+    apiKeyScope: string | null;
+    example: string | null;
+    settingsTab: ('keys' | 'github' | 'organisation') | null;
+    canCheck: boolean;
+  };
+}
+
+export interface IntegrationOverview {
+  generatedAt: string;
+  integrations: {
+    id: string;
+    name: string;
+    kind: 'push' | 'pull' | 'outbound' | 'engine';
+    scope: 'organization' | 'installation';
+    provides: string;
+    requires: string[];
+    status: 'not_configured' | 'configured' | 'connected' | 'delivering' | 'degraded' | 'unavailable';
+    statusDetail: string;
+    lastReceivedAt: string | null;
+    lastError: {
+      at: string;
+      message: string;
+    } | null;
+    lastCheck: {
+      at: string;
+      ok: boolean;
+      detail: string;
+    } | null;
+    facts: {
+      label: string;
+      value: string;
+    }[];
+    setup: {
+      endpoint: string | null;
+      apiKeyScope: string | null;
+      example: string | null;
+      settingsTab: ('keys' | 'github' | 'organisation') | null;
+      canCheck: boolean;
+    };
+  }[];
+  unresolvedServices: {
+    ref: string;
+    sources: string[];
+    count: number | null;
+    lastSeenAt: string | null;
+    linkable: boolean;
+    registered: boolean;
+  }[];
+  onboarding: {
+    complete: boolean;
+    steps: {
+      id: string;
+      title: string;
+      done: boolean;
+      detail: string;
+      href: string;
+    }[];
+  };
+}
+
+export interface IntegrationCheck {
+  ok: boolean;
+  detail: string;
+}
+
 /** A page of results, as every list endpoint returns it. */
 export interface Paged<T> {
   data: T[];

@@ -2,7 +2,7 @@
 
 import { useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { Activity, BarChart3, Bell, BookOpen, Boxes, ChevronsUpDown, GitBranch, LayoutDashboard, LogOut, Menu, Rocket, ScrollText, Settings, ShieldCheck, Siren, Sparkles, Users, X } from 'lucide-react';
+import { Activity, BarChart3, Bell, BookOpen, Boxes, ChevronsUpDown, GitBranch, LayoutDashboard, LogOut, Menu, PlugZap, Rocket, ScrollText, Settings, ShieldCheck, Siren, Sparkles, Users, X } from 'lucide-react';
 import { BRAND } from '@/lib/brand';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -42,6 +42,7 @@ const NAV = [
   {
     label: 'Organisation',
     items: [
+      { href: '/integrations', label: 'Integrations', icon: PlugZap },
       { href: '/team', label: 'Team', icon: Users },
       { href: '/settings', label: 'Settings', icon: Settings },
     ],

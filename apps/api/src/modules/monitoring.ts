@@ -6,6 +6,7 @@ import { notFound } from '../lib/errors';
 import { assertRange, paged, paginate, paginationQuery, param, timeParam } from '../lib/http';
 import { logger } from '../lib/logger';
 import { notifyRoles } from '../lib/notify';
+import { describeRejection, noteAccepted, noteRejected } from '../lib/integrationState';
 import { prisma } from '../lib/prisma';
 import { authOf, requirePermission } from '../middleware/auth';
 import { createIncident, incidentKey } from './incidents';
@@ -257,7 +258,19 @@ monitoringRouter.get('/series', requirePermission('read'), async (req, res) => {
 });
 
 monitoringRouter.post('/metrics', requirePermission('metric:write'), async (req, res) => {
-  res.status(202).json(await ingestMetrics(authOf(req).organizationId, metricsBody.parse(req.body)));
+  const { organizationId } = authOf(req);
+  try {
+    const result = await ingestMetrics(organizationId, metricsBody.parse(req.body));
+    // Samples for a service that is not registered are dropped. That is a rejection the sender
+    // never notices (the request succeeds), so it is recorded where an operator will see it.
+    if (result.accepted) await noteAccepted(organizationId, 'metrics', result.unknownServices);
+    if (result.rejected) await noteRejected(organizationId, 'metrics', `${result.rejected} of ${result.accepted + result.rejected} samples in the last request were dropped because they name a service that is not registered.`, result.unknownServices);
+    res.status(202).json(result);
+  } catch (err) {
+    const why = describeRejection(err);
+    if (why) await noteRejected(organizationId, 'metrics', why);
+    throw err;
+  }
 });
 
 monitoringRouter.post('/evaluate', requirePermission('monitoring:write'), async (req, res) => {

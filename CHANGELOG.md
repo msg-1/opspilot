@@ -5,6 +5,11 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- Integrations page and `GET /integrations`: every source that can be connected (logs, metrics, deployments, service events, GitHub, the remediation webhook, and the installation's trace store and analysis engine), what each provides and needs, and whether it works. Status follows accepted data, recorded rejections and explicit checks, not saved credentials: not set up, set up, connected, receiving data, needs attention, not working.
+- Ingestion visibility: the last time each source delivered, how much arrived in 24 hours, how many services are covered, and the last rejection in words that name the field and never the content. Metrics dropped for an unregistered service are no longer silent.
+- Getting-started list for a new organisation (register services, set up a source, send a request, confirm data, check it belongs to services, run an investigation), each step ticked from what was received.
+- Connection checks on request: `POST /integrations/github/check` and `POST /integrations/remediation-webhook/check` (a signed `ping` with no action).
+- Data that names an unregistered service is listed, and stored log lines can be given to a service afterwards (`POST /integrations/unresolved-services/link`).
 - Failure handling for investigations: a run is started by a conditional update and named in the queue after its investigation, so it runs at most once; a run whose worker was killed is recorded as interrupted when the queue hands the job out again (about a minute), and a worker asked to stop records its unfinished runs as interrupted before it exits. Settings `INVESTIGATION_TIMEOUT_MS`, `WORKER_SHUTDOWN_GRACE_MS`, `QUEUE_LOCK_MS`, `QUEUE_STALLED_INTERVAL_MS`.
 - Accepted work survives a loss of Redis data: Redis writes an append-only file to a volume; the sweep puts back the job of an investigation that has waited more than two minutes; the worker restores the schedules of its repeating jobs when they are missing.
 - `/ready` on the worker (PostgreSQL and Redis). The Compose health checks of the API and the worker use readiness instead of liveness.
