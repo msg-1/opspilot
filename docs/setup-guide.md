@@ -141,7 +141,7 @@ Sign in as `shop-demo@example.com` / `OpsPilot-demo-1`. No model is called and n
 ## 10. Tests
 
 ```bash
-npm test                 # API: 134 integration tests on database opspilot_test (25 of them use Redis and skip without it) · web: 53 tests
+npm test                 # API: 135 integration tests on database opspilot_test (26 of them use Redis and skip without it) · web: 53 tests
 npm run test:ai          # 177 tests, all against mocked model APIs or hand-written evidence
 npm run contracts:check  # shared contracts and generated frontend API types are up to date
 npm run evals -- --heuristic          # 11 scenarios on the rule-based engine

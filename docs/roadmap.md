@@ -27,7 +27,7 @@ Status as of 14 November 2026. "Verified" means exercised by automated tests or 
 
 | Suite | Count | Scope |
 |---|---|---|
-| API integration (Vitest + Supertest) | 134 | HTTP → PostgreSQL, all modules; shared contracts; real API responses against the response contracts; trace continuity through BullMQ; failure handling (AI service, Redis and PostgreSQL outages, a killed worker, duplicate delivery, failing trace export) |
+| API integration (Vitest + Supertest) | 135 | HTTP → PostgreSQL, all modules; shared contracts; real API responses against the response contracts; trace continuity through BullMQ; failure handling (AI service, Redis and PostgreSQL outages, a killed worker, duplicate delivery, failing trace export) |
 | AI service (pytest, mocked model APIs) | 177 | Agent graph, guardrails, providers, embeddings, HTTP API, MCP; each rule of the rule-based engine; a snapshot of all its reports; shared contracts; tracing |
 | Web (Vitest + Testing Library) | 53 | API client, formatting, accessible components; the seven journeys as rendered pages (sign-in, incident, starting an investigation, report, evidence, approval, execution outcomes) |
 | End-to-end (Playwright), in CI on every pull request | 12 | Sign-in, incident, investigation, approval, RBAC, logs, knowledge, audit, mobile layout; what the page shows while the AI service or the queue is down, and after it returns |
