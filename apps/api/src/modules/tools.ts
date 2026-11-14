@@ -11,6 +11,7 @@ import { authOf, requirePermission } from '../middleware/auth';
 import { incidentContext, incidentKey } from './incidents';
 import { searchKnowledge } from './knowledge';
 import { type LogFilter, logAnomalies, logHistogram, logPatterns, resolveServiceIds, searchLogs } from './logs';
+import { healthDuring, isPastWindow } from './healthHistory';
 import { KNOWN_METRICS, metricSummary } from './monitoring';
 import { findService, requireService } from './services';
 
@@ -74,8 +75,15 @@ toolsRouter.get('/services', async (req, res) => {
   });
 });
 
+/**
+ * Health in this answer describes the window that was asked for. For a window that is over, it
+ * is worked out from the alerts, incidents and telemetry recorded then, and the present state
+ * of the service is left out altogether: what is down today says nothing about last week.
+ * `healthAsOf.mode` says which of the two the answer is.
+ */
 toolsRouter.get('/services/:ref', async (req, res) => {
   const { organizationId } = authOf(req);
+  const q = z.object({ from: timeParam.optional(), to: timeParam.optional() }).parse(req.query);
   const base = await requireService(organizationId, param(req.params.ref));
   const service = await prisma.service.findUniqueOrThrow({
     where: { id: base.id },
@@ -87,6 +95,31 @@ toolsRouter.get('/services/:ref', async (req, res) => {
       alerts: { where: { status: 'firing' }, select: { message: true, startedAt: true } },
     },
   });
+  const now = new Date();
+  if (q.from && q.to && q.from < q.to && isPastWindow(q.to, now)) {
+    // The investigation that is asking may be about an incident; that incident is not evidence for itself.
+    const asking = req.auth?.kind === 'tool_token' ? await prisma.investigation.findFirst({ where: { id: req.auth.investigationId, organizationId }, select: { incidentId: true } }) : null;
+    const then = await healthDuring(organizationId, [service.id, ...service.dependencies.map((d) => d.dependsOnId)], q.from, q.to, asking?.incidentId);
+    const alertsThen = await prisma.alert.findMany({ where: { organizationId, serviceId: service.id, startedAt: { lte: q.to }, OR: [{ resolvedAt: null }, { resolvedAt: { gte: q.from } }] }, select: { message: true, startedAt: true, resolvedAt: true }, orderBy: { startedAt: 'asc' }, take: 10 });
+    res.json({
+      id: service.id,
+      slug: service.slug,
+      name: service.name,
+      description: service.description,
+      tier: service.tier,
+      language: service.language,
+      health: then.get(service.id)!.health,
+      healthNote: then.get(service.id)!.note,
+      healthAsOf: { mode: 'window', from: q.from, to: q.to, observedAt: now },
+      ownerTeam: service.ownerTeam?.name ?? null,
+      repositories: service.repositories.map((r) => r.fullName),
+      dependsOn: service.dependencies.map((d) => ({ slug: d.dependsOn.slug, name: d.dependsOn.name, health: then.get(d.dependsOnId)!.health, healthNote: then.get(d.dependsOnId)!.note, kind: d.kind, description: d.description })),
+      // Who depends on it is structure, not state; their health then is not looked up here.
+      dependedOnBy: service.dependents.map((d) => ({ slug: d.service.slug, name: d.service.name, kind: d.kind })),
+      firingAlerts: alertsThen,
+    });
+    return;
+  }
   res.json({
     id: service.id,
     slug: service.slug,
@@ -96,6 +129,7 @@ toolsRouter.get('/services/:ref', async (req, res) => {
     language: service.language,
     health: service.health,
     healthNote: service.healthNote,
+    healthAsOf: { mode: 'current', from: null, to: null, observedAt: now },
     ownerTeam: service.ownerTeam?.name ?? null,
     repositories: service.repositories.map((r) => r.fullName),
     dependsOn: service.dependencies.map((d) => ({ ...d.dependsOn, kind: d.kind, description: d.description })),

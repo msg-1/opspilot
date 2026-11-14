@@ -7,6 +7,7 @@ import { csvEnum, paged, paginate, paginationQuery, param, timeParam } from '../
 import { notifyUsers } from '../lib/notify';
 import { prisma } from '../lib/prisma';
 import { type AuthContext, authOf, requirePermission } from '../middleware/auth';
+import { healthDuring, isPastWindow } from './healthHistory';
 
 const severity = z.enum(['SEV1', 'SEV2', 'SEV3', 'SEV4']);
 const status = z.enum(['OPEN', 'INVESTIGATING', 'IDENTIFIED', 'MITIGATED', 'RESOLVED', 'CLOSED']);
@@ -381,11 +382,17 @@ export async function incidentContext(organizationId: string, incidentId: string
       ORDER BY score DESC, i."startedAt" DESC LIMIT 6`,
   ]);
   const serviceNames = new Map((await prisma.service.findMany({ where: { id: { in: scope } }, select: { id: true, name: true, slug: true } })).map((s) => [s.id, s]));
+  // For an incident that is over, the health of what it depends on is what was recorded while it
+  // lasted, not what it is today. For one that is still going, today is part of the incident.
+  const now = new Date();
+  const past = !!incident.resolvedAt && isPastWindow(incident.resolvedAt, now);
+  const then = past ? await healthDuring(organizationId, upstream.map((u) => u.dependsOn.id), logFrom, to, incident.id) : null;
   return {
     incident: { id: incident.id, key: incidentKey(incident.number), title: incident.title, severity: incident.severity, status: incident.status, startedAt: incident.startedAt, resolvedAt: incident.resolvedAt },
     window: { from, to },
     affectedServices: incident.services.map((s) => s.service),
-    upstreamDependencies: upstream.map((u) => ({ ...u.dependsOn, kind: u.kind, requiredBy: u.serviceId })),
+    upstreamDependencies: upstream.map((u) => ({ ...u.dependsOn, ...(then ? { health: then.get(u.dependsOn.id)!.health, healthNote: then.get(u.dependsOn.id)!.note } : {}), kind: u.kind, requiredBy: u.serviceId })),
+    healthAsOf: then ? { mode: 'window' as const, from: logFrom, to, observedAt: now } : { mode: 'current' as const, from: null, to: null, observedAt: now },
     deployments,
     serviceEvents: events,
     alerts,
