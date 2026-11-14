@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { audit } from '../lib/audit';
 import { badRequest, notFound } from '../lib/errors';
 import { csv, csvEnum, httpUrl, paged, paginate, paginationQuery, param, timeParam } from '../lib/http';
+import { describeRejection, noteAccepted, noteRejected } from '../lib/integrationState';
 import { prisma } from '../lib/prisma';
 import { slugify } from '../lib/slug';
 import { authOf, requirePermission } from '../middleware/auth';
@@ -17,6 +18,12 @@ export async function requireService(organizationId: string, idOrSlug: string) {
   const service = await findService(organizationId, idOrSlug);
   if (!service) throw notFound('Service');
   return service;
+}
+
+/** The service name a rejected request used, when it was rejected because no such service is registered. */
+function unknownServiceOf(err: unknown, body: unknown): string[] | undefined {
+  const ref = (body as { service?: unknown } | null)?.service;
+  return (err as { status?: number })?.status === 404 && typeof ref === 'string' && ref ? [ref] : undefined;
 }
 
 // ───────────────────────── Services ─────────────────────────
@@ -284,12 +291,18 @@ deploymentsRouter.get('/', requirePermission('read'), async (req, res) => {
 
 deploymentsRouter.post('/', requirePermission('deployment:write'), async (req, res) => {
   const auth = authOf(req);
-  const body = deploymentBody.parse(req.body);
-  const deployment = await recordDeployment(
-    auth.organizationId,
-    { ...body, deployedBy: body.deployedBy ?? (auth.kind === 'user' ? auth.label : null) },
-    auth.kind === 'api_key' ? 'api' : 'manual',
-  );
+  const deployment = await (async () => {
+    try {
+      const body = deploymentBody.parse(req.body);
+      const recorded = await recordDeployment(auth.organizationId, { ...body, deployedBy: body.deployedBy ?? (auth.kind === 'user' ? auth.label : null) }, auth.kind === 'api_key' ? 'api' : 'manual');
+      if (auth.kind === 'api_key') await noteAccepted(auth.organizationId, 'deployments');
+      return recorded;
+    } catch (err) {
+      const why = auth.kind === 'api_key' ? describeRejection(err) : null;
+      if (why) await noteRejected(auth.organizationId, 'deployments', why, unknownServiceOf(err, req.body));
+      throw err;
+    }
+  })();
   await audit(req, 'deployment.record', 'deployment', deployment.id, { service: deployment.service.slug, version: deployment.version, environment: deployment.environment });
   res.status(201).json(deployment);
 });
@@ -391,8 +404,18 @@ serviceEventsRouter.get('/', requirePermission('read'), async (req, res) => {
 
 serviceEventsRouter.post('/', requirePermission('event:write'), async (req, res) => {
   const auth = authOf(req);
-  const body = serviceEventBody.parse(req.body);
-  const event = await recordServiceEvent(auth.organizationId, { ...body, actor: body.actor ?? auth.label }, auth.kind === 'api_key' ? 'api' : 'manual');
+  const event = await (async () => {
+    try {
+      const body = serviceEventBody.parse(req.body);
+      const recorded = await recordServiceEvent(auth.organizationId, { ...body, actor: body.actor ?? auth.label }, auth.kind === 'api_key' ? 'api' : 'manual');
+      if (auth.kind === 'api_key') await noteAccepted(auth.organizationId, 'events');
+      return recorded;
+    } catch (err) {
+      const why = auth.kind === 'api_key' ? describeRejection(err) : null;
+      if (why) await noteRejected(auth.organizationId, 'events', why, unknownServiceOf(err, req.body));
+      throw err;
+    }
+  })();
   await audit(req, 'service_event.record', 'service_event', event.id, { service: event.service.slug, type: event.type });
   res.status(201).json(event);
 });

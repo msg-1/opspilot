@@ -39,6 +39,7 @@ model Organization {
   alerts             Alert[]
   repositories       Repository[]
   githubIntegration  GithubIntegration?
+  integrationStates IntegrationState[]
   documents          KnowledgeDocument[]
   investigations     Investigation[]
   remediationActions RemediationAction[]
@@ -525,6 +526,27 @@ model GithubIntegration {
   lastSyncError   String?
   updatedAt       DateTime     @updatedAt
   organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+// What is known about whether a data source of an organisation is working: when data was last
+// accepted, the last rejection, and the result of the last explicit check. One row per source.
+// Messages are written by OpsPilot and never contain payload content or credentials.
+model IntegrationState {
+  organizationId  String
+  // logs | metrics | deployments | events | github | remediation_webhook
+  integration     String
+  lastSuccessAt   DateTime?
+  lastErrorAt     DateTime?
+  lastError       String?
+  // Service names the source used that match no registered service (most recent request)
+  unknownServices String[]     @default([])
+  lastCheckedAt   DateTime?
+  lastCheckOk     Boolean?
+  lastCheckDetail String?
+  updatedAt       DateTime     @updatedAt
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@id([organizationId, integration])
 }
 
 model Repository {

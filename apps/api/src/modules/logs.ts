@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { assertRange, csv, paged, paginate, paginationQuery, timeParam } from '../lib/http';
 import { fingerprint, parseLevel, redact, redactAttributes } from '../lib/logParsing';
 import { logsIngested } from '../lib/metrics';
+import { describeRejection, noteAccepted, noteRejected } from '../lib/integrationState';
 import { prisma } from '../lib/prisma';
 import { authOf, requirePermission } from '../middleware/auth';
 import { getSettings } from './organization';
@@ -276,6 +277,14 @@ logsRouter.get('/facets', requirePermission('read'), async (req, res) => {
 });
 
 logsRouter.post('/', requirePermission('log:write'), async (req, res) => {
-  const result = await ingestLogs(authOf(req).organizationId, ingestBody.parse(req.body));
-  res.status(202).json(result);
+  const { organizationId } = authOf(req);
+  try {
+    const result = await ingestLogs(organizationId, ingestBody.parse(req.body));
+    await noteAccepted(organizationId, 'logs', result.unknownServices);
+    res.status(202).json(result);
+  } catch (err) {
+    const why = describeRejection(err);
+    if (why) await noteRejected(organizationId, 'logs', why);
+    throw err;
+  }
 });
