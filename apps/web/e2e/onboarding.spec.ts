@@ -37,7 +37,9 @@ test('a new organisation sees what can be connected, connects a source, watches 
   await page.getByRole('button', { name: /Add service|New service/ }).first().click();
   await page.getByLabel('Name').fill('Checkout Service');
   await page.getByRole('dialog').getByRole('button', { name: /Add service|Create/ }).click();
-  await expect(page.getByRole('link', { name: 'Checkout Service' }).first()).toBeVisible();
+  // Saving opens the new service's own page.
+  await expect(page).toHaveURL(/\/services\/[a-z0-9]+$/);
+  await expect(page.getByRole('heading', { level: 1, name: 'Checkout Service' })).toBeVisible();
 
   // Step 2: an API key. Created by an owner; the secret is shown once.
   const key = await (await page.request.post('/api/v1/api-keys', { data: { name: 'pilot ingestion', scopes: ['ingest:logs', 'ingest:metrics', 'ingest:deployments'] } })).json();
